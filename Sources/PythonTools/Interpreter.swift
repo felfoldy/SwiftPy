@@ -32,4 +32,8 @@ public extension Interpreter {
     static func execute(_ code: String) {
         shared.execute(code)
     }
+    
+    static func returnNone() {
+        py_newnone(py_retval())
+    }
 }
