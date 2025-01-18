@@ -4,11 +4,11 @@ import PackageDescription
 import CompilerPluginSupport
 
 let package = Package(
-    name: "PythonTools",
+    name: "SwiftPy",
     platforms: [.macOS(.v11), .iOS(.v14), .visionOS(.v2)],
     products: [
         .library(
-            name: "PythonTools",
+            name: "SwiftPy",
             targets: [
                 "PythonTools",
                 // TODO: Remove when the lib will be complete.
