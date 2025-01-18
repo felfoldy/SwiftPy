@@ -15,13 +15,14 @@ public enum GlobalFunctionMacro: ExpressionMacro {
     public static func expansion(of node: some FreestandingMacroExpansionSyntax, in context: some MacroExpansionContext) throws -> ExprSyntax {
         let id = UUID().uuidString
 
+        let name = node.arguments.first!.expression
         let block = node.trailingClosure!
 
         // Python callback.
         let callback = ExprSyntax("""
         { _, _ in
             FunctionReference.references["\(raw: id)"]?()
-            Interpreter.returnNone()
+            SetPython.returnNone()
             return true
         }
         """)
@@ -29,6 +30,7 @@ public enum GlobalFunctionMacro: ExpressionMacro {
         return ExprSyntax("""
         Interpreter.shared.createFunction(
             "\(raw: id)",
+            name: \(name),
             block: \(block),
             callback: \(callback)
         ) 

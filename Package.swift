@@ -1,12 +1,11 @@
 // swift-tools-version: 6.0
-// The swift-tools-version declares the minimum version of Swift required to build this package.
 
 import PackageDescription
 import CompilerPluginSupport
 
 let package = Package(
     name: "PythonTools",
-    platforms: [.macOS(.v10_15), .iOS(.v13)],
+    platforms: [.macOS(.v11), .iOS(.v14)],
     products: [
         .library(
             name: "PythonTools",
@@ -14,12 +13,17 @@ let package = Package(
         ),
     ],
     dependencies: [
-        .package(url: "https://github.com/apple/swift-syntax.git", from: "600.0.0")
+        .package(url: "https://github.com/apple/swift-syntax.git", from: "600.0.0"),
+        .package(url: "https://github.com/felfoldy/LogTools.git", from: "1.0.2")
     ],
     targets: [
         .target(
             name: "PythonTools",
-            dependencies: ["pocketpy", "PythonToolsMacros"]
+            dependencies: [
+                "pocketpy",
+                "PythonToolsMacros",
+                "LogTools"
+            ]
         ),
         .testTarget(
             name: "PythonToolsTests",
