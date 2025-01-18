@@ -21,8 +21,8 @@ public enum GlobalFunctionMacro: ExpressionMacro {
         // Python callback.
         let callback = ExprSyntax("""
         { _, _ in
-            FunctionReference.references["\(raw: id)"]?()
-            SetPython.returnNone()
+            FunctionStore.voidFunctions["\(raw: id)"]?()
+            PK.returnNone()
             return true
         }
         """)

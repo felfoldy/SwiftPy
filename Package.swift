@@ -5,11 +5,15 @@ import CompilerPluginSupport
 
 let package = Package(
     name: "PythonTools",
-    platforms: [.macOS(.v11), .iOS(.v14)],
+    platforms: [.macOS(.v11), .iOS(.v14), .visionOS(.v2)],
     products: [
         .library(
             name: "PythonTools",
-            targets: ["PythonTools", "pocketpy"]
+            targets: [
+                "PythonTools",
+                // TODO: Remove when the lib will be complete.
+                "pocketpy",
+            ]
         ),
     ],
     dependencies: [

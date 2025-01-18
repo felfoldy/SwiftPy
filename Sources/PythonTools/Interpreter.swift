@@ -29,6 +29,8 @@ public final class Interpreter {
                 log.info(str)
             }
         }
+
+        log.info("PocketPython [\(PK_VERSION)] initialized")
     }
 
     deinit {
@@ -47,11 +49,5 @@ public final class Interpreter {
 public extension Interpreter {
     static func execute(_ code: String) {
         shared.execute(code)
-    }
-}
-
-public enum SetPython {
-    @inlinable public static func returnNone() {
-        py_newnone(py_retval())
     }
 }
