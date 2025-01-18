@@ -27,7 +27,7 @@ public extension Interpreter {
     /// Returns the module with the given name.
     /// - Parameter name: Module name for example: `__main__`
     /// - Returns: `PK.Module?`.
-    @inlinable static func module(_ name: String) -> PK.Module? {
+    @inlinable func module(_ name: String) -> PK.Module? {
         py_getmodule(name)
     }
 
@@ -35,7 +35,7 @@ public extension Interpreter {
     ///
     /// Equivalent to `Interpreter.module("__main__")!`
     @inlinable static var main: PK.Module {
-        Interpreter.module("__main__")!
+        Interpreter.shared.module("__main__")!
     }
 }
 
