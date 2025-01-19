@@ -21,6 +21,10 @@ public extension PK {
     @inlinable static func returnNone() {
         py_newnone(py_retval())
     }
+
+    @inlinable static func returnInt(_ value: Int) {
+        py_newint(py_retval(), py_i64(value))
+    }
 }
 
 public extension Interpreter {
@@ -42,6 +46,6 @@ public extension Interpreter {
 @MainActor
 public extension PK.Module {
     @inlinable func set(_ function: FunctionRegistration) {
-        py_bind(self, function.signature, function.cFunction)
+        py_bind(self, function.signatureString, function.cFunction)
     }
 }

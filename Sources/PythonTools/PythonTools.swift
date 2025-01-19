@@ -9,11 +9,14 @@ import LogTools
 let log = Logger(subsystem: "com.felfoldy.PythonTools", category: "Interpreter")
 
 public extension Interpreter {
-    func createFunction(_ id: String, name: String, block: @MainActor @escaping () -> Void, callback: PK.CFunction) -> FunctionRegistration {
-        let signature = "\(name)() -> None"
-        log.info("Register function: \(signature)")
-
-        FunctionStore.voidFunctions[id] = block
+    func createFunction<Result>(_ id: String, name: String, signature: FunctionSignature, block: @MainActor @escaping () -> Result, callback: PK.CFunction) -> FunctionRegistration {
+        switch signature {
+        case .void:
+            FunctionStore.voidFunctions[id] = block as? VoidFunction
+        case .int:
+            FunctionStore.intFunctions[id] = block as? @MainActor () -> Int
+        }
+        
         return FunctionRegistration(
             id: id,
             name: name,
@@ -27,6 +30,16 @@ public extension Interpreter {
 public macro pythonFunction(
     _ name: String,
     block: @MainActor @escaping () -> Void
+) -> FunctionRegistration = #externalMacro(
+    module: "PythonToolsMacros",
+    type: "GlobalFunctionMacro"
+)
+
+@freestanding(expression)
+public macro pythonFunction<Result>(
+    _ name: String,
+    signature: FunctionSignature,
+    block: @MainActor @escaping () -> Result
 ) -> FunctionRegistration = #externalMacro(
     module: "PythonToolsMacros",
     type: "GlobalFunctionMacro"

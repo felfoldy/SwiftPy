@@ -25,5 +25,20 @@ struct FunctionRegistrationTests {
 
         #expect(executed)
     }
+    
+    @Test func intFunctionRegistration() throws {
+        let function = #pythonFunction("value", signature: .int) {
+            42
+        }
+        
+        Interpreter.main.set(function)
+        Interpreter.execute("x = value()")
+        
+        let item = py_getglobal(py_name("x"))
+        try #require(py_istype(item, py_Type(tp_int.rawValue)))
+
+        let result = py_toint(item)
+        #expect(result == 42)
+    }
 }
 
