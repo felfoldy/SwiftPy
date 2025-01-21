@@ -49,11 +49,11 @@ public enum RegisterFunctionMacro: ExpressionMacro {
             ) \(block)
             cFunction: { _, _ in
                 let result = FunctionStore.intFunctions["\(raw: id)"]?()
-                PK.returnInt(result)
+                PyAPI.returnValue.set(result)
                 return true
             }
             """)
-            
+
         case "str":
             return ExprSyntax("""
             FunctionRegistration(
@@ -62,11 +62,11 @@ public enum RegisterFunctionMacro: ExpressionMacro {
             ) \(block)
             cFunction: { _, _ in
                 let result = FunctionStore.stringFunctions["\(raw: id)"]?()
-                PK.returnStr(result)
+                PyAPI.returnValue.set(result)
                 return true
             }
             """)
-            
+
         case "bool":
             return ExprSyntax("""
             FunctionRegistration(
@@ -75,18 +75,31 @@ public enum RegisterFunctionMacro: ExpressionMacro {
             ) \(block)
             cFunction: { _, _ in
                 let result = FunctionStore.boolFunctions["\(raw: id)"]?()
-                PK.returnBool(result)
+                PyAPI.returnValue.set(result)
                 return true
             }
             """)
-            
+
+        case "float":
+            return ExprSyntax("""
+            FunctionRegistration(
+                id: "\(raw: id)",
+                signature: \(raw: signature)
+            ) \(block)
+            cFunction: { _, _ in
+                let result = FunctionStore.floatFunctions["\(raw: id)"]?()
+                PyAPI.returnValue.set(result)
+                return true
+            }
+            """)
+
         default:
             throw MacroExpansionErrorMessage(
                 "Unsupported return type: \(returnType)"
             )
         }
     }
-    
+
     static func createNoneFunction(id: String, name: String, block: ClosureExprSyntax) -> ExprSyntax {
         ExprSyntax("""
         FunctionRegistration(
@@ -95,7 +108,7 @@ public enum RegisterFunctionMacro: ExpressionMacro {
         ) \(block)
         cFunction: { _, _ in
             FunctionStore.voidFunctions["\(raw: id)"]?()
-            PK.returnNone()
+            PyAPI.returnValue.setNone()
             return true
         }
         """)

@@ -16,3 +16,12 @@ public macro def<Out>(
     module: "PythonToolsMacros",
     type: "RegisterFunctionMacro"
 )
+
+@freestanding(expression)
+public macro def<Out>(
+    _ signature: String,
+    block: @MainActor @escaping (FunctionArguments) -> Out
+) -> FunctionRegistration = #externalMacro(
+    module: "PythonToolsMacros",
+    type: "RegisterFunctionMacro"
+)

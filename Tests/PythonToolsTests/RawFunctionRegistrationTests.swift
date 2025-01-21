@@ -11,6 +11,8 @@ import Testing
 
 @MainActor
 struct RawFunctionRegistrationTests {
+    let main = Interpreter.main
+    
     @Test func rawVoidFunctionRegistration() throws {
         var executed = false
 
@@ -22,13 +24,13 @@ struct RawFunctionRegistrationTests {
         }
         cFunction: { _, _ in
             FunctionStore.voidFunctions["id"]?()
-            PK.returnNone()
+            PyAPI.returnValue.setNone()
             return true
         }
 
         try #require(FunctionStore.voidFunctions["id"] != nil)
 
-        Interpreter.main.set(function)
+        main.bind(function)
         Interpreter.execute("custom()")
 
         #expect(executed)
@@ -42,20 +44,16 @@ struct RawFunctionRegistrationTests {
             42
         } cFunction: { _, _ in
             let result = FunctionStore.intFunctions["id"]?()
-            PK.returnInt(result)
+            PyAPI.returnValue.set(result)
             return true
         }
 
         try #require(FunctionStore.intFunctions["id"] != nil)
 
-        Interpreter.main.set(function)
+        main.bind(function)
         Interpreter.execute("x = custom()")
 
-        let item = py_getglobal(py_name("x"))
-        try #require(py_istype(item, py_Type(tp_int.rawValue)))
-
-        let result = py_toint(item)
-        #expect(result == 42)
+        #expect(main["x"]?.asInt() == 42)
     }
 
     @Test func rawStringFunctionRegistration() throws {
@@ -66,20 +64,16 @@ struct RawFunctionRegistrationTests {
             "Hello, World!"
         } cFunction: { _, _ in
             let result = FunctionStore.stringFunctions["id"]?()
-            PK.returnStr(result)
+            PyAPI.returnValue.set(result)
             return true
         }
 
         try #require(FunctionStore.stringFunctions["id"] != nil)
         
-        Interpreter.main.set(function)
+        main.bind(function)
         Interpreter.execute("x = custom()")
-        
-        let item = py_getglobal(py_name("x"))
-        try #require(py_istype(item, py_Type(tp_str.rawValue)))
-        
-        let result = String(cString: py_tostr(item)!)
-        #expect(result == "Hello, World!")
+
+        #expect(main["x"]?.asStr() == "Hello, World!")
     }
     
     @Test func rawBoolFunctionRegistration() throws {
@@ -90,19 +84,15 @@ struct RawFunctionRegistrationTests {
             true
         } cFunction: { _, _ in
             let result = FunctionStore.boolFunctions["id"]?()
-            PK.returnBool(result)
+            PyAPI.returnValue.set(result)
             return true
         }
 
         try #require(FunctionStore.boolFunctions["id"] != nil)
 
-        Interpreter.main.set(function)
+        main.bind(function)
         Interpreter.execute("x = custom()")
 
-        let item = py_getglobal(py_name("x"))
-        try #require(py_istype(item, py_Type(tp_bool.rawValue)))
-
-        let result = py_tobool(item)
-        #expect(result)
+        #expect(main["x"]?.asBool() == true)
     }
 }

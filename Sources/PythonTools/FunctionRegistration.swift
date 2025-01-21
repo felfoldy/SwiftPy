@@ -7,10 +7,19 @@
 
 import pocketpy
 
-public typealias VoidFunction = @MainActor () -> Void
+@MainActor
+public struct FunctionArguments {
+    let argc: Int
+    let argv: PyAPI.Reference?
+
+    static let none = FunctionArguments(argc: 0, argv: nil)
+}
+
+public typealias VoidFunction = @MainActor (FunctionArguments) -> Void
 public typealias IntFunction = @MainActor () -> Int?
 public typealias StringFunction = @MainActor () -> String?
 public typealias BoolFunction = @MainActor () -> Bool?
+public typealias FloatFunction = @MainActor () -> Double?
 
 @MainActor
 public enum FunctionStore {
@@ -18,19 +27,20 @@ public enum FunctionStore {
     public static var intFunctions: [String: IntFunction] = [:]
     public static var stringFunctions: [String: StringFunction] = [:]
     public static var boolFunctions: [String: BoolFunction] = [:]
+    public static var floatFunctions: [String: FloatFunction] = [:]
 }
 
 @MainActor
 public struct FunctionRegistration {
     public let id: String
-    public let cFunction: PK.CFunction
+    public let cFunction: PyAPI.CFunction
     public let signature: String
 
     public init(
         id: String,
         name: String,
         block: @escaping VoidFunction,
-        cFunction: PK.CFunction
+        cFunction: PyAPI.CFunction
     ) {
         FunctionStore.voidFunctions[id] = block
         
@@ -45,7 +55,7 @@ public struct FunctionRegistration {
         id: String,
         signature: String,
         block: @escaping @MainActor () -> Out?,
-        cFunction: PK.CFunction
+        cFunction: PyAPI.CFunction
     ) {
         if let intBlock = block as? IntFunction {
             FunctionStore.intFunctions[id] = intBlock
@@ -53,6 +63,8 @@ public struct FunctionRegistration {
             FunctionStore.stringFunctions[id] = stringBlock
         } else if let boolBlock = block as? BoolFunction {
             FunctionStore.boolFunctions[id] = boolBlock
+        } else if let floatBlock = block as? FloatFunction {
+            FunctionStore.floatFunctions[id] = floatBlock
         }
 
         self.id = id

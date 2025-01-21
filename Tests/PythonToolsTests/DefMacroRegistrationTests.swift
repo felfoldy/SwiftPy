@@ -11,6 +11,8 @@ import pocketpy
 
 @MainActor
 struct DefMacroRegistrationTests {
+    let main = Interpreter.main
+    
     @Test func voidFunctionRegistrationByName() {
         var executed = false
 
@@ -20,7 +22,7 @@ struct DefMacroRegistrationTests {
 
         #expect(FunctionStore.voidFunctions[function.id] != nil)
 
-        Interpreter.main.set(function)
+        main.bind(function)
         Interpreter.execute("custom()")
 
         #expect(executed)
@@ -35,7 +37,7 @@ struct DefMacroRegistrationTests {
 
         #expect(FunctionStore.voidFunctions[function.id] != nil)
 
-        Interpreter.main.set(function)
+        main.bind(function)
         Interpreter.execute("custom()")
 
         #expect(executed)
@@ -46,14 +48,10 @@ struct DefMacroRegistrationTests {
             42
         }
         
-        Interpreter.main.set(function)
+        main.bind(function)
         Interpreter.execute("x = value()")
-        
-        let item = py_getglobal(py_name("x"))
-        try #require(py_istype(item, py_Type(tp_int.rawValue)))
 
-        let result = py_toint(item)
-        #expect(result == 42)
+        #expect(main["x"]?.asInt() == 42)
     }
     
     @Test func stringFunctionRegistration() throws {
@@ -61,14 +59,10 @@ struct DefMacroRegistrationTests {
             "Hello, World!"
         }
         
-        Interpreter.main.set(function)
+        main.bind(function)
         Interpreter.execute("x = value()")
-        
-        let item = py_getglobal(py_name("x"))
-        #expect(py_isinstance(item, py_Type(tp_str.rawValue)))
-        
-        let result = String(cString: py_tostr(item)!)
-        #expect(result == "Hello, World!")
+
+        #expect(main["x"]?.asStr() == "Hello, World!")
     }
     
     @Test func boolFunctionRegistration() throws {
@@ -76,12 +70,20 @@ struct DefMacroRegistrationTests {
             true
         }
 
-        Interpreter.main.set(function)
+        main.bind(function)
         Interpreter.execute("x = value()")
 
-        let item = py_getglobal(py_name("x"))
-        #expect(py_isinstance(item, py_Type(tp_bool.rawValue)))
-        
-        #expect(py_tobool(item))
+        #expect(main["x"]?.asBool() == true)
+    }
+    
+    @Test func floatFunctionRegistration() throws {
+        let function = #def("value() -> float") {
+            3.14
+        }
+
+        main.bind(function)
+        Interpreter.execute("x = value()")
+
+        #expect(main["x"]?.asFloat() == 3.14)
     }
 }
