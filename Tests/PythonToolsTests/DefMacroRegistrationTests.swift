@@ -1,32 +1,24 @@
 //
-//  DefMacroRegistrationTests.swift
+//  FunctionRegistrationTests.swift
 //  SwiftPy
 //
-//  Created by Tibor Felföldy on 2025-01-21.
+//  Created by Tibor Felföldy on 2025-01-18.
 //
 
 import PythonTools
-import pocketpy
 import Testing
+import pocketpy
 
 @MainActor
 struct DefMacroRegistrationTests {
-    @Test func rawVoidFunctionRegistration() throws {
+    @Test func voidFunctionRegistrationByName() {
         var executed = false
 
-        let function = FunctionRegistration(
-            id: "id",
-            name: "custom"
-        ) {
+        let function = #def("custom") {
             executed = true
         }
-        cFunction: { _, _ in
-            FunctionStore.voidFunctions["id"]?()
-            PK.returnNone()
-            return true
-        }
 
-        try #require(FunctionStore.voidFunctions["id"] != nil)
+        #expect(FunctionStore.voidFunctions[function.id] != nil)
 
         Interpreter.main.set(function)
         Interpreter.execute("custom()")
@@ -34,51 +26,62 @@ struct DefMacroRegistrationTests {
         #expect(executed)
     }
     
-    @Test func rawIntFunctionRegistration() throws {
-        let function = FunctionRegistration(
-            id: "id",
-            signature: "custom() -> int"
-        ) {
-            42
-        } cFunction: { _, _ in
-            let result = FunctionStore.intFunctions["id"]?()
-            PK.returnInt(result)
-            return true
+    @Test func voidFunctionRegistrationBySignature() {
+        var executed = false
+
+        let function = #def("custom() -> None") {
+            executed = true
         }
 
-        try #require(FunctionStore.intFunctions["id"] != nil)
+        #expect(FunctionStore.voidFunctions[function.id] != nil)
 
         Interpreter.main.set(function)
-        Interpreter.execute("x = custom()")
+        Interpreter.execute("custom()")
 
+        #expect(executed)
+    }
+
+    @Test func intFunctionRegistration() throws {
+        let function = #def("value() -> int") {
+            42
+        }
+        
+        Interpreter.main.set(function)
+        Interpreter.execute("x = value()")
+        
         let item = py_getglobal(py_name("x"))
         try #require(py_istype(item, py_Type(tp_int.rawValue)))
 
         let result = py_toint(item)
         #expect(result == 42)
     }
-
-    @Test func rawStringFunctionRegistration() throws {
-        let function = FunctionRegistration(
-            id: "id",
-            signature: "custom() -> str"
-        ) {
+    
+    @Test func stringFunctionRegistration() throws {
+        let function = #def("value() -> str") {
             "Hello, World!"
-        } cFunction: { _, _ in
-            let result = FunctionStore.stringFunctions["id"]?()
-            PK.returnStr(result)
-            return true
         }
-
-        try #require(FunctionStore.stringFunctions["id"] != nil)
         
         Interpreter.main.set(function)
-        Interpreter.execute("x = custom()")
+        Interpreter.execute("x = value()")
         
         let item = py_getglobal(py_name("x"))
-        try #require(py_istype(item, py_Type(tp_str.rawValue)))
+        #expect(py_isinstance(item, py_Type(tp_str.rawValue)))
         
         let result = String(cString: py_tostr(item)!)
         #expect(result == "Hello, World!")
+    }
+    
+    @Test func boolFunctionRegistration() throws {
+        let function = #def("value() -> bool") {
+            true
+        }
+
+        Interpreter.main.set(function)
+        Interpreter.execute("x = value()")
+
+        let item = py_getglobal(py_name("x"))
+        #expect(py_isinstance(item, py_Type(tp_bool.rawValue)))
+        
+        #expect(py_tobool(item))
     }
 }

@@ -37,6 +37,14 @@ public extension PK {
             py_newnone(py_retval())
         }
     }
+
+    @inlinable static func returnBool(_ value: Bool?) {
+        if let value {
+            py_newbool(py_retval(), value)
+        } else {
+            py_newnone(py_retval())
+        }
+    }
 }
 
 public extension Interpreter {

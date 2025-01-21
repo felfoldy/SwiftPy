@@ -67,6 +67,19 @@ public enum RegisterFunctionMacro: ExpressionMacro {
             }
             """)
             
+        case "bool":
+            return ExprSyntax("""
+            FunctionRegistration(
+                id: "\(raw: id)",
+                signature: \(raw: signature)
+            ) \(block)
+            cFunction: { _, _ in
+                let result = FunctionStore.boolFunctions["\(raw: id)"]?()
+                PK.returnBool(result)
+                return true
+            }
+            """)
+            
         default:
             throw MacroExpansionErrorMessage(
                 "Unsupported return type: \(returnType)"
