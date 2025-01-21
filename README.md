@@ -8,7 +8,7 @@
 ### Register a function
 ```swift
 // Create a function.
-let function = #pythonFunction("custom_func") {
+let function = #def("custom_func") {
    print("Swift code called from Python")
 }
 
@@ -17,6 +17,13 @@ Interpreter.main.set(function)
 
 // Run a script.
 Interpreter.execute("custom_func()")
+```
+
+### Register a function with a function signature
+```swift
+let function = #def("random() -> int") {
+    Int.random(in: 0..<10)
+}
 ```
 
 #### Output
