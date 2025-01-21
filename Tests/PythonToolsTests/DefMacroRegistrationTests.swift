@@ -1,5 +1,5 @@
 //
-//  RawFunctionRegistrationtests.swift
+//  DefMacroRegistrationTests.swift
 //  SwiftPy
 //
 //  Created by Tibor Felföldy on 2025-01-21.
@@ -10,7 +10,7 @@ import pocketpy
 import Testing
 
 @MainActor
-struct RawFunctionRegistrationtests {
+struct DefMacroRegistrationTests {
     @Test func rawVoidFunctionRegistration() throws {
         var executed = false
 
@@ -56,5 +56,29 @@ struct RawFunctionRegistrationtests {
 
         let result = py_toint(item)
         #expect(result == 42)
+    }
+
+    @Test func rawStringFunctionRegistration() throws {
+        let function = FunctionRegistration(
+            id: "id",
+            signature: "custom() -> str"
+        ) {
+            "Hello, World!"
+        } cFunction: { _, _ in
+            let result = FunctionStore.stringFunctions["id"]?()
+            PK.returnStr(result)
+            return true
+        }
+
+        try #require(FunctionStore.stringFunctions["id"] != nil)
+        
+        Interpreter.main.set(function)
+        Interpreter.execute("x = custom()")
+        
+        let item = py_getglobal(py_name("x"))
+        try #require(py_istype(item, py_Type(tp_str.rawValue)))
+        
+        let result = String(cString: py_tostr(item)!)
+        #expect(result == "Hello, World!")
     }
 }

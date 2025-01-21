@@ -29,6 +29,14 @@ public extension PK {
             py_newnone(py_retval())
         }
     }
+
+    @inlinable static func returnStr(_ value: String?) {
+        if let value {
+            py_newstr(py_retval(), value)
+        } else {
+            py_newnone(py_retval())
+        }
+    }
 }
 
 public extension Interpreter {

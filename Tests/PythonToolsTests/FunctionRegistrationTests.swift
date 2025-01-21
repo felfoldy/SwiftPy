@@ -55,5 +55,19 @@ struct FunctionRegistrationTests {
         let result = py_toint(item)
         #expect(result == 42)
     }
+    
+    @Test func stringFunctionRegistration() throws {
+        let function = #def("value() -> str") {
+            "Hello, World!"
+        }
+        
+        Interpreter.main.set(function)
+        Interpreter.execute("x = value()")
+        
+        let item = py_getglobal(py_name("x"))
+        #expect(py_isinstance(item, py_Type(tp_str.rawValue)))
+        
+        let result = String(cString: py_tostr(item)!)
+        #expect(result == "Hello, World!")
+    }
 }
-

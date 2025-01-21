@@ -9,19 +9,13 @@ import pocketpy
 
 public typealias VoidFunction = @MainActor () -> Void
 public typealias IntFunction = @MainActor () -> Int?
+public typealias StringFunction = @MainActor () -> String?
 
 @MainActor
 public enum FunctionStore {
     public static var voidFunctions: [String: VoidFunction] = [:]
     public static var intFunctions: [String: IntFunction] = [:]
-}
-
-public enum FunctionSignature {
-    /// `() -> Void`
-    case void
-
-    /// `() -> int`
-    case int
+    public static var stringFunctions: [String: StringFunction] = [:]
 }
 
 @MainActor
@@ -54,7 +48,11 @@ public struct FunctionRegistration {
         if let intBlock = block as? IntFunction {
             FunctionStore.intFunctions[id] = intBlock
         }
-        
+
+        if let stringBlock = block as? StringFunction {
+            FunctionStore.stringFunctions[id] = stringBlock
+        }
+
         self.id = id
         self.cFunction = cFunction
         self.signature = signature

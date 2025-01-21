@@ -37,13 +37,12 @@ public enum RegisterFunctionMacro: ExpressionMacro {
 
         let (_, name, returnType) = match.output
 
-        if returnType == "None" {
+        switch returnType {
+        case "None":
             return createNoneFunction(id: id, name: "\"\(name)\"", block: block)
-        }
-        
-        if returnType == "int" {
-            return ExprSyntax(
-            """
+            
+        case "int":
+            return ExprSyntax("""
             FunctionRegistration(
                 id: "\(raw: id)",
                 signature: \(raw: signature)
@@ -53,11 +52,26 @@ public enum RegisterFunctionMacro: ExpressionMacro {
                 PK.returnInt(result)
                 return true
             }
-            """
+            """)
+            
+        case "str":
+            return ExprSyntax("""
+            FunctionRegistration(
+                id: "\(raw: id)",
+                signature: \(raw: signature)
+            ) \(block)
+            cFunction: { _, _ in
+                let result = FunctionStore.stringFunctions["\(raw: id)"]?()
+                PK.returnStr(result)
+                return true
+            }
+            """)
+            
+        default:
+            throw MacroExpansionErrorMessage(
+                "Unsupported return type: \(returnType)"
             )
         }
-
-        throw MachError(MachErrorCode.invalidArgument)
     }
     
     static func createNoneFunction(id: String, name: String, block: ClosureExprSyntax) -> ExprSyntax {
