@@ -19,14 +19,14 @@ Interpreter.main.set(function)
 Interpreter.execute("custom_func()")
 ```
 
+#### Output
+```
+Swift code called from Python
+```
+
 ### Register a function with a function signature
 ```swift
 let function = #def("random() -> int") {
     Int.random(in: 0..<10)
 }
-```
-
-#### Output
-```
-Swift code called from Python
 ```
