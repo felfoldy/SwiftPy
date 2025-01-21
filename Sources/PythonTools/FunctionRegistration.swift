@@ -5,12 +5,15 @@
 //  Created by Tibor Felföldy on 2025-01-18.
 //
 
+import pocketpy
+
 public typealias VoidFunction = @MainActor () -> Void
+public typealias IntFunction = @MainActor () -> Int?
 
 @MainActor
 public enum FunctionStore {
     public static var voidFunctions: [String: VoidFunction] = [:]
-    public static var intFunctions: [String: @MainActor () -> Int] = [:]
+    public static var intFunctions: [String: IntFunction] = [:]
 }
 
 public enum FunctionSignature {
@@ -23,24 +26,39 @@ public enum FunctionSignature {
 
 @MainActor
 public struct FunctionRegistration {
-    let id: String
-    let name: String
-    public let signature: FunctionSignature
+    public let id: String
     public let cFunction: PK.CFunction
+    public let signature: String
 
-    public let signatureString: String
-    
-    init(id: String, name: String, signature: FunctionSignature, cFunction: PK.CFunction) {
+    public init(
+        id: String,
+        name: String,
+        block: @escaping VoidFunction,
+        cFunction: PK.CFunction
+    ) {
+        FunctionStore.voidFunctions[id] = block
+        
         self.id = id
-        self.name = name
-        self.signature = signature
         self.cFunction = cFunction
-
-        signatureString = switch signature {
-        case .void: "\(name)() -> None"
-        case .int: "\(name)() -> int"
+        signature = "\(name)() -> None"
+        
+        log.info("Register function: \(signature)")
+    }
+    
+    public init<Out>(
+        id: String,
+        signature: String,
+        block: @escaping @MainActor () -> Out?,
+        cFunction: PK.CFunction
+    ) {
+        if let intBlock = block as? IntFunction {
+            FunctionStore.intFunctions[id] = intBlock
         }
         
-        log.info("Register function: \(signatureString)")
+        self.id = id
+        self.cFunction = cFunction
+        self.signature = signature
+
+        log.info("Register function: \(signature)")
     }
 }

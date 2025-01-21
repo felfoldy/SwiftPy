@@ -11,14 +11,14 @@ import pocketpy
 
 @MainActor
 struct FunctionRegistrationTests {
-    @Test func voidFunctionRegistration() {
+    @Test func voidFunctionRegistrationByName() {
         var executed = false
 
-        let function = #pythonFunction("custom") {
+        let function = #def("custom") {
             executed = true
         }
 
-        #expect(!FunctionStore.voidFunctions.isEmpty)
+        #expect(FunctionStore.voidFunctions[function.id] != nil)
 
         Interpreter.main.set(function)
         Interpreter.execute("custom()")
@@ -26,8 +26,23 @@ struct FunctionRegistrationTests {
         #expect(executed)
     }
     
+    @Test func voidFunctionRegistrationBySignature() {
+        var executed = false
+
+        let function = #def("custom() -> None") {
+            executed = true
+        }
+
+        #expect(FunctionStore.voidFunctions[function.id] != nil)
+
+        Interpreter.main.set(function)
+        Interpreter.execute("custom()")
+
+        #expect(executed)
+    }
+
     @Test func intFunctionRegistration() throws {
-        let function = #pythonFunction("value", signature: .int) {
+        let function = #def("value() -> int") {
             42
         }
         
