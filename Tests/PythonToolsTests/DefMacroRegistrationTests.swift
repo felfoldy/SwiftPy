@@ -5,7 +5,7 @@
 //  Created by Tibor Felföldy on 2025-01-18.
 //
 
-import PythonTools
+import SwiftPy
 import Testing
 import pocketpy
 

@@ -5,7 +5,7 @@
 //  Created by Tibor Felföldy on 2025-01-21.
 //
 
-@testable import PythonTools
+@testable import SwiftPy
 import pocketpy
 import Testing
 

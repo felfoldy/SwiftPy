@@ -10,7 +10,7 @@ let package = Package(
         .library(
             name: "SwiftPy",
             targets: [
-                "PythonTools",
+                "SwiftPy",
                 // TODO: Remove when the lib will be complete.
                 "pocketpy",
             ]
@@ -22,7 +22,7 @@ let package = Package(
     ],
     targets: [
         .target(
-            name: "PythonTools",
+            name: "SwiftPy",
             dependencies: [
                 "pocketpy",
                 "PythonToolsMacros",
@@ -31,7 +31,7 @@ let package = Package(
         ),
         .testTarget(
             name: "PythonToolsTests",
-            dependencies: ["PythonTools"]
+            dependencies: ["SwiftPy"]
         ),
         .macro(
             name: "PythonToolsMacros",

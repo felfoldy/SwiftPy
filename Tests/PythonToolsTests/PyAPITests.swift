@@ -6,7 +6,7 @@
 //
 
 import Testing
-import PythonTools
+import SwiftPy
 
 @MainActor
 @Test func settAttribute() {
