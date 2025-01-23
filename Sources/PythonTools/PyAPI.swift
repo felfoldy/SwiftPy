@@ -87,29 +87,13 @@ public extension PyAPI.Reference {
     @inlinable func setNone() {
         py_newnone(self)
     }
-    
-    @inlinable func setNone<T>(_ value: T?, else: (T) -> Void) {
+
+    @inlinable func set(_ value: PythonConvertible?) {
         if let value {
-            `else`(value)
+            value.toPython(self)
         } else {
             py_newnone(self)
         }
-    }
-
-    @inlinable func set(_ bool: Bool?) {
-        setNone(bool) { py_newbool(self, $0) }
-    }
-
-    @inlinable func set(_ int: Int?) {
-        setNone(int) { py_newint(self, py_i64($0)) }
-    }
-
-    @inlinable func set(_ str: String?) {
-        setNone(str) { py_newstr(self, $0) }
-    }
-
-    @inlinable func set(_ float: Double?) {
-        setNone(float) { py_newfloat(self, $0) }
     }
 
     @inlinable subscript(name: String) -> PyAPI.Reference? {
