@@ -40,7 +40,7 @@ struct RawFunctionRegistrationTests {
         let function = FunctionRegistration(
             id: "id",
             signature: "custom() -> int"
-        ) {
+        ) { _ in
             42
         } cFunction: { _, _ in
             let result = FunctionStore.intFunctions["id"]?(.none)
@@ -53,14 +53,14 @@ struct RawFunctionRegistrationTests {
         main.bind(function)
         Interpreter.execute("x = custom()")
 
-        #expect(main["x"]?.asInt() == 42)
+        #expect(Int(main["x"]) == 42)
     }
 
     @Test func rawStringFunctionRegistration() throws {
         let function = FunctionRegistration(
             id: "id",
             signature: "custom() -> str"
-        ) {
+        ) { _ in
             "Hello, World!"
         } cFunction: { _, _ in
             let result = FunctionStore.stringFunctions["id"]?(.none)
@@ -73,14 +73,14 @@ struct RawFunctionRegistrationTests {
         main.bind(function)
         Interpreter.execute("x = custom()")
 
-        #expect(main["x"]?.asStr() == "Hello, World!")
+        #expect(String(main["x"]) == "Hello, World!")
     }
     
     @Test func rawBoolFunctionRegistration() throws {
         let function = FunctionRegistration(
             id: "id",
             signature: "custom() -> bool"
-        ) {
+        ) { _ in 
             true
         } cFunction: { _, _ in
             let result = FunctionStore.boolFunctions["id"]?(.none)
@@ -93,7 +93,7 @@ struct RawFunctionRegistrationTests {
         main.bind(function)
         Interpreter.execute("x = custom()")
 
-        #expect(main["x"]?.asBool() == true)
+        #expect(Bool(main["x"]) == true)
     }
     
     @Test func argumentedVoidFunctionRegistration() throws {
@@ -103,7 +103,7 @@ struct RawFunctionRegistrationTests {
             id: "id",
             signature: "custom(value: int)"
         ) { args in
-            secretValue = args[0]?.asInt()
+            secretValue = Int(args[0])
         } cFunction: { argc, argv in
             let arguments = FunctionArguments(argc: argc, argv: argv)
             FunctionStore.voidFunctions["id"]?(arguments)

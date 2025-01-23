@@ -120,26 +120,6 @@ public extension PyAPI.Reference {
         py_bind(self, function.signature, function.cFunction)
     }
 
-    @inlinable func asBool() -> Bool? {
-        guard isType(.bool) else { return nil }
-        return py_tobool(self)
-    }
-    
-    @inlinable func asInt() -> Int? {
-        guard isType(.int) else { return nil }
-        return Int(py_toint(self))
-    }
-    
-    @inlinable func asStr() -> String? {
-        guard isType(.str) else { return nil }
-        return String(cString: py_tostr(self))
-    }
-    
-    @inlinable func asFloat() -> Double? {
-        guard isType(.float) else { return nil }
-        return py_tofloat(self)
-    }
-
     @inlinable func isType(_ type: PyType) -> Bool {
         py_istype(self, type.rawValue)
     }

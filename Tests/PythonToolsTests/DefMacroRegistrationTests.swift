@@ -51,7 +51,7 @@ struct DefMacroRegistrationTests {
         main.bind(function)
         Interpreter.execute("x = value()")
 
-        #expect(main["x"]?.asInt() == 42)
+        #expect(Int(main["x"]) == 42)
     }
     
     @Test func stringFunctionRegistration() throws {
@@ -62,7 +62,7 @@ struct DefMacroRegistrationTests {
         main.bind(function)
         Interpreter.execute("x = value()")
 
-        #expect(main["x"]?.asStr() == "Hello, World!")
+        #expect(String(main["x"]) == "Hello, World!")
     }
     
     @Test func boolFunctionRegistration() throws {
@@ -73,7 +73,7 @@ struct DefMacroRegistrationTests {
         main.bind(function)
         Interpreter.execute("x = value()")
 
-        #expect(main["x"]?.asBool() == true)
+        #expect(Bool(main["x"]) == true)
     }
     
     @Test func floatFunctionRegistration() throws {
@@ -84,6 +84,6 @@ struct DefMacroRegistrationTests {
         main.bind(function)
         Interpreter.execute("x = value()")
 
-        #expect(main["x"]?.asFloat() == 3.14)
+        #expect(Double(main["x"]) == 3.14)
     }
 }

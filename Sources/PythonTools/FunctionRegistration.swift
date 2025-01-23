@@ -74,7 +74,7 @@ public struct FunctionRegistration {
     public init<Out>(
         id: String,
         signature: String,
-        block: @escaping @MainActor () -> Out?,
+        block: @escaping @MainActor (FunctionArguments) -> Out?,
         cFunction: PyAPI.CFunction
     ) {
         if let intBlock = block as? IntFunction {
