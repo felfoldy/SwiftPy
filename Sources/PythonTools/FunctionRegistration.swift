@@ -9,17 +9,22 @@ import pocketpy
 
 @MainActor
 public struct FunctionArguments {
-    let argc: Int
+    let argc: Int32
     let argv: PyAPI.Reference?
 
-    static let none = FunctionArguments(argc: 0, argv: nil)
+    public static let none = FunctionArguments(argc: 0, argv: nil)
+    
+    public subscript(index: UInt32) -> PyAPI.Reference? {
+        // TODO: Index arguments.
+        argv
+    }
 }
 
 public typealias VoidFunction = @MainActor (FunctionArguments) -> Void
-public typealias IntFunction = @MainActor () -> Int?
-public typealias StringFunction = @MainActor () -> String?
-public typealias BoolFunction = @MainActor () -> Bool?
-public typealias FloatFunction = @MainActor () -> Double?
+public typealias IntFunction = @MainActor (FunctionArguments) -> Int?
+public typealias StringFunction = @MainActor (FunctionArguments) -> String?
+public typealias BoolFunction = @MainActor (FunctionArguments) -> Bool?
+public typealias FloatFunction = @MainActor (FunctionArguments) -> Double?
 
 @MainActor
 public enum FunctionStore {
@@ -47,6 +52,21 @@ public struct FunctionRegistration {
         self.id = id
         self.cFunction = cFunction
         signature = "\(name)() -> None"
+        
+        log.info("Register function: \(signature)")
+    }
+    
+    public init(
+        id: String,
+        signature: String,
+        block: @escaping VoidFunction,
+        cFunction: PyAPI.CFunction
+    ) {
+        FunctionStore.voidFunctions[id] = block
+        
+        self.id = id
+        self.cFunction = cFunction
+        self.signature = signature
         
         log.info("Register function: \(signature)")
     }

@@ -5,7 +5,7 @@
 //  Created by Tibor Felföldy on 2025-01-21.
 //
 
-import PythonTools
+@testable import PythonTools
 import pocketpy
 import Testing
 
@@ -19,11 +19,11 @@ struct RawFunctionRegistrationTests {
         let function = FunctionRegistration(
             id: "id",
             name: "custom"
-        ) {
+        ) { _ in
             executed = true
         }
         cFunction: { _, _ in
-            FunctionStore.voidFunctions["id"]?()
+            FunctionStore.voidFunctions["id"]?(.none)
             PyAPI.returnValue.setNone()
             return true
         }
@@ -43,7 +43,7 @@ struct RawFunctionRegistrationTests {
         ) {
             42
         } cFunction: { _, _ in
-            let result = FunctionStore.intFunctions["id"]?()
+            let result = FunctionStore.intFunctions["id"]?(.none)
             PyAPI.returnValue.set(result)
             return true
         }
@@ -63,7 +63,7 @@ struct RawFunctionRegistrationTests {
         ) {
             "Hello, World!"
         } cFunction: { _, _ in
-            let result = FunctionStore.stringFunctions["id"]?()
+            let result = FunctionStore.stringFunctions["id"]?(.none)
             PyAPI.returnValue.set(result)
             return true
         }
@@ -83,7 +83,7 @@ struct RawFunctionRegistrationTests {
         ) {
             true
         } cFunction: { _, _ in
-            let result = FunctionStore.boolFunctions["id"]?()
+            let result = FunctionStore.boolFunctions["id"]?(.none)
             PyAPI.returnValue.set(result)
             return true
         }
@@ -94,5 +94,26 @@ struct RawFunctionRegistrationTests {
         Interpreter.execute("x = custom()")
 
         #expect(main["x"]?.asBool() == true)
+    }
+    
+    @Test func argumentedVoidFunctionRegistration() throws {
+        var secretValue: Int?
+        
+        let function = FunctionRegistration(
+            id: "id",
+            signature: "custom(value: int)"
+        ) { args in
+            secretValue = args[0]?.asInt()
+        } cFunction: { argc, argv in
+            let arguments = FunctionArguments(argc: argc, argv: argv)
+            FunctionStore.voidFunctions["id"]?(arguments)
+            PyAPI.returnValue.setNone()
+            return true
+        }
+        
+        main.bind(function)
+        Interpreter.execute("custom(42)")
+        
+        #expect(secretValue == 42)
     }
 }

@@ -29,26 +29,32 @@ public enum RegisterFunctionMacro: ExpressionMacro {
         let id = UUID().uuidString
 
         let signature = node.arguments.first!.expression.description
-        let block = node.trailingClosure!
+        let block = node.trailingClosure?.description
+        
+        guard let block, block.starts(with: "{") else {
+            throw MacroExpansionErrorMessage("Set the trailing closure")
+        }
+        
+        let ignoreInputBlock = "{ _ in" + block.dropFirst()
 
         guard let match = signature.wholeMatch(of: arg0SignatureRegex) else {
-            return createNoneFunction(id: id, name: signature, block: block)
+            return createNoneFunction(id: id, name: signature, block: ignoreInputBlock)
         }
 
         let (_, name, returnType) = match.output
 
         switch returnType {
         case "None":
-            return createNoneFunction(id: id, name: "\"\(name)\"", block: block)
+            return createNoneFunction(id: id, name: "\"\(name)\"", block: ignoreInputBlock)
             
         case "int":
             return ExprSyntax("""
             FunctionRegistration(
                 id: "\(raw: id)",
                 signature: \(raw: signature)
-            ) \(block)
+            ) \(raw: ignoreInputBlock)
             cFunction: { _, _ in
-                let result = FunctionStore.intFunctions["\(raw: id)"]?()
+                let result = FunctionStore.intFunctions["\(raw: id)"]?(.none)
                 PyAPI.returnValue.set(result)
                 return true
             }
@@ -59,9 +65,9 @@ public enum RegisterFunctionMacro: ExpressionMacro {
             FunctionRegistration(
                 id: "\(raw: id)",
                 signature: \(raw: signature)
-            ) \(block)
+            ) \(raw: ignoreInputBlock)
             cFunction: { _, _ in
-                let result = FunctionStore.stringFunctions["\(raw: id)"]?()
+                let result = FunctionStore.stringFunctions["\(raw: id)"]?(.none)
                 PyAPI.returnValue.set(result)
                 return true
             }
@@ -72,9 +78,9 @@ public enum RegisterFunctionMacro: ExpressionMacro {
             FunctionRegistration(
                 id: "\(raw: id)",
                 signature: \(raw: signature)
-            ) \(block)
+            ) \(raw: ignoreInputBlock)
             cFunction: { _, _ in
-                let result = FunctionStore.boolFunctions["\(raw: id)"]?()
+                let result = FunctionStore.boolFunctions["\(raw: id)"]?(.none)
                 PyAPI.returnValue.set(result)
                 return true
             }
@@ -85,9 +91,9 @@ public enum RegisterFunctionMacro: ExpressionMacro {
             FunctionRegistration(
                 id: "\(raw: id)",
                 signature: \(raw: signature)
-            ) \(block)
+            ) \(raw: ignoreInputBlock)
             cFunction: { _, _ in
-                let result = FunctionStore.floatFunctions["\(raw: id)"]?()
+                let result = FunctionStore.floatFunctions["\(raw: id)"]?(.none)
                 PyAPI.returnValue.set(result)
                 return true
             }
@@ -100,14 +106,14 @@ public enum RegisterFunctionMacro: ExpressionMacro {
         }
     }
 
-    static func createNoneFunction(id: String, name: String, block: ClosureExprSyntax) -> ExprSyntax {
+    static func createNoneFunction(id: String, name: String, block: String) -> ExprSyntax {
         ExprSyntax("""
         FunctionRegistration(
             id: "\(raw: id)",
             name: \(raw: name)
-        ) \(block)
+        ) \(raw: block)
         cFunction: { _, _ in
-            FunctionStore.voidFunctions["\(raw: id)"]?()
+            FunctionStore.voidFunctions["\(raw: id)"]?(.none)
             PyAPI.returnValue.setNone()
             return true
         }
