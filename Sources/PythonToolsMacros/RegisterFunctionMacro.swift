@@ -14,58 +14,59 @@ import RegexBuilder
 
 public enum RegisterFunctionMacro: ExpressionMacro {
     public static func expansion(of node: some FreestandingMacroExpansionSyntax, in context: some MacroExpansionContext) throws -> ExprSyntax {
-        let signatureRegex = Regex {
-            "\""
-            OneOrMore(.any)
-            "("
-            Capture { ZeroOrMore(.any) }
-            ") -> "
-            Capture { OneOrMore(.word) }
-            "\""
-        }
-        
-        let id = UUID().uuidString
-
-        var signature = node.arguments.first!.expression.description
-        let block = node.trailingClosure?.description
-        
-        guard var block, block.starts(with: "{") else {
-            throw MacroExpansionErrorMessage("Set the trailing closure")
-        }
-
-        var returnType = "None"
-        var createArguments = ".none"
-        
-        if let match = signature.wholeMatch(of: signatureRegex) {
-            let (_, parameters, returnTypeMatch) = match.output
-
-            returnType = String(returnTypeMatch)
-            
-            // Take parameter labels.
-            let labels = parameters
-                .components(separatedBy: ",")
-                .map { argument in
-                    argument
-                        .components(separatedBy: ":")[0]
-                        .trimmingCharacters(in: .whitespacesAndNewlines)
-                }
-                .filter { !$0.isEmpty }
-            
-            if labels.isEmpty {
-                block = "{ _ in" + block.dropFirst()
-            } else {
-                createArguments = "FunctionArguments(argc: argc, argv: argv)"
+        if #available(macOS 13.0, iOS 16.0, *) {
+            let signatureRegex = Regex {
+                "\""
+                OneOrMore(.any)
+                "("
+                Capture { ZeroOrMore(.any) }
+                ") -> "
+                Capture { OneOrMore(.word) }
+                "\""
             }
-        } else {
-            let trimmed = signature.trimmingCharacters(in: CharacterSet(charactersIn: "\""))
-            signature = "\"\(trimmed)() -> None\""
-            block = "{ _ in" + block.dropFirst()
-        }
-
-        let functions = returnType == "None" ? "voidFunctions" :  "returningFunctions"
-        let returnSetter = returnType == "None" ? "setNone()" : "set(result)"
-
-        return ExprSyntax("""
+            
+            let id = UUID().uuidString
+            
+            var signature = node.arguments.first!.expression.description
+            let block = node.trailingClosure?.description
+            
+            guard var block, block.starts(with: "{") else {
+                throw MacroExpansionErrorMessage("Set the trailing closure")
+            }
+            
+            var returnType = "None"
+            var createArguments = ".none"
+            
+            if let match = signature.wholeMatch(of: signatureRegex) {
+                let (_, parameters, returnTypeMatch) = match.output
+                
+                returnType = String(returnTypeMatch)
+                
+                // Take parameter labels.
+                let labels = parameters
+                    .components(separatedBy: ",")
+                    .map { argument in
+                        argument
+                            .components(separatedBy: ":")[0]
+                            .trimmingCharacters(in: .whitespacesAndNewlines)
+                    }
+                    .filter { !$0.isEmpty }
+                
+                if labels.isEmpty {
+                    block = "{ _ in" + block.dropFirst()
+                } else {
+                    createArguments = "FunctionArguments(argc: argc, argv: argv)"
+                }
+            } else {
+                let trimmed = signature.trimmingCharacters(in: CharacterSet(charactersIn: "\""))
+                signature = "\"\(trimmed)() -> None\""
+                block = "{ _ in" + block.dropFirst()
+            }
+            
+            let functions = returnType == "None" ? "voidFunctions" :  "returningFunctions"
+            let returnSetter = returnType == "None" ? "setNone()" : "set(result)"
+            
+            return ExprSyntax("""
         FunctionRegistration(
             id: "\(raw: id)",
             signature: \(raw: signature)
@@ -76,5 +77,8 @@ public enum RegisterFunctionMacro: ExpressionMacro {
             return true
         }
         """)
+        }
+        
+        throw MacroExpansionErrorMessage("Macro is not available in this context.")
     }
 }
