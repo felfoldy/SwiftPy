@@ -58,7 +58,7 @@ struct RawFunctionRegistrationTests {
         main.bind(function)
         Interpreter.execute("x = custom()")
 
-        #expect(Int(main["x"]) == 42)
+        #expect(main["x"] == 42)
     }
 
     @Test func rawStringFunctionRegistration() throws {
@@ -78,7 +78,7 @@ struct RawFunctionRegistrationTests {
         main.bind(function)
         Interpreter.execute("x = custom()")
 
-        #expect(String(main["x"]) == "Hello, World!")
+        #expect(main["x"] == "Hello, World!")
     }
     
     @Test func rawBoolFunctionRegistration() throws {
@@ -98,7 +98,7 @@ struct RawFunctionRegistrationTests {
         main.bind(function)
         Interpreter.execute("x = custom()")
 
-        #expect(Bool(main["x"]) == true)
+        #expect(main["x"] == true)
     }
     
     @Test func argumentedVoidFunctionRegistration() throws {
@@ -108,7 +108,7 @@ struct RawFunctionRegistrationTests {
             id: "id",
             signature: "custom(value: int)"
         ) { args in
-            secretValue = Int(args[0])
+            secretValue = args[0]
         } cFunction: { argc, argv in
             let arguments = FunctionArguments(argc: argc, argv: argv)
             FunctionStore.voidFunctions["id"]?(arguments)

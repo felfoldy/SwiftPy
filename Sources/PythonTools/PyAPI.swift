@@ -95,6 +95,16 @@ public extension PyAPI.Reference {
             py_newnone(self)
         }
     }
+    
+    @inlinable func setAttribute(_ name: String, _ value: PyAPI.Reference?) {
+        py_setattr(self, py_name(name), value)
+    }
+
+    @inlinable func setAttribute(_ name: String, _ value: PythonConvertible?) {
+        let r0 = py_getreg(0)
+        value?.toPython(r0)
+        py_setattr(self, py_name(name), r0)
+    }
 
     @inlinable subscript(name: String) -> PyAPI.Reference? {
         py_getdict(self, py_name(name))
@@ -106,5 +116,11 @@ public extension PyAPI.Reference {
 
     @inlinable func isType(_ type: PyType) -> Bool {
         py_istype(self, type.rawValue)
+    }
+}
+
+@MainActor public extension PyAPI.Reference? {
+    @inlinable static func == <T: PythonConvertible>(lhs: PyAPI.Reference?, rhs: T?) -> Bool where T: Equatable {
+        T(lhs) == rhs
     }
 }

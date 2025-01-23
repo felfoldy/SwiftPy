@@ -9,20 +9,24 @@ import pocketpy
 
 @MainActor
 public struct FunctionArguments {
-    let argc: Int32
-    let argv: PyAPI.Reference?
-
-    public static let none = FunctionArguments(argc: 0, argv: nil)
-    
-    public subscript(index: UInt32) -> PyAPI.Reference? {
-        // TODO: Index arguments.
-        argv
-    }
+    public let argc: Int32
+    public let argv: PyAPI.Reference?
 
     public init(argc: Int32, argv: PyAPI.Reference?) {
         self.argc = argc
         self.argv = argv
     }
+
+    @inlinable public subscript(index: Int) -> PyAPI.Reference? {
+        let argument = Int(bitPattern: argv) + (index << 4)
+        return PyAPI.Reference(bitPattern: argument)
+    }
+    
+    @inlinable public subscript<T: PythonConvertible>(index: Int) -> T? {
+        T(self[index])
+    }
+
+    public static let none = FunctionArguments(argc: 0, argv: nil)
 }
 
 public typealias VoidFunction = @MainActor (FunctionArguments) -> Void

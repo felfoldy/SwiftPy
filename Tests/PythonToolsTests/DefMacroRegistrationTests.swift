@@ -43,7 +43,7 @@ struct DefMacroRegistrationTests {
         #expect(executed)
     }
 
-    @Test func intFunctionRegistration() throws {
+    @Test func intFunctionRegistration() {
         let function = #def("value() -> int") {
             42
         }
@@ -51,10 +51,10 @@ struct DefMacroRegistrationTests {
         main.bind(function)
         Interpreter.execute("x = value()")
 
-        #expect(Int(main["x"]) == 42)
+        #expect(main["x"] == 42)
     }
     
-    @Test func stringFunctionRegistration() throws {
+    @Test func stringFunctionRegistration() {
         let function = #def("value() -> str") {
             "Hello, World!"
         }
@@ -62,10 +62,10 @@ struct DefMacroRegistrationTests {
         main.bind(function)
         Interpreter.execute("x = value()")
 
-        #expect(String(main["x"]) == "Hello, World!")
+        #expect(main["x"] == "Hello, World!")
     }
     
-    @Test func boolFunctionRegistration() throws {
+    @Test func boolFunctionRegistration() {
         let function = #def("value() -> bool") {
             true
         }
@@ -73,10 +73,10 @@ struct DefMacroRegistrationTests {
         main.bind(function)
         Interpreter.execute("x = value()")
 
-        #expect(Bool(main["x"]) == true)
+        #expect(main["x"] == true)
     }
     
-    @Test func floatFunctionRegistration() throws {
+    @Test func floatFunctionRegistration() {
         let function = #def("value() -> float") {
             3.14
         }
@@ -84,19 +84,18 @@ struct DefMacroRegistrationTests {
         main.bind(function)
         Interpreter.execute("x = value()")
 
-        #expect(Double(main["x"]) == 3.14)
+        #expect(main["x"] == 3.14)
     }
     
-    @Test func argumentedFuntionRegistration() throws {
+    @Test func argumentedFuntionRegistration() {
         let function = #def("add(a: int, b: int) -> int") { args in
-            let a = Int(args[0])!
-            let b = Int(args[1])!
+            let a: Int = args[0]!
+            let b: Int = args[1]!
             return a + b
         }
 
         main.bind(function)
         Interpreter.execute("x = add(10, 3)")
 
-        #expect(Int(main["x"]) == 13)
-    }
-}
+        #expect(main["x"] == 13)
+    }}
