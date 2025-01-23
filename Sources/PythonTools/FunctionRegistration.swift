@@ -18,6 +18,11 @@ public struct FunctionArguments {
         // TODO: Index arguments.
         argv
     }
+
+    public init(argc: Int32, argv: PyAPI.Reference?) {
+        self.argc = argc
+        self.argv = argv
+    }
 }
 
 public typealias VoidFunction = @MainActor (FunctionArguments) -> Void

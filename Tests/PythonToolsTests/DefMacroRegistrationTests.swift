@@ -86,4 +86,17 @@ struct DefMacroRegistrationTests {
 
         #expect(Double(main["x"]) == 3.14)
     }
+    
+    @Test func argumentedFuntionRegistration() throws {
+        let function = #def("add(a: int, b: int) -> int") { args in
+            let a = Int(args[0])!
+            let b = Int(args[1])!
+            return a + b
+        }
+
+        main.bind(function)
+        Interpreter.execute("x = add(10, 3)")
+
+        #expect(Int(main["x"]) == 13)
+    }
 }

@@ -29,21 +29,26 @@ public enum RegisterFunctionMacro: ExpressionMacro {
         var signature = node.arguments.first!.expression.description
         let block = node.trailingClosure?.description
         
-        guard let block, block.starts(with: "{") else {
+        guard var block, block.starts(with: "{") else {
             throw MacroExpansionErrorMessage("Set the trailing closure")
         }
-        
-        let ignoreInputBlock = "{ _ in" + block.dropFirst()
 
         var returnType = "None"
+        var createArguments = ".none"
         
         if let match = signature.wholeMatch(of: signatureRegex) {
-            let (_, _, returnTypeMatch) = match.output
+            let (_, parameters, returnTypeMatch) = match.output
 
             returnType = String(returnTypeMatch)
+            if parameters.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                block = "{ _ in" + block.dropFirst()
+            } else {
+                createArguments = "FunctionArguments(argc: argc, argv: argv)"
+            }
         } else {
             let trimmed = signature.trimmingCharacters(in: CharacterSet(charactersIn: "\""))
             signature = "\"\(trimmed)() -> None\""
+            block = "{ _ in" + block.dropFirst()
         }
 
         let functions = returnType == "None" ? "voidFunctions" :  "returningFunctions"
@@ -53,9 +58,9 @@ public enum RegisterFunctionMacro: ExpressionMacro {
         FunctionRegistration(
             id: "\(raw: id)",
             signature: \(raw: signature)
-        ) \(raw: ignoreInputBlock)
+        ) \(raw: block)
         cFunction: { argc, argv in
-            let result = FunctionStore.\(raw: functions)["\(raw: id)"]?(.none)
+            let result = FunctionStore.\(raw: functions)["\(raw: id)"]?(\(raw: createArguments))
             PyAPI.returnValue.\(raw: returnSetter)
             return true
         }
