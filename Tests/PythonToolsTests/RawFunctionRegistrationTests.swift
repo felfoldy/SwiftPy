@@ -12,13 +12,18 @@ import Testing
 @MainActor
 struct RawFunctionRegistrationTests {
     let main = Interpreter.main
-    
+
+    init() {
+        FunctionStore.voidFunctions.removeAll()
+        FunctionStore.returningFunctions.removeAll()
+    }
+
     @Test func rawVoidFunctionRegistration() throws {
         var executed = false
 
         let function = FunctionRegistration(
             id: "id",
-            name: "custom"
+            signature: "custom() -> None"
         ) { _ in
             executed = true
         }
@@ -43,12 +48,12 @@ struct RawFunctionRegistrationTests {
         ) { _ in
             42
         } cFunction: { _, _ in
-            let result = FunctionStore.intFunctions["id"]?(.none)
+            let result = FunctionStore.returningFunctions["id"]?(.none)
             PyAPI.returnValue.set(result)
             return true
         }
 
-        try #require(FunctionStore.intFunctions["id"] != nil)
+        try #require(FunctionStore.returningFunctions["id"] != nil)
 
         main.bind(function)
         Interpreter.execute("x = custom()")
@@ -63,12 +68,12 @@ struct RawFunctionRegistrationTests {
         ) { _ in
             "Hello, World!"
         } cFunction: { _, _ in
-            let result = FunctionStore.stringFunctions["id"]?(.none)
+            let result = FunctionStore.returningFunctions["id"]?(.none)
             PyAPI.returnValue.set(result)
             return true
         }
 
-        try #require(FunctionStore.stringFunctions["id"] != nil)
+        try #require(FunctionStore.returningFunctions["id"] != nil)
         
         main.bind(function)
         Interpreter.execute("x = custom()")
@@ -83,12 +88,12 @@ struct RawFunctionRegistrationTests {
         ) { _ in 
             true
         } cFunction: { _, _ in
-            let result = FunctionStore.boolFunctions["id"]?(.none)
+            let result = FunctionStore.returningFunctions["id"]?(.none)
             PyAPI.returnValue.set(result)
             return true
         }
 
-        try #require(FunctionStore.boolFunctions["id"] != nil)
+        try #require(FunctionStore.returningFunctions["id"] != nil)
 
         main.bind(function)
         Interpreter.execute("x = custom()")

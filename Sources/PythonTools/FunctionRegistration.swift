@@ -21,18 +21,12 @@ public struct FunctionArguments {
 }
 
 public typealias VoidFunction = @MainActor (FunctionArguments) -> Void
-public typealias IntFunction = @MainActor (FunctionArguments) -> Int?
-public typealias StringFunction = @MainActor (FunctionArguments) -> String?
-public typealias BoolFunction = @MainActor (FunctionArguments) -> Bool?
-public typealias FloatFunction = @MainActor (FunctionArguments) -> Double?
+public typealias ReturningFunction = @MainActor (FunctionArguments) -> PythonConvertible?
 
 @MainActor
 public enum FunctionStore {
     public static var voidFunctions: [String: VoidFunction] = [:]
-    public static var intFunctions: [String: IntFunction] = [:]
-    public static var stringFunctions: [String: StringFunction] = [:]
-    public static var boolFunctions: [String: BoolFunction] = [:]
-    public static var floatFunctions: [String: FloatFunction] = [:]
+    public static var returningFunctions: [String: ReturningFunction] = [:]
 }
 
 @MainActor
@@ -41,21 +35,6 @@ public struct FunctionRegistration {
     public let cFunction: PyAPI.CFunction
     public let signature: String
 
-    public init(
-        id: String,
-        name: String,
-        block: @escaping VoidFunction,
-        cFunction: PyAPI.CFunction
-    ) {
-        FunctionStore.voidFunctions[id] = block
-        
-        self.id = id
-        self.cFunction = cFunction
-        signature = "\(name)() -> None"
-        
-        log.info("Register function: \(signature)")
-    }
-    
     public init(
         id: String,
         signature: String,
@@ -70,22 +49,14 @@ public struct FunctionRegistration {
         
         log.info("Register function: \(signature)")
     }
-    
-    public init<Out>(
+
+    public init(
         id: String,
         signature: String,
-        block: @escaping @MainActor (FunctionArguments) -> Out?,
+        block: @escaping ReturningFunction,
         cFunction: PyAPI.CFunction
     ) {
-        if let intBlock = block as? IntFunction {
-            FunctionStore.intFunctions[id] = intBlock
-        } else if let stringBlock = block as? StringFunction {
-            FunctionStore.stringFunctions[id] = stringBlock
-        } else if let boolBlock = block as? BoolFunction {
-            FunctionStore.boolFunctions[id] = boolBlock
-        } else if let floatBlock = block as? FloatFunction {
-            FunctionStore.floatFunctions[id] = floatBlock
-        }
+        FunctionStore.returningFunctions[id] = block
 
         self.id = id
         self.cFunction = cFunction

@@ -13,22 +13,20 @@ import Foundation
 import RegexBuilder
 
 public enum RegisterFunctionMacro: ExpressionMacro {
-    enum ReturnType: String {
-        case void, int
-    }
-    
     public static func expansion(of node: some FreestandingMacroExpansionSyntax, in context: some MacroExpansionContext) throws -> ExprSyntax {
-        let arg0SignatureRegex = Regex {
+        let signatureRegex = Regex {
             "\""
-            Capture { OneOrMore(.any) }
-            "() -> "
+            OneOrMore(.any)
+            "("
+            Capture { ZeroOrMore(.any) }
+            ") -> "
             Capture { OneOrMore(.word) }
             "\""
         }
         
         let id = UUID().uuidString
 
-        let signature = node.arguments.first!.expression.description
+        var signature = node.arguments.first!.expression.description
         let block = node.trailingClosure?.description
         
         guard let block, block.starts(with: "{") else {
@@ -37,84 +35,28 @@ public enum RegisterFunctionMacro: ExpressionMacro {
         
         let ignoreInputBlock = "{ _ in" + block.dropFirst()
 
-        guard let match = signature.wholeMatch(of: arg0SignatureRegex) else {
-            return createNoneFunction(id: id, name: signature, block: ignoreInputBlock)
+        var returnType = "None"
+        
+        if let match = signature.wholeMatch(of: signatureRegex) {
+            let (_, _, returnTypeMatch) = match.output
+
+            returnType = String(returnTypeMatch)
+        } else {
+            let trimmed = signature.trimmingCharacters(in: CharacterSet(charactersIn: "\""))
+            signature = "\"\(trimmed)() -> None\""
         }
 
-        let (_, name, returnType) = match.output
+        let functions = returnType == "None" ? "voidFunctions" :  "returningFunctions"
+        let returnSetter = returnType == "None" ? "setNone()" : "set(result)"
 
-        switch returnType {
-        case "None":
-            return createNoneFunction(id: id, name: "\"\(name)\"", block: ignoreInputBlock)
-            
-        case "int":
-            return ExprSyntax("""
-            FunctionRegistration(
-                id: "\(raw: id)",
-                signature: \(raw: signature)
-            ) \(raw: ignoreInputBlock)
-            cFunction: { _, _ in
-                let result = FunctionStore.intFunctions["\(raw: id)"]?(.none)
-                PyAPI.returnValue.set(result)
-                return true
-            }
-            """)
-
-        case "str":
-            return ExprSyntax("""
-            FunctionRegistration(
-                id: "\(raw: id)",
-                signature: \(raw: signature)
-            ) \(raw: ignoreInputBlock)
-            cFunction: { _, _ in
-                let result = FunctionStore.stringFunctions["\(raw: id)"]?(.none)
-                PyAPI.returnValue.set(result)
-                return true
-            }
-            """)
-
-        case "bool":
-            return ExprSyntax("""
-            FunctionRegistration(
-                id: "\(raw: id)",
-                signature: \(raw: signature)
-            ) \(raw: ignoreInputBlock)
-            cFunction: { _, _ in
-                let result = FunctionStore.boolFunctions["\(raw: id)"]?(.none)
-                PyAPI.returnValue.set(result)
-                return true
-            }
-            """)
-
-        case "float":
-            return ExprSyntax("""
-            FunctionRegistration(
-                id: "\(raw: id)",
-                signature: \(raw: signature)
-            ) \(raw: ignoreInputBlock)
-            cFunction: { _, _ in
-                let result = FunctionStore.floatFunctions["\(raw: id)"]?(.none)
-                PyAPI.returnValue.set(result)
-                return true
-            }
-            """)
-
-        default:
-            throw MacroExpansionErrorMessage(
-                "Unsupported return type: \(returnType)"
-            )
-        }
-    }
-
-    static func createNoneFunction(id: String, name: String, block: String) -> ExprSyntax {
-        ExprSyntax("""
+        return ExprSyntax("""
         FunctionRegistration(
             id: "\(raw: id)",
-            name: \(raw: name)
-        ) \(raw: block)
-        cFunction: { _, _ in
-            FunctionStore.voidFunctions["\(raw: id)"]?(.none)
-            PyAPI.returnValue.setNone()
+            signature: \(raw: signature)
+        ) \(raw: ignoreInputBlock)
+        cFunction: { argc, argv in
+            let result = FunctionStore.\(raw: functions)["\(raw: id)"]?(.none)
+            PyAPI.returnValue.\(raw: returnSetter)
             return true
         }
         """)
