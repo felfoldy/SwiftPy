@@ -40,7 +40,18 @@ public enum RegisterFunctionMacro: ExpressionMacro {
             let (_, parameters, returnTypeMatch) = match.output
 
             returnType = String(returnTypeMatch)
-            if parameters.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            
+            // Take parameter labels.
+            let labels = parameters
+                .components(separatedBy: ",")
+                .map { argument in
+                    argument
+                        .components(separatedBy: ":")[0]
+                        .trimmingCharacters(in: .whitespacesAndNewlines)
+                }
+                .filter { !$0.isEmpty }
+            
+            if labels.isEmpty {
                 block = "{ _ in" + block.dropFirst()
             } else {
                 createArguments = "FunctionArguments(argc: argc, argv: argv)"
