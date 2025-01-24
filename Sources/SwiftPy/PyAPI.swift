@@ -11,57 +11,17 @@ import pocketpy
 @MainActor
 public enum PyAPI {}
 
-public enum PyType: py_Type {
-    case int, str, bool, float
-    
-    public var rawValue: Int16 {
-        switch self {
-        case .int: py_Type(tp_int.rawValue)
-        case .str: py_Type(tp_str.rawValue)
-        case .bool: py_Type(tp_bool.rawValue)
-        case .float: py_Type(tp_float.rawValue)
-        }
-    }
-}
-
 public extension PyAPI {
     /// Python function signature `(argc: Int32, argv: StackRef?) -> Bool`.
     typealias CFunction = py_CFunction
 
     typealias Reference = py_GlobalRef
-
-    /// Sets the return value to None.
-    @inlinable static func returnNone() {
-        py_newnone(py_retval())
-    }
     
     @inlinable static var returnValue: Reference {
         py_retval()
     }
-
-    @inlinable static func returnInt(_ value: Int?) {
-        returnNoneIfNil(value) { py_newint(py_retval(), py_i64($0)) }
-    }
-
-    @inlinable static func returnStr(_ value: String?) {
-        returnNoneIfNil(value) { py_newstr(py_retval(), $0) }
-    }
-
-    @inlinable static func returnBool(_ value: Bool?) {
-        returnNoneIfNil(value) { py_newbool(py_retval(), $0) }
-    }
-
-    @inlinable static func returnFloat(_ value: Double?) {
-        returnNoneIfNil(value) { py_newfloat(py_retval(), $0) }
-    }
-
-    @inlinable static func returnNoneIfNil<T>(_ value: T?, callback: (T) -> Void) {
-        if let value {
-            callback(value)
-        } else {
-            py_newnone(py_retval())
-        }
-    }
+    
+    static let TypeInt = py_Type(tp_int.rawValue)
 }
 
 public extension Interpreter {
@@ -100,12 +60,6 @@ public extension PyAPI.Reference {
         py_setattr(self, py_name(name), value)
     }
 
-    @inlinable func setAttribute(_ name: String, _ value: PythonConvertible?) {
-        let r0 = py_getreg(0)
-        value?.toPython(r0)
-        py_setattr(self, py_name(name), r0)
-    }
-
     @inlinable subscript(name: String) -> PyAPI.Reference? {
         py_getdict(self, py_name(name))
     }
@@ -114,8 +68,8 @@ public extension PyAPI.Reference {
         py_bind(self, function.signature, function.cFunction)
     }
 
-    @inlinable func isType(_ type: PyType) -> Bool {
-        py_istype(self, type.rawValue)
+    @inlinable func isType<T: PythonConvertible>(_ type: T.Type) -> Bool {
+        py_istype(self, T.pyType)
     }
 }
 

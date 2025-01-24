@@ -13,9 +13,13 @@ public final class Interpreter {
     public static let shared = Interpreter()
     static var isFailed = false
 
+    public var replBuffer = ""
+    
+    public static var importMap = [String: String]()
+
     init() {
         py_initialize()
-
+        
         py_callbacks().pointee.print = { cString in
             guard let cString else { return }
             let str = String(cString: cString)
@@ -29,6 +33,28 @@ public final class Interpreter {
                 log.info(str)
             }
         }
+        
+        py_callbacks().pointee.importfile = { cFilename in
+            guard let cFilename else {
+                return nil
+            }
+
+            let filename = String(cString: cFilename)
+            let filenameWithoutPy = filename
+                .replacingOccurrences(of: ".py", with: "")
+
+            let content = Interpreter.importMap[filename]
+
+            guard let content = content ?? Interpreter.importMap[filenameWithoutPy] else {
+                log.error("Couldn't import \(filename)")
+                return nil
+            }
+
+            return strdup(content)
+        }
+        
+        let builtins = py_getmodule("builtins")
+        py_deldict(builtins, py_name("exit"))
 
         log.info("PocketPython [\(PK_VERSION)] initialized")
     }
@@ -44,10 +70,59 @@ public final class Interpreter {
             py_printexc()
         }
     }
+
+    public func repl(input: String) -> String {
+        for line in input.components(separatedBy: .newlines) {
+            repl(line: line)
+        }
+
+        return replBuffer
+    }
+
+    func repl(line input: String) {
+        if input.isEmpty, !replBuffer.isEmpty {
+            repl(replBuffer)
+            replBuffer = ""
+        }
+
+        guard !input.isEmpty else {
+            return
+        }
+
+        if !replBuffer.isEmpty || ":({[".contains(input.last!) {
+            replBuffer += "\(input)\n"
+            return
+        }
+
+        repl(input)
+    }
+    
+    func repl(_ code: String) {
+        let p0 = py_peek(0)
+        let ok = py_exec(code, "<stdin>", SINGLE_MODE, nil)
+        
+        if ok {
+            log.info("Ok")
+        } else {
+            Interpreter.isFailed = true
+            py_printexc()
+            py_clearexc(p0)
+            return
+        }
+    }
 }
 
 public extension Interpreter {
     static func execute(_ code: String) {
         shared.execute(code)
+    }
+
+    /// Interactive interpreter input.
+    ///
+    /// - Parameter input: Input to run.
+    /// - Returns: The current buffer if the input was not executed.
+    @discardableResult
+    static func input(_ input: String) -> String {
+        shared.repl(input: input)
     }
 }

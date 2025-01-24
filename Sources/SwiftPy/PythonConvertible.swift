@@ -11,6 +11,8 @@ import pocketpy
 public protocol PythonConvertible {
     @inlinable init?(_ reference: PyAPI.Reference)
     @inlinable func toPython(_ reference: PyAPI.Reference)
+
+    static var pyType: py_Type { get }
 }
 
 extension PythonConvertible {
@@ -18,53 +20,55 @@ extension PythonConvertible {
         guard let reference else { return nil }
         self.init(reference)
     }
-    
-    @inlinable public func toPython(_ reference: PyAPI.Reference?) {
-        guard let reference else { return }
-        self.toPython(reference)
-    }
 }
 
 extension Bool: PythonConvertible {
     public init?(_ reference: PyAPI.Reference) {
-        guard reference.isType(.bool) else { return nil }
         self = py_tobool(reference)
     }
 
     public func toPython(_ reference: PyAPI.Reference) {
         py_newbool(reference, self)
     }
+
+    public static let pyType = py_Type(tp_bool.rawValue)
 }
 
 extension Int: PythonConvertible {
     public init?(_ reference: PyAPI.Reference) {
-        guard reference.isType(.int) else { return nil }
+        guard reference.isType(Self.self) else { return nil }
         self = Int(py_toint(reference))
     }
 
     public func toPython(_ reference: PyAPI.Reference) {
         py_newint(reference, py_i64(self))
     }
+
+    public static let pyType = py_Type(tp_int.rawValue)
 }
 
 extension String: PythonConvertible {
     public init?(_ reference: PyAPI.Reference) {
-        guard reference.isType(.str) else { return nil }
+        guard reference.isType(Self.self) else { return nil }
         self = String(cString: py_tostr(reference))
     }
 
     public func toPython(_ reference: PyAPI.Reference) {
         py_newstr(reference, self)
     }
+
+    public static let pyType = py_Type(tp_str.rawValue)
 }
 
 extension Double: PythonConvertible {
     public init?(_ reference: PyAPI.Reference) {
-        guard reference.isType(.float) else { return nil }
+        guard reference.isType(Self.self) else { return nil }
         self = Double(py_tofloat(reference))
     }
 
     public func toPython(_ reference: PyAPI.Reference) {
         py_newfloat(reference, self)
     }
+
+    public static let pyType = py_Type(tp_float.rawValue)
 }
