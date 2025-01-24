@@ -48,6 +48,10 @@ public extension PyAPI.Reference {
         py_newnone(self)
     }
 
+    @inlinable func isNone() -> Bool {
+        py_istype(self, py_Type(tp_NoneType.rawValue))
+    }
+
     @inlinable func set(_ value: PythonConvertible?) {
         if let value {
             value.toPython(self)
