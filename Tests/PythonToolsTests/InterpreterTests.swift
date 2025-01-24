@@ -28,4 +28,20 @@ struct InterpreterTests {
     @Test func justEvaluate() {
         #expect(Interpreter.input("3 + 4").isEmpty)
     }
+    
+    @Test func importModule() {
+        // TODO: Expect errors to output.
+        Interpreter.execute("import justx")
+        
+        var moduleName: String?
+        Interpreter.onImport = { module in
+            moduleName = module
+            return "x = 10"
+        }
+
+        Interpreter.execute("import justx")
+        #expect(moduleName == "justx.py")
+        
+        #expect(Interpreter.shared.module("justx")?["x"] == 10)
+    }
 }

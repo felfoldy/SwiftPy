@@ -14,8 +14,11 @@ public final class Interpreter {
     static var isFailed = false
 
     public var replBuffer = ""
-    
-    public static var importMap = [String: String]()
+
+    public static var onImport: (String) -> String? = { module in
+        log.fault("Tried to import \(module), but  Interpreter.onImport is not set")
+        return nil
+    }
 
     init() {
         py_initialize()
@@ -35,18 +38,11 @@ public final class Interpreter {
         }
         
         py_callbacks().pointee.importfile = { cFilename in
-            guard let cFilename else {
-                return nil
-            }
-
+            guard let cFilename else { return nil }
+            
             let filename = String(cString: cFilename)
-            let filenameWithoutPy = filename
-                .replacingOccurrences(of: ".py", with: "")
-
-            let content = Interpreter.importMap[filename]
-
-            guard let content = content ?? Interpreter.importMap[filenameWithoutPy] else {
-                log.error("Couldn't import \(filename)")
+            guard let content = Interpreter.onImport(filename) else {
+                log.fault("Failed to load \(filename)")
                 return nil
             }
 
