@@ -8,10 +8,10 @@
 
 // clang-format off
 
-#define PK_VERSION				"2.0.5"
+#define PK_VERSION				"2.0.6"
 #define PK_VERSION_MAJOR            2
 #define PK_VERSION_MINOR            0
-#define PK_VERSION_PATCH            5
+#define PK_VERSION_PATCH            6
 
 /*************** feature settings ***************/
 
@@ -202,6 +202,8 @@ typedef struct py_Callbacks {
     char* (*importfile)(const char*);
     /// Used by `print` to output a string.
     void (*print)(const char*);
+    /// Used by `input` to get a character.
+    int (*getchar)();
 } py_Callbacks;
 
 #define PY_RAISE
@@ -321,6 +323,8 @@ PK_API void py_newstr(py_OutRef, const char*);
 PK_API char* py_newstrn(py_OutRef, int);
 /// Create a `str` object from a `c11_sv`.
 PK_API void py_newstrv(py_OutRef, c11_sv);
+/// Create a formatted `str` object.
+PK_API void py_newfstr(py_OutRef, const char*, ...);
 /// Create a `bytes` object with `n` UNINITIALIZED bytes.
 PK_API unsigned char* py_newbytes(py_OutRef, int n);
 /// Create a `None` object.

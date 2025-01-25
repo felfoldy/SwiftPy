@@ -9,17 +9,6 @@ import __main__
 import builtins
 import inspect
 
-def dir(object) -> list[str]:
-    keys = []
-    
-    for key in object.__dict__.keys():
-        keys.append(key)
-    if not isinstance(object, type):
-        for key in type(object).__dict__.keys():
-            keys.append(key)
-    
-    return keys
-
 class Completer:
     def __init__(self, namespace = None):
         """Create a new completer for the command line.
@@ -89,7 +78,6 @@ class Completer:
 
         Return a list of all keywords, built-in functions and names currently
         defined in self.namespace that match.
-
         """
         matches = []
         seen = {"__builtins__"}
@@ -126,7 +114,6 @@ class Completer:
 
         WARNING: this can still invoke arbitrary C code, if an object
         with a __getattr__ hook is evaluated.
-
         """
         
         # TODO: no re lib
@@ -134,10 +121,6 @@ class Completer:
         # if not m:
         #     return []
         # expr, attr = m.group(1, 3)
-        # try:
-        #     thisobject = eval(expr, self.namespace)
-        # except Exception:
-        #     return []
         
         # Workaround:
         parts = text.split('.')
@@ -173,8 +156,6 @@ class Completer:
             for word in words:
                 if (word[:n] == attr and not (noprefix and word[:n+1] == noprefix)):
                     
-                    # TODO: Unsupported operand %
-                    # match = "%s.%s" % (expr, word)
                     match = f"{expr}.{word}"
                     
                     attribute = getattr(type(thisobject), word, None)
@@ -188,8 +169,6 @@ class Completer:
                         matches.append(match)
                         continue
 
-                    # TODO: := operator is not supported?
-                    # if (value := getattr(thisobject, word, None)) is not None:
                     value = getattr(thisobject, word, None)
                     if value is not None:
                         matches.append(self._callable_postfix(value, match))
@@ -204,7 +183,6 @@ class Completer:
                 noprefix = None
         
         matches.sort()
-        print(matches)
         return matches
         
     def get_class_members(klass):

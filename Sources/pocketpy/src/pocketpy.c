@@ -33,6 +33,11 @@ void pk__add_module_conio();
 void pk__add_module_lz4();
 void pk__add_module_pkpy();
 
+#ifdef PK_BUILD_MODULE_LIBHV
+void pk__add_module_libhv();
+#else
+#define pk__add_module_libhv()
+#endif
 // objects/base.h
 
 
@@ -118,27 +123,22 @@ bool c11__stable_sort(void* ptr,
 // common/memorypool.h
 
 
-#define kPoolExprBlockSize      128
-#define kPoolFrameBlockSize     80
-#define kPoolObjectBlockSize    80
+typedef struct FixedMemoryPool {
+    int BlockSize;
+    int BlockCount;
 
-#define kPoolObjectArenaSize    (256*1024)
-#define kPoolObjectMaxBlocks    (kPoolObjectArenaSize / kPoolObjectBlockSize)
+    char* data;
+    char* data_end;
+    int exceeded_bytes;
 
-void MemoryPools__initialize();
-void MemoryPools__finalize();
+    char** _free_list;
+    char** _free_list_end;
+} FixedMemoryPool;
 
-void* PoolExpr_alloc();
-void PoolExpr_dealloc(void*);
-void* PoolFrame_alloc();
-void PoolFrame_dealloc(void*);
-
-void* PoolObject_alloc();
-void PoolObject_dealloc(void* p);
-void PoolObject_shrink_to_fit();
-
-void Pools_debug_info(char* buffer, int size);
-
+void FixedMemoryPool__ctor(FixedMemoryPool* self, int BlockSize, int BlockCount);
+void FixedMemoryPool__dtor(FixedMemoryPool* self);
+void* FixedMemoryPool__alloc(FixedMemoryPool* self);
+void FixedMemoryPool__dealloc(FixedMemoryPool* self, void* p);
 // common/utils.h
 
 
@@ -190,12 +190,6 @@ typedef struct RefCounted {
         }                                                                                          \
     } while(0)
 
-// static assert
-#ifndef __cplusplus
-    #ifndef static_assert
-        #define static_assert(x, msg) if(!(x)) c11__abort("static_assert failed: %s", msg)
-    #endif
-#endif
 
 // common/vector.h
 
@@ -220,6 +214,7 @@ void c11_vector__clear(c11_vector* self);
 void* c11_vector__emplace(c11_vector* self);
 bool c11_vector__contains(const c11_vector* self, void* elem);
 void* c11_vector__submit(c11_vector* self, int* length);
+void c11_vector__swap(c11_vector* self, c11_vector* other);
 
 #define c11__getitem(T, self, index) (((T*)(self)->data)[index])
 #define c11__setitem(T, self, index, value) ((T*)(self)->data)[index] = value;
@@ -238,7 +233,9 @@ void* c11_vector__submit(c11_vector* self, int* length);
 
 #define c11_vector__extend(T, self, p, size)                                                       \
     do {                                                                                           \
-        c11_vector__reserve((self), (self)->length + (size));                                      \
+        int min_capacity = (self)->length + (size);                                                \
+        if((self)->capacity < min_capacity)                                                        \
+            c11_vector__reserve((self), c11__max((self)->capacity * 2, min_capacity));             \
         memcpy((T*)(self)->data + (self)->length, (p), (size) * sizeof(T));                        \
         (self)->length += (size);                                                                  \
     } while(0)
@@ -351,6 +348,36 @@ typedef enum IntParsingResult {
 
 IntParsingResult c11__parse_uint(c11_sv text, int64_t* out, int base);
 
+// interpreter/objectpool.h
+
+
+#define kPoolArenaSize (120 * 1024)
+#define kMultiPoolCount 5
+#define kPoolMaxBlockSize (32*kMultiPoolCount)
+
+typedef struct PoolArena {
+    int block_size;
+    int block_count;
+    int unused_length;
+    int* unused;
+    char data[kPoolArenaSize];
+} PoolArena;
+
+typedef struct Pool {
+    c11_vector /* PoolArena* */ arenas;
+    c11_vector /* PoolArena* */ no_free_arenas;
+    int block_size;
+} Pool;
+
+typedef struct MultiPool {
+    Pool pools[kMultiPoolCount];
+} MultiPool;
+
+void* MultiPool__alloc(MultiPool* self, int size);
+int MultiPool__sweep_dealloc(MultiPool* self);
+void MultiPool__ctor(MultiPool* self);
+void MultiPool__dtor(MultiPool* self);
+c11_string* MultiPool__summary(MultiPool* self);
 // objects/namedict.h
 
 
@@ -507,13 +534,14 @@ void ModuleDict__dtor(ModuleDict* self);
 void ModuleDict__set(ModuleDict* self, const char* key, py_TValue val);
 py_TValue* ModuleDict__try_get(ModuleDict* self, const char* path);
 bool ModuleDict__contains(ModuleDict* self, const char* path);
+void ModuleDict__apply_mark(ModuleDict* self, void (*marker)(PyObject*));
 
 // objects/object.h
 
 
 typedef struct PyObject {
     py_Type type;  // we have a duplicated type here for convenience
-    bool gc_is_large;
+    // bool _;
     bool gc_marked;
     int slots;  // number of slots in the object
     char flex[];
@@ -531,31 +559,28 @@ void* PyObject__userdata(PyObject* self);
 
 #define PK_OBJ_SLOTS_SIZE(slots) ((slots) >= 0 ? sizeof(py_TValue) * (slots) : sizeof(NameDict))
 
-PyObject* PyObject__new(py_Type type, int slots, int size);
-void PyObject__delete(PyObject* self);
+void PyObject__dtor(PyObject* self);
 
 // interpreter/heap.h
-typedef struct ManagedHeap{
-    c11_vector no_gc;
-    c11_vector gen;
+typedef struct ManagedHeap {
+    MultiPool small_objects;
+    c11_vector /* PyObject* */ large_objects;
 
-    int gc_threshold;
-    int gc_counter;
+    int freed_ma[3];
+    int gc_threshold;  // threshold for gc_counter
+    int gc_counter;    // objects created since last gc
     bool gc_enabled;
-    
-    VM* vm;
-
-    void (*gc_on_delete)(VM*, PyObject*);
 } ManagedHeap;
 
-void ManagedHeap__ctor(ManagedHeap* self, VM* vm);
+void ManagedHeap__ctor(ManagedHeap* self);
 void ManagedHeap__dtor(ManagedHeap* self);
 
 void ManagedHeap__collect_if_needed(ManagedHeap* self);
 int ManagedHeap__collect(ManagedHeap* self);
 int ManagedHeap__sweep(ManagedHeap* self);
 
-PyObject* ManagedHeap__new(ManagedHeap* self, py_Type type, int slots, int udsize);
+#define ManagedHeap__new(self, type, slots, udsize)                                                \
+    ManagedHeap__gcnew((self), (type), (slots), (udsize))
 PyObject* ManagedHeap__gcnew(ManagedHeap* self, py_Type type, int slots, int udsize);
 
 // external implementation
@@ -1432,9 +1457,11 @@ typedef struct VM {
 
     py_Callbacks callbacks;
 
+    py_TValue ascii_literals[128+1];
+
     py_TValue last_retval;
     py_TValue curr_exception;
-    bool is_signal_interrupted;
+    volatile bool is_signal_interrupted;
     bool is_curr_exc_handled;  // handled by try-except block but not cleared yet
 
     py_TValue reg[8];  // users' registers
@@ -1444,6 +1471,7 @@ typedef struct VM {
     py_StackRef __curr_function;
     py_TValue __vectorcall_buffer[PK_MAX_CO_VARNAMES];
 
+    FixedMemoryPool pool_frame;
     ManagedHeap heap;
     ValueStack stack;  // put `stack` at the end for better cache locality
 } VM;
@@ -1464,7 +1492,6 @@ bool pk__object_new(int argc, py_Ref argv);
 py_TypeInfo* pk__type_info(py_Type type);
 
 bool pk_wrapper__self(int argc, py_Ref argv);
-bool pk_wrapper__NotImplementedError(int argc, py_Ref argv);
 
 const char* pk_op2str(py_Name op);
 
@@ -1659,40 +1686,246 @@ Error* Lexer__process(SourceData_ src, Token** out_tokens, int* out_length);
 
 Error* pk_compile(SourceData_ src, CodeObject* out);
 
-// src/interpreter/heap.c
-void ManagedHeap__ctor(ManagedHeap* self, VM* vm) {
-    c11_vector__ctor(&self->no_gc, sizeof(PyObject*));
-    c11_vector__ctor(&self->gen, sizeof(PyObject*));
+// src/interpreter/objectpool.c
+#include <assert.h>
+#include <stdbool.h>
+#include <stdlib.h>
+#include <string.h>
 
+static PoolArena* PoolArena__new(int block_size) {
+    assert(kPoolArenaSize % block_size == 0);
+    int block_count = kPoolArenaSize / block_size;
+    PoolArena* self = PK_MALLOC(sizeof(PoolArena) + sizeof(int) * block_count);
+    self->block_size = block_size;
+    self->block_count = block_count;
+    self->unused_length = block_count;
+    self->unused = PK_MALLOC(sizeof(int) * block_count);
+    for(int i = 0; i < block_count; i++) {
+        self->unused[i] = i;
+    }
+    memset(self->data, 0, kPoolArenaSize);
+    return self;
+}
+
+static void PoolArena__delete(PoolArena* self) {
+    for(int i = 0; i < self->block_count; i++) {
+        PyObject* obj = (PyObject*)(self->data + i * self->block_size);
+        if(obj->type != 0) PyObject__dtor(obj);
+    }
+    PK_FREE(self->unused);
+    PK_FREE(self);
+}
+
+static void* PoolArena__alloc(PoolArena* self) {
+    assert(self->unused_length > 0);
+    int index = self->unused[self->unused_length - 1];
+    self->unused_length--;
+    return self->data + index * self->block_size;
+}
+
+static int PoolArena__sweep_dealloc(PoolArena* self) {
+    int freed = 0;
+    self->unused_length = 0;
+    for(int i = 0; i < self->block_count; i++) {
+        PyObject* obj = (PyObject*)(self->data + i * self->block_size);
+        if(obj->type == 0) {
+            // free slot
+            self->unused[self->unused_length] = i;
+            self->unused_length++;
+        } else {
+            if(!obj->gc_marked) {
+                // not marked, need to free
+                obj->type = 0;
+                freed++;
+                self->unused[self->unused_length] = i;
+                self->unused_length++;
+            } else {
+                // marked, clear mark
+                obj->gc_marked = false;
+            }
+        }
+    }
+    return freed;
+}
+
+static void Pool__ctor(Pool* self, int block_size) {
+    c11_vector__ctor(&self->arenas, sizeof(PoolArena*));
+    c11_vector__ctor(&self->no_free_arenas, sizeof(PoolArena*));
+    self->block_size = block_size;
+}
+
+static void Pool__dtor(Pool* self) {
+    c11__foreach(PoolArena*, &self->arenas, arena) PoolArena__delete(*arena);
+    c11__foreach(PoolArena*, &self->no_free_arenas, arena) PoolArena__delete(*arena);
+    c11_vector__dtor(&self->arenas);
+    c11_vector__dtor(&self->no_free_arenas);
+}
+
+static void* Pool__alloc(Pool* self) {
+    PoolArena* arena;
+    if(self->arenas.length == 0) {
+        arena = PoolArena__new(self->block_size);
+        c11_vector__push(PoolArena*, &self->arenas, arena);
+    } else {
+        arena = c11_vector__back(PoolArena*, &self->arenas);
+    }
+    void* ptr = PoolArena__alloc(arena);
+    if(arena->unused_length == 0) {
+        c11_vector__pop(&self->arenas);
+        c11_vector__push(PoolArena*, &self->no_free_arenas, arena);
+    }
+    return ptr;
+}
+
+static int Pool__sweep_dealloc(Pool* self, c11_vector* arenas, c11_vector* no_free_arenas) {
+    c11_vector__clear(arenas);
+    c11_vector__clear(no_free_arenas);
+
+    int freed = 0;
+    for(int i = 0; i < self->arenas.length; i++) {
+        PoolArena* item = c11__getitem(PoolArena*, &self->arenas, i);
+        assert(item->unused_length > 0);
+        freed += PoolArena__sweep_dealloc(item);
+        if(item->unused_length == item->block_count) {
+            // all free
+            if(arenas->length > 0) {
+                // at least one arena
+                PoolArena__delete(item);
+            } else {
+                // no arena
+                c11_vector__push(PoolArena*, arenas, item);
+            }
+        } else {
+            // some free
+            c11_vector__push(PoolArena*, arenas, item);
+        }
+    }
+    for(int i = 0; i < self->no_free_arenas.length; i++) {
+        PoolArena* item = c11__getitem(PoolArena*, &self->no_free_arenas, i);
+        freed += PoolArena__sweep_dealloc(item);
+        if(item->unused_length == 0) {
+            // still no free
+            c11_vector__push(PoolArena*, no_free_arenas, item);
+        } else {
+            if(item->unused_length == item->block_count) {
+                // all free
+                PoolArena__delete(item);
+            } else {
+                // some free
+                c11_vector__push(PoolArena*, arenas, item);
+            }
+        }
+    }
+
+    c11_vector__swap(&self->arenas, arenas);
+    c11_vector__swap(&self->no_free_arenas, no_free_arenas);
+    return freed;
+}
+
+void* MultiPool__alloc(MultiPool* self, int size) {
+    if(size == 0) return NULL;
+    int index = (size - 1) >> 5;
+    if(index < kMultiPoolCount) {
+        Pool* pool = &self->pools[index];
+        return Pool__alloc(pool);
+    }
+    return NULL;
+}
+
+int MultiPool__sweep_dealloc(MultiPool* self) {
+    c11_vector arenas;
+    c11_vector no_free_arenas;
+    c11_vector__ctor(&arenas, sizeof(PoolArena*));
+    c11_vector__ctor(&no_free_arenas, sizeof(PoolArena*));
+    int freed = 0;
+    for(int i = 0; i < kMultiPoolCount; i++) {
+        Pool* item = &self->pools[i];
+        freed += Pool__sweep_dealloc(item, &arenas, &no_free_arenas);
+    }
+    c11_vector__dtor(&arenas);
+    c11_vector__dtor(&no_free_arenas);
+    return freed;
+}
+
+void MultiPool__ctor(MultiPool* self) {
+    for(int i = 0; i < kMultiPoolCount; i++) {
+        Pool__ctor(&self->pools[i], 32 * (i + 1));
+    }
+}
+
+void MultiPool__dtor(MultiPool* self) {
+    for(int i = 0; i < kMultiPoolCount; i++) {
+        Pool__dtor(&self->pools[i]);
+    }
+}
+
+c11_string* MultiPool__summary(MultiPool* self) {
+    c11_sbuf sbuf;
+    c11_sbuf__ctor(&sbuf);
+    for(int i = 0; i < kMultiPoolCount; i++) {
+        Pool* item = &self->pools[i];
+        int total_bytes = (item->arenas.length + item->no_free_arenas.length) * kPoolArenaSize;
+        int used_bytes = 0;
+        for(int j = 0; j < item->arenas.length; j++) {
+            PoolArena* arena = c11__getitem(PoolArena*, &item->arenas, j);
+            used_bytes += (arena->block_count - arena->unused_length) * arena->block_size;
+        }
+        used_bytes += item->no_free_arenas.length * kPoolArenaSize;
+        float used_pct = (float)used_bytes / total_bytes * 100;
+        char buf[256];
+        snprintf(buf,
+                 sizeof(buf),
+                 "Pool<%d>: len(arenas)=%d, len(no_free_arenas)=%d, %d/%d (%.1f%% used)",
+                 item->block_size,
+                 item->arenas.length,
+                 item->no_free_arenas.length,
+                 used_bytes,
+                 total_bytes,
+                 used_pct);
+        c11_sbuf__write_cstr(&sbuf, buf);
+        c11_sbuf__write_char(&sbuf, '\n');
+    }
+    return c11_sbuf__submit(&sbuf);
+}
+
+// src/interpreter/heap.c
+void ManagedHeap__ctor(ManagedHeap* self) {
+    MultiPool__ctor(&self->small_objects);
+    c11_vector__ctor(&self->large_objects, sizeof(PyObject*));
+
+    for(int i = 0; i < c11__count_array(self->freed_ma); i++) {
+        self->freed_ma[i] = PK_GC_MIN_THRESHOLD;
+    }
     self->gc_threshold = PK_GC_MIN_THRESHOLD;
     self->gc_counter = 0;
     self->gc_enabled = true;
-
-    self->vm = vm;
-
-    self->gc_on_delete = NULL;
 }
 
 void ManagedHeap__dtor(ManagedHeap* self) {
-    for(int i = 0; i < self->gen.length; i++) {
-        PyObject* obj = c11__getitem(PyObject*, &self->gen, i);
-        PyObject__delete(obj);
+    // small_objects
+    MultiPool__dtor(&self->small_objects);
+    // large_objects
+    for(int i = 0; i < self->large_objects.length; i++) {
+        PyObject* obj = c11__getitem(PyObject*, &self->large_objects, i);
+        PyObject__dtor(obj);
+        PK_FREE(obj);
     }
-    for(int i = 0; i < self->no_gc.length; i++) {
-        PyObject* obj = c11__getitem(PyObject*, &self->no_gc, i);
-        PyObject__delete(obj);
-    }
-    c11_vector__dtor(&self->no_gc);
-    c11_vector__dtor(&self->gen);
+    c11_vector__dtor(&self->large_objects);
 }
 
 void ManagedHeap__collect_if_needed(ManagedHeap* self) {
     if(!self->gc_enabled) return;
     if(self->gc_counter < self->gc_threshold) return;
     self->gc_counter = 0;
-    ManagedHeap__collect(self);
-    self->gc_threshold = self->gen.length * 2;
-    if(self->gc_threshold < PK_GC_MIN_THRESHOLD) { self->gc_threshold = PK_GC_MIN_THRESHOLD; }
+    int freed = ManagedHeap__collect(self);
+    // adjust `gc_threshold` based on `freed_ma`
+    self->freed_ma[0] = self->freed_ma[1];
+    self->freed_ma[1] = self->freed_ma[2];
+    self->freed_ma[2] = freed;
+    int avg_freed = (self->freed_ma[0] + self->freed_ma[1] + self->freed_ma[2]) / 3;
+    int upper = self->gc_threshold * 2;
+    int lower = c11__max(PK_GC_MIN_THRESHOLD, self->gc_threshold / 2 + 1);
+    self->gc_threshold = c11__min(c11__max(avg_freed, lower), upper);
 }
 
 int ManagedHeap__collect(ManagedHeap* self) {
@@ -1702,76 +1935,55 @@ int ManagedHeap__collect(ManagedHeap* self) {
 }
 
 int ManagedHeap__sweep(ManagedHeap* self) {
-    c11_vector alive;
-    c11_vector__ctor(&alive, sizeof(PyObject*));
-    c11_vector__reserve(&alive, self->gen.length / 2);
-
-    for(int i = 0; i < self->gen.length; i++) {
-        PyObject* obj = c11__getitem(PyObject*, &self->gen, i);
+    // small_objects
+    int small_freed = MultiPool__sweep_dealloc(&self->small_objects);
+    // large_objects
+    int large_living_count = 0;
+    for(int i = 0; i < self->large_objects.length; i++) {
+        PyObject* obj = c11__getitem(PyObject*, &self->large_objects, i);
         if(obj->gc_marked) {
             obj->gc_marked = false;
-            c11_vector__push(PyObject*, &alive, obj);
+            c11__setitem(PyObject*, &self->large_objects, large_living_count, obj);
+            large_living_count++;
         } else {
-            if(self->gc_on_delete) { self->gc_on_delete(self->vm, obj); }
-            PyObject__delete(obj);
+            PyObject__dtor(obj);
+            PK_FREE(obj);
         }
     }
-
-    // clear _no_gc marked flag
-    for(int i = 0; i < self->no_gc.length; i++) {
-        PyObject* obj = c11__getitem(PyObject*, &self->no_gc, i);
-        obj->gc_marked = false;
-    }
-
-    int freed = self->gen.length - alive.length;
-
-    // destroy old gen
-    c11_vector__dtor(&self->gen);
-    // move alive to gen
-    self->gen = alive;
-
-    PoolObject_shrink_to_fit();
-    return freed;
-}
-
-PyObject* ManagedHeap__new(ManagedHeap* self, py_Type type, int slots, int udsize) {
-    PyObject* obj = PyObject__new(type, slots, udsize);
-    c11_vector__push(PyObject*, &self->no_gc, obj);
-    return obj;
+    // shrink `self->large_objects`
+    int large_freed = self->large_objects.length - large_living_count;
+    self->large_objects.length = large_living_count;
+    // printf("large_freed=%d\n", large_freed);
+    // printf("small_freed=%d\n", small_freed);
+    return small_freed + large_freed;
 }
 
 PyObject* ManagedHeap__gcnew(ManagedHeap* self, py_Type type, int slots, int udsize) {
-    PyObject* obj = PyObject__new(type, slots, udsize);
-    c11_vector__push(PyObject*, &self->gen, obj);
-    self->gc_counter++;
-    return obj;
-}
-
-PyObject* PyObject__new(py_Type type, int slots, int size) {
     assert(slots >= 0 || slots == -1);
-    PyObject* self;
+    PyObject* obj;
     // header + slots + udsize
-    size = sizeof(PyObject) + PK_OBJ_SLOTS_SIZE(slots) + size;
-    if(!PK_LOW_MEMORY_MODE && size <= kPoolObjectBlockSize) {
-        self = PoolObject_alloc();
-        self->gc_is_large = false;
+    int size = sizeof(PyObject) + PK_OBJ_SLOTS_SIZE(slots) + udsize;
+    if(!PK_LOW_MEMORY_MODE && size <= kPoolMaxBlockSize) {
+        obj = MultiPool__alloc(&self->small_objects, size);
+        assert(obj != NULL);
     } else {
-        self = PK_MALLOC(size);
-        self->gc_is_large = true;
+        obj = PK_MALLOC(size);
+        c11_vector__push(PyObject*, &self->large_objects, obj);
     }
-    self->type = type;
-    self->gc_marked = false;
-    self->slots = slots;
+    obj->type = type;
+    obj->gc_marked = false;
+    obj->slots = slots;
 
     // initialize slots or dict
     if(slots >= 0) {
-        memset(self->flex, 0, slots * sizeof(py_TValue));
+        memset(obj->flex, 0, slots * sizeof(py_TValue));
     } else {
-        NameDict__ctor((void*)self->flex);
+        NameDict__ctor((void*)obj->flex);
     }
-    return self;
-}
 
+    self->gc_counter++;
+    return obj;
+}
 // src/interpreter/vm.c
 #include <stdbool.h>
 
@@ -1831,6 +2043,7 @@ void VM__ctor(VM* self) {
 
     self->callbacks.importfile = pk_default_importfile;
     self->callbacks.print = pk_default_print;
+    self->callbacks.getchar = getchar;
 
     self->last_retval = *py_NIL();
     self->curr_exception = *py_NIL();
@@ -1841,10 +2054,18 @@ void VM__ctor(VM* self) {
     self->__curr_class = NULL;
     self->__curr_function = NULL;
 
-    ManagedHeap__ctor(&self->heap, self);
+    FixedMemoryPool__ctor(&self->pool_frame, sizeof(Frame), 32);
+
+    ManagedHeap__ctor(&self->heap);
     ValueStack__ctor(&self->stack);
 
     /* Init Builtin Types */
+    for(int i = 0; i < 128; i++) {
+        char* p = py_newstrn(&self->ascii_literals[i], 1);
+        *p = i;
+    }
+    py_newstrn(&self->ascii_literals[128], 0);
+
     // 0: unused
     void* placeholder = TypeList__emplace(&self->types);
     memset(placeholder, 0, sizeof(py_TypeInfo));
@@ -1915,7 +2136,7 @@ void VM__ctor(VM* self) {
 
     validate(tp_StopIteration, pk_StopIteration__register());
     py_setdict(&self->builtins, py_name("StopIteration"), py_tpobject(tp_StopIteration));
-    
+
     INJECT_BUILTIN_EXC(SyntaxError, tp_Exception);
     INJECT_BUILTIN_EXC(StackOverflowError, tp_Exception);
     INJECT_BUILTIN_EXC(OSError, tp_Exception);
@@ -1986,7 +2207,8 @@ void VM__ctor(VM* self) {
     pk__add_module_importlib();
 
     pk__add_module_conio();
-    pk__add_module_lz4();
+    pk__add_module_lz4();    // optional
+    pk__add_module_libhv();  // optional
     pk__add_module_pkpy();
 
     // add python builtins
@@ -2011,6 +2233,7 @@ void VM__dtor(VM* self) {
         VM__pop_frame(self);
     ModuleDict__dtor(&self->modules);
     TypeList__dtor(&self->types);
+    FixedMemoryPool__dtor(&self->pool_frame);
     ValueStack__clear(&self->stack);
 }
 
@@ -2269,7 +2492,7 @@ FrameResult VM__vectorcall(VM* self, uint16_t argc, uint16_t kwargc, bool opcall
                 memcpy(argv, self->__vectorcall_buffer, co->nlocals * sizeof(py_TValue));
                 Frame* frame = Frame__new(co, &fn->module, p0, argv, true);
                 pk_newgenerator(py_retval(), frame, p0, self->stack.sp);
-                self->stack.sp = p0;    // reset the stack
+                self->stack.sp = p0;  // reset the stack
                 return RES_RETURN;
             }
             default: c11__unreachable();
@@ -2333,15 +2556,10 @@ FrameResult VM__vectorcall(VM* self, uint16_t argc, uint16_t kwargc, bool opcall
 }
 
 /****************************************/
-void PyObject__delete(PyObject* self) {
+void PyObject__dtor(PyObject* self) {
     py_TypeInfo* ti = pk__type_info(self->type);
     if(ti->dtor) ti->dtor(PyObject__userdata(self));
     if(self->slots == -1) NameDict__dtor(PyObject__dict(self));
-    if(self->gc_is_large) {
-        PK_FREE(self);
-    } else {
-        PoolObject_dealloc(self);
-    }
 }
 
 static void mark_object(PyObject* obj);
@@ -2400,21 +2618,24 @@ void CodeObject__gc_mark(const CodeObject* self) {
 }
 
 void ManagedHeap__mark(ManagedHeap* self) {
-    VM* vm = self->vm;
-    // mark heap objects
-    for(int i = 0; i < self->no_gc.length; i++) {
-        PyObject* obj = c11__getitem(PyObject*, &self->no_gc, i);
-        mark_object(obj);
-    }
+    VM* vm = pk_current_vm;
     // mark value stack
     for(py_TValue* p = vm->stack.begin; p != vm->stack.end; p++) {
         pk__mark_value(p);
     }
+    // mark ascii literals
+    for(int i = 0; i < c11__count_array(vm->ascii_literals); i++) {
+        pk__mark_value(&vm->ascii_literals[i]);
+    }
+    // mark modules
+    ModuleDict__apply_mark(&vm->modules, mark_object);
     // mark types
     int types_length = vm->types.length;
     // 0-th type is placeholder
     for(py_Type i = 1; i < types_length; i++) {
         py_TypeInfo* ti = TypeList__get(&vm->types, i);
+        // mark type object
+        pk__mark_value(&ti->self);
         // mark common magic slots
         for(int j = 0; j < PK_MAGIC_SLOTS_COMMON_LENGTH; j++) {
             py_TValue* slot = ti->magic_0 + j;
@@ -2509,12 +2730,49 @@ bool pk_wrapper__self(int argc, py_Ref argv) {
     return true;
 }
 
-bool pk_wrapper__NotImplementedError(int argc, py_Ref argv) {
-    return py_exception(tp_NotImplementedError, "");
-}
-
 py_TypeInfo* pk__type_info(py_Type type) { return TypeList__get(&pk_current_vm->types, type); }
 
+int py_replinput(char* buf, int max_size) {
+    buf[0] = '\0';  // reset first char because we check '@' at the beginning
+
+    int size = 0;
+    bool multiline = false;
+    printf(">>> ");
+
+    while(true) {
+        int c = pk_current_vm->callbacks.getchar();
+        if(c == EOF) return -1;
+
+        if(c == '\n') {
+            char last = '\0';
+            if(size > 0) last = buf[size - 1];
+            if(multiline) {
+                if(last == '\n') {
+                    break;  // 2 consecutive newlines to end multiline input
+                } else {
+                    printf("... ");
+                }
+            } else {
+                if(last == ':' || last == '(' || last == '[' || last == '{' || buf[0] == '@') {
+                    printf("... ");
+                    multiline = true;
+                } else {
+                    break;
+                }
+            }
+        }
+
+        if(size == max_size - 1) {
+            buf[size] = '\0';
+            return size;
+        }
+
+        buf[size++] = c;
+    }
+
+    buf[size] = '\0';
+    return size;
+}
 // src/interpreter/typeinfo.c
 #define CHUNK_SIZE 128
 #define LOG2_CHUNK_SIZE 7
@@ -4138,8 +4396,7 @@ Frame* Frame__new(const CodeObject* co,
                   py_StackRef p0,
                   py_StackRef locals,
                   bool has_function) {
-    static_assert(sizeof(Frame) <= kPoolFrameBlockSize, "!(sizeof(Frame) <= kPoolFrameBlockSize)");
-    Frame* self = PoolFrame_alloc();
+    Frame* self = FixedMemoryPool__alloc(&pk_current_vm->pool_frame);
     self->f_back = NULL;
     self->ip = (Bytecode*)co->codes.data - 1;
     self->co = co;
@@ -4158,7 +4415,7 @@ void Frame__delete(Frame* self) {
         self->uw_list = p->next;
         UnwindTarget__delete(p);
     }
-    PoolFrame_dealloc(self);
+    FixedMemoryPool__dealloc(&pk_current_vm->pool_frame, self);
 }
 
 int Frame__prepare_jump_exception_handler(Frame* self, ValueStack* _s) {
@@ -4666,11 +4923,18 @@ py_TValue* ModuleDict__try_get(ModuleDict* self, const char* path) {
 bool ModuleDict__contains(ModuleDict* self, const char* path) {
     return ModuleDict__try_get(self, path) != NULL;
 }
+
+void ModuleDict__apply_mark(ModuleDict *self, void (*marker)(PyObject*)) {
+    if(self->left) ModuleDict__apply_mark(self->left, marker);
+    if(self->right) ModuleDict__apply_mark(self->right, marker);
+    marker(self->module._obj);
+}
+
 // src/common/_generated.c
 // generated by prebuild.py
 #include <string.h>
 const char kPythonLibs_bisect[] = "\"\"\"Bisection algorithms.\"\"\"\n\ndef insort_right(a, x, lo=0, hi=None):\n    \"\"\"Insert item x in list a, and keep it sorted assuming a is sorted.\n\n    If x is already in a, insert it to the right of the rightmost x.\n\n    Optional args lo (default 0) and hi (default len(a)) bound the\n    slice of a to be searched.\n    \"\"\"\n\n    lo = bisect_right(a, x, lo, hi)\n    a.insert(lo, x)\n\ndef bisect_right(a, x, lo=0, hi=None):\n    \"\"\"Return the index where to insert item x in list a, assuming a is sorted.\n\n    The return value i is such that all e in a[:i] have e <= x, and all e in\n    a[i:] have e > x.  So if x already appears in the list, a.insert(x) will\n    insert just after the rightmost x already there.\n\n    Optional args lo (default 0) and hi (default len(a)) bound the\n    slice of a to be searched.\n    \"\"\"\n\n    if lo < 0:\n        raise ValueError('lo must be non-negative')\n    if hi is None:\n        hi = len(a)\n    while lo < hi:\n        mid = (lo+hi)//2\n        if x < a[mid]: hi = mid\n        else: lo = mid+1\n    return lo\n\ndef insort_left(a, x, lo=0, hi=None):\n    \"\"\"Insert item x in list a, and keep it sorted assuming a is sorted.\n\n    If x is already in a, insert it to the left of the leftmost x.\n\n    Optional args lo (default 0) and hi (default len(a)) bound the\n    slice of a to be searched.\n    \"\"\"\n\n    lo = bisect_left(a, x, lo, hi)\n    a.insert(lo, x)\n\n\ndef bisect_left(a, x, lo=0, hi=None):\n    \"\"\"Return the index where to insert item x in list a, assuming a is sorted.\n\n    The return value i is such that all e in a[:i] have e < x, and all e in\n    a[i:] have e >= x.  So if x already appears in the list, a.insert(x) will\n    insert just before the leftmost x already there.\n\n    Optional args lo (default 0) and hi (default len(a)) bound the\n    slice of a to be searched.\n    \"\"\"\n\n    if lo < 0:\n        raise ValueError('lo must be non-negative')\n    if hi is None:\n        hi = len(a)\n    while lo < hi:\n        mid = (lo+hi)//2\n        if a[mid] < x: lo = mid+1\n        else: hi = mid\n    return lo\n\n# Create aliases\nbisect = bisect_right\ninsort = insort_right\n";
-const char kPythonLibs_builtins[] = "def all(iterable):\n    for i in iterable:\n        if not i:\n            return False\n    return True\n\ndef any(iterable):\n    for i in iterable:\n        if i:\n            return True\n    return False\n\ndef enumerate(iterable, start=0):\n    n = start\n    for elem in iterable:\n        yield n, elem\n        n += 1\n\ndef __minmax_reduce(op, args):\n    if len(args) == 2:  # min(1, 2)\n        return args[0] if op(args[0], args[1]) else args[1]\n    if len(args) == 0:  # min()\n        raise TypeError('expected 1 arguments, got 0')\n    if len(args) == 1:  # min([1, 2, 3, 4]) -> min(1, 2, 3, 4)\n        args = args[0]\n    args = iter(args)\n    try:\n        res = next(args)\n    except StopIteration:\n        raise ValueError('args is an empty sequence')\n    while True:\n        try:\n            i = next(args)\n        except StopIteration:\n            break\n        if op(i, res):\n            res = i\n    return res\n\ndef min(*args, key=None):\n    key = key or (lambda x: x)\n    return __minmax_reduce(lambda x,y: key(x)<key(y), args)\n\ndef max(*args, key=None):\n    key = key or (lambda x: x)\n    return __minmax_reduce(lambda x,y: key(x)>key(y), args)\n\ndef sum(iterable):\n    res = 0\n    for i in iterable:\n        res += i\n    return res\n\ndef map(f, iterable):\n    for i in iterable:\n        yield f(i)\n\ndef filter(f, iterable):\n    for i in iterable:\n        if f(i):\n            yield i\n\ndef zip(a, b):\n    a = iter(a)\n    b = iter(b)\n    while True:\n        try:\n            ai = next(a)\n            bi = next(b)\n        except StopIteration:\n            break\n        yield ai, bi\n\ndef reversed(iterable):\n    a = list(iterable)\n    a.reverse()\n    return a\n\ndef sorted(iterable, key=None, reverse=False):\n    a = list(iterable)\n    a.sort(key=key, reverse=reverse)\n    return a\n\n##### str #####\ndef __format_string(self: str, *args, **kwargs) -> str:\n    def tokenizeString(s: str):\n        tokens = []\n        L, R = 0,0\n        \n        mode = None\n        curArg = 0\n        # lookingForKword = False\n        \n        while(R<len(s)):\n            curChar = s[R]\n            nextChar = s[R+1] if R+1<len(s) else ''\n            \n            # Invalid case 1: stray '}' encountered, example: \"ABCD EFGH {name} IJKL}\", \"Hello {vv}}\", \"HELLO {0} WORLD}\"\n            if curChar == '}' and nextChar != '}':\n                raise ValueError(\"Single '}' encountered in format string\")        \n            \n            # Valid Case 1: Escaping case, we escape \"{{ or \"}}\" to be \"{\" or \"}\", example: \"{{}}\", \"{{My Name is {0}}}\"\n            if (curChar == '{' and nextChar == '{') or (curChar == '}' and nextChar == '}'):\n                \n                if (L<R): # Valid Case 1.1: make sure we are not adding empty string\n                    tokens.append(s[L:R]) # add the string before the escape\n                \n                \n                tokens.append(curChar) # Valid Case 1.2: add the escape char\n                L = R+2 # move the left pointer to the next char\n                R = R+2 # move the right pointer to the next char\n                continue\n            \n            # Valid Case 2: Regular command line arg case: example:  \"ABCD EFGH {} IJKL\", \"{}\", \"HELLO {} WORLD\"\n            elif curChar == '{' and nextChar == '}':\n                if mode is not None and mode != 'auto':\n                    # Invalid case 2: mixing automatic and manual field specifications -- example: \"ABCD EFGH {name} IJKL {}\", \"Hello {vv} {}\", \"HELLO {0} WORLD {}\" \n                    raise ValueError(\"Cannot switch from manual field numbering to automatic field specification\")\n                \n                mode = 'auto'\n                if(L<R): # Valid Case 2.1: make sure we are not adding empty string\n                    tokens.append(s[L:R]) # add the string before the special marker for the arg\n                \n                tokens.append(\"{\"+str(curArg)+\"}\") # Valid Case 2.2: add the special marker for the arg\n                curArg+=1 # increment the arg position, this will be used for referencing the arg later\n                \n                L = R+2 # move the left pointer to the next char\n                R = R+2 # move the right pointer to the next char\n                continue\n            \n            # Valid Case 3: Key-word arg case: example: \"ABCD EFGH {name} IJKL\", \"Hello {vv}\", \"HELLO {name} WORLD\"\n            elif (curChar == '{'):\n                \n                if mode is not None and mode != 'manual':\n                    # # Invalid case 2: mixing automatic and manual field specifications -- example: \"ABCD EFGH {} IJKL {name}\", \"Hello {} {1}\", \"HELLO {} WORLD {name}\"\n                    raise ValueError(\"Cannot switch from automatic field specification to manual field numbering\")\n                \n                mode = 'manual'\n                \n                if(L<R): # Valid case 3.1: make sure we are not adding empty string\n                    tokens.append(s[L:R]) # add the string before the special marker for the arg\n                \n                # We look for the end of the keyword          \n                kwL = R # Keyword left pointer\n                kwR = R+1 # Keyword right pointer\n                while(kwR<len(s) and s[kwR]!='}'):\n                    if s[kwR] == '{': # Invalid case 3: stray '{' encountered, example: \"ABCD EFGH {n{ame} IJKL {\", \"Hello {vv{}}\", \"HELLO {0} WOR{LD}\"\n                        raise ValueError(\"Unexpected '{' in field name\")\n                    kwR += 1\n                \n                # Valid case 3.2: We have successfully found the end of the keyword\n                if kwR<len(s) and s[kwR] == '}':\n                    tokens.append(s[kwL:kwR+1]) # add the special marker for the arg\n                    L = kwR+1\n                    R = kwR+1\n                    \n                # Invalid case 4: We didn't find the end of the keyword, throw error\n                else:\n                    raise ValueError(\"Expected '}' before end of string\")\n                continue\n            \n            R = R+1\n        \n        \n        # Valid case 4: We have reached the end of the string, add the remaining string to the tokens \n        if L<R:\n            tokens.append(s[L:R])\n                \n        # print(tokens)\n        return tokens\n\n    tokens = tokenizeString(self)\n    argMap = {}\n    for i, a in enumerate(args):\n        argMap[str(i)] = a\n    final_tokens = []\n    for t in tokens:\n        if t[0] == '{' and t[-1] == '}':\n            key = t[1:-1]\n            argMapVal = argMap.get(key, None)\n            kwargsVal = kwargs.get(key, None)\n                                    \n            if argMapVal is None and kwargsVal is None:\n                raise ValueError(\"No arg found for token: \"+t)\n            elif argMapVal is not None:\n                final_tokens.append(str(argMapVal))\n            else:\n                final_tokens.append(str(kwargsVal))\n        else:\n            final_tokens.append(t)\n    \n    return ''.join(final_tokens)\n\nstr.format = __format_string\ndel __format_string\n\n\ndef help(obj):\n    if hasattr(obj, '__func__'):\n        obj = obj.__func__\n    # print(obj.__signature__)\n    if obj.__doc__:\n        print(obj.__doc__)\n\ndef complex(real, imag=0):\n    import cmath\n    return cmath.complex(real, imag)\n\n\nclass set:\n    def __init__(self, iterable=None):\n        iterable = iterable or []\n        self._a = {}\n        self.update(iterable)\n\n    def add(self, elem):\n        self._a[elem] = None\n        \n    def discard(self, elem):\n        self._a.pop(elem, None)\n\n    def remove(self, elem):\n        del self._a[elem]\n        \n    def clear(self):\n        self._a.clear()\n\n    def update(self, other):\n        for elem in other:\n            self.add(elem)\n\n    def __len__(self):\n        return len(self._a)\n    \n    def copy(self):\n        return set(self._a.keys())\n    \n    def __and__(self, other):\n        return {elem for elem in self if elem in other}\n\n    def __sub__(self, other):\n        return {elem for elem in self if elem not in other}\n    \n    def __or__(self, other):\n        ret = self.copy()\n        ret.update(other)\n        return ret\n\n    def __xor__(self, other): \n        _0 = self - other\n        _1 = other - self\n        return _0 | _1\n\n    def union(self, other):\n        return self | other\n\n    def intersection(self, other):\n        return self & other\n\n    def difference(self, other):\n        return self - other\n\n    def symmetric_difference(self, other):      \n        return self ^ other\n    \n    def __eq__(self, other):\n        if not isinstance(other, set):\n            return NotImplemented\n        return len(self ^ other) == 0\n    \n    def __ne__(self, other):\n        if not isinstance(other, set):\n            return NotImplemented\n        return len(self ^ other) != 0\n\n    def isdisjoint(self, other):\n        return len(self & other) == 0\n    \n    def issubset(self, other):\n        return len(self - other) == 0\n    \n    def issuperset(self, other):\n        return len(other - self) == 0\n\n    def __contains__(self, elem):\n        return elem in self._a\n    \n    def __repr__(self):\n        if len(self) == 0:\n            return 'set()'\n        return '{'+ ', '.join([repr(i) for i in self._a.keys()]) + '}'\n    \n    def __iter__(self):\n        return iter(self._a.keys())";
+const char kPythonLibs_builtins[] = "def all(iterable):\n    for i in iterable:\n        if not i:\n            return False\n    return True\n\ndef any(iterable):\n    for i in iterable:\n        if i:\n            return True\n    return False\n\ndef enumerate(iterable, start=0):\n    n = start\n    for elem in iterable:\n        yield n, elem\n        n += 1\n\ndef __minmax_reduce(op, args):\n    if len(args) == 2:  # min(1, 2)\n        return args[0] if op(args[0], args[1]) else args[1]\n    if len(args) == 0:  # min()\n        raise TypeError('expected 1 arguments, got 0')\n    if len(args) == 1:  # min([1, 2, 3, 4]) -> min(1, 2, 3, 4)\n        args = args[0]\n    args = iter(args)\n    try:\n        res = next(args)\n    except StopIteration:\n        raise ValueError('args is an empty sequence')\n    while True:\n        try:\n            i = next(args)\n        except StopIteration:\n            break\n        if op(i, res):\n            res = i\n    return res\n\ndef min(*args, key=None):\n    key = key or (lambda x: x)\n    return __minmax_reduce(lambda x,y: key(x)<key(y), args)\n\ndef max(*args, key=None):\n    key = key or (lambda x: x)\n    return __minmax_reduce(lambda x,y: key(x)>key(y), args)\n\ndef sum(iterable):\n    res = 0\n    for i in iterable:\n        res += i\n    return res\n\ndef map(f, iterable):\n    for i in iterable:\n        yield f(i)\n\ndef filter(f, iterable):\n    for i in iterable:\n        if f(i):\n            yield i\n\ndef zip(a, b):\n    a = iter(a)\n    b = iter(b)\n    while True:\n        try:\n            ai = next(a)\n            bi = next(b)\n        except StopIteration:\n            break\n        yield ai, bi\n\ndef reversed(iterable):\n    a = list(iterable)\n    a.reverse()\n    return a\n\ndef sorted(iterable, key=None, reverse=False):\n    a = list(iterable)\n    a.sort(key=key, reverse=reverse)\n    return a\n\ndef dir(obj=None):\n    \"\"\"\n    dir([object]) -> list of strings\n    \n    If called without an argument, return the names in the current scope.\n    Else, return an alphabetized list of names comprising (some of) the attributes\n    of the given object, and of attributes reachable from it.\n    If the object supplies a method named __dir__, it will be used; otherwise\n    the default dir() logic is used and returns:\n      for a module object: the module's attributes.\n      for a class object: its attributes.\n      for any other object: its attributes, its class's attributes.\n    \"\"\"\n    \n    if obj is None:\n        return list(globals().keys())\n    \n    if hasattr(obj, \"__dir__\"):\n        return obj.__dir__\n    \n    attributes = set()\n    # Set object attributes.\n    if hasattr(obj, \"__dict__\"):\n        attributes.update(obj.__dict__.keys())\n    \n    # Set type attributes.\n    if not isinstance(obj, type):\n        if hasattr(type(obj), \"__dict__\"):\n            attributes.update(type(obj).__dict__.keys())\n    \n    return sorted(attributes)\n\n\n##### str #####\ndef __format_string(self: str, *args, **kwargs) -> str:\n    def tokenizeString(s: str):\n        tokens = []\n        L, R = 0,0\n        \n        mode = None\n        curArg = 0\n        # lookingForKword = False\n        \n        while(R<len(s)):\n            curChar = s[R]\n            nextChar = s[R+1] if R+1<len(s) else ''\n            \n            # Invalid case 1: stray '}' encountered, example: \"ABCD EFGH {name} IJKL}\", \"Hello {vv}}\", \"HELLO {0} WORLD}\"\n            if curChar == '}' and nextChar != '}':\n                raise ValueError(\"Single '}' encountered in format string\")        \n            \n            # Valid Case 1: Escaping case, we escape \"{{ or \"}}\" to be \"{\" or \"}\", example: \"{{}}\", \"{{My Name is {0}}}\"\n            if (curChar == '{' and nextChar == '{') or (curChar == '}' and nextChar == '}'):\n                \n                if (L<R): # Valid Case 1.1: make sure we are not adding empty string\n                    tokens.append(s[L:R]) # add the string before the escape\n                \n                \n                tokens.append(curChar) # Valid Case 1.2: add the escape char\n                L = R+2 # move the left pointer to the next char\n                R = R+2 # move the right pointer to the next char\n                continue\n            \n            # Valid Case 2: Regular command line arg case: example:  \"ABCD EFGH {} IJKL\", \"{}\", \"HELLO {} WORLD\"\n            elif curChar == '{' and nextChar == '}':\n                if mode is not None and mode != 'auto':\n                    # Invalid case 2: mixing automatic and manual field specifications -- example: \"ABCD EFGH {name} IJKL {}\", \"Hello {vv} {}\", \"HELLO {0} WORLD {}\" \n                    raise ValueError(\"Cannot switch from manual field numbering to automatic field specification\")\n                \n                mode = 'auto'\n                if(L<R): # Valid Case 2.1: make sure we are not adding empty string\n                    tokens.append(s[L:R]) # add the string before the special marker for the arg\n                \n                tokens.append(\"{\"+str(curArg)+\"}\") # Valid Case 2.2: add the special marker for the arg\n                curArg+=1 # increment the arg position, this will be used for referencing the arg later\n                \n                L = R+2 # move the left pointer to the next char\n                R = R+2 # move the right pointer to the next char\n                continue\n            \n            # Valid Case 3: Key-word arg case: example: \"ABCD EFGH {name} IJKL\", \"Hello {vv}\", \"HELLO {name} WORLD\"\n            elif (curChar == '{'):\n                \n                if mode is not None and mode != 'manual':\n                    # # Invalid case 2: mixing automatic and manual field specifications -- example: \"ABCD EFGH {} IJKL {name}\", \"Hello {} {1}\", \"HELLO {} WORLD {name}\"\n                    raise ValueError(\"Cannot switch from automatic field specification to manual field numbering\")\n                \n                mode = 'manual'\n                \n                if(L<R): # Valid case 3.1: make sure we are not adding empty string\n                    tokens.append(s[L:R]) # add the string before the special marker for the arg\n                \n                # We look for the end of the keyword          \n                kwL = R # Keyword left pointer\n                kwR = R+1 # Keyword right pointer\n                while(kwR<len(s) and s[kwR]!='}'):\n                    if s[kwR] == '{': # Invalid case 3: stray '{' encountered, example: \"ABCD EFGH {n{ame} IJKL {\", \"Hello {vv{}}\", \"HELLO {0} WOR{LD}\"\n                        raise ValueError(\"Unexpected '{' in field name\")\n                    kwR += 1\n                \n                # Valid case 3.2: We have successfully found the end of the keyword\n                if kwR<len(s) and s[kwR] == '}':\n                    tokens.append(s[kwL:kwR+1]) # add the special marker for the arg\n                    L = kwR+1\n                    R = kwR+1\n                    \n                # Invalid case 4: We didn't find the end of the keyword, throw error\n                else:\n                    raise ValueError(\"Expected '}' before end of string\")\n                continue\n            \n            R = R+1\n        \n        \n        # Valid case 4: We have reached the end of the string, add the remaining string to the tokens \n        if L<R:\n            tokens.append(s[L:R])\n                \n        # print(tokens)\n        return tokens\n\n    tokens = tokenizeString(self)\n    argMap = {}\n    for i, a in enumerate(args):\n        argMap[str(i)] = a\n    final_tokens = []\n    for t in tokens:\n        if t[0] == '{' and t[-1] == '}':\n            key = t[1:-1]\n            argMapVal = argMap.get(key, None)\n            kwargsVal = kwargs.get(key, None)\n                                    \n            if argMapVal is None and kwargsVal is None:\n                raise ValueError(\"No arg found for token: \"+t)\n            elif argMapVal is not None:\n                final_tokens.append(str(argMapVal))\n            else:\n                final_tokens.append(str(kwargsVal))\n        else:\n            final_tokens.append(t)\n    \n    return ''.join(final_tokens)\n\nstr.format = __format_string\ndel __format_string\n\n\ndef help(obj):\n    if hasattr(obj, '__func__'):\n        obj = obj.__func__\n    # print(obj.__signature__)\n    if obj.__doc__:\n        print(obj.__doc__)\n\ndef complex(real, imag=0):\n    import cmath\n    return cmath.complex(real, imag)\n\n\nclass set:\n    def __init__(self, iterable=None):\n        iterable = iterable or []\n        self._a = {}\n        self.update(iterable)\n\n    def add(self, elem):\n        self._a[elem] = None\n        \n    def discard(self, elem):\n        self._a.pop(elem, None)\n\n    def remove(self, elem):\n        del self._a[elem]\n        \n    def clear(self):\n        self._a.clear()\n\n    def update(self, other):\n        for elem in other:\n            self.add(elem)\n\n    def __len__(self):\n        return len(self._a)\n    \n    def copy(self):\n        return set(self._a.keys())\n    \n    def __and__(self, other):\n        return {elem for elem in self if elem in other}\n\n    def __sub__(self, other):\n        return {elem for elem in self if elem not in other}\n    \n    def __or__(self, other):\n        ret = self.copy()\n        ret.update(other)\n        return ret\n\n    def __xor__(self, other): \n        _0 = self - other\n        _1 = other - self\n        return _0 | _1\n\n    def union(self, other):\n        return self | other\n\n    def intersection(self, other):\n        return self & other\n\n    def difference(self, other):\n        return self - other\n\n    def symmetric_difference(self, other):      \n        return self ^ other\n    \n    def __eq__(self, other):\n        if not isinstance(other, set):\n            return NotImplemented\n        return len(self ^ other) == 0\n    \n    def __ne__(self, other):\n        if not isinstance(other, set):\n            return NotImplemented\n        return len(self ^ other) != 0\n\n    def isdisjoint(self, other):\n        return len(self & other) == 0\n    \n    def issubset(self, other):\n        return len(self - other) == 0\n    \n    def issuperset(self, other):\n        return len(other - self) == 0\n\n    def __contains__(self, elem):\n        return elem in self._a\n    \n    def __repr__(self):\n        if len(self) == 0:\n            return 'set()'\n        return '{'+ ', '.join([repr(i) for i in self._a.keys()]) + '}'\n    \n    def __iter__(self):\n        return iter(self._a.keys())";
 const char kPythonLibs_cmath[] = "import math\n\nclass complex:\n    def __init__(self, real, imag=0):\n        self._real = float(real)\n        self._imag = float(imag)\n\n    @property\n    def real(self):\n        return self._real\n    \n    @property\n    def imag(self):\n        return self._imag\n\n    def conjugate(self):\n        return complex(self.real, -self.imag)\n    \n    def __repr__(self):\n        s = ['(', str(self.real)]\n        s.append('-' if self.imag < 0 else '+')\n        s.append(str(abs(self.imag)))\n        s.append('j)')\n        return ''.join(s)\n    \n    def __eq__(self, other):\n        if type(other) is complex:\n            return self.real == other.real and self.imag == other.imag\n        if type(other) in (int, float):\n            return self.real == other and self.imag == 0\n        return NotImplemented\n    \n    def __ne__(self, other):\n        res = self == other\n        if res is NotImplemented:\n            return res\n        return not res\n    \n    def __add__(self, other):\n        if type(other) is complex:\n            return complex(self.real + other.real, self.imag + other.imag)\n        if type(other) in (int, float):\n            return complex(self.real + other, self.imag)\n        return NotImplemented\n        \n    def __radd__(self, other):\n        return self.__add__(other)\n    \n    def __sub__(self, other):\n        if type(other) is complex:\n            return complex(self.real - other.real, self.imag - other.imag)\n        if type(other) in (int, float):\n            return complex(self.real - other, self.imag)\n        return NotImplemented\n    \n    def __rsub__(self, other):\n        if type(other) is complex:\n            return complex(other.real - self.real, other.imag - self.imag)\n        if type(other) in (int, float):\n            return complex(other - self.real, -self.imag)\n        return NotImplemented\n    \n    def __mul__(self, other):\n        if type(other) is complex:\n            return complex(self.real * other.real - self.imag * other.imag,\n                           self.real * other.imag + self.imag * other.real)\n        if type(other) in (int, float):\n            return complex(self.real * other, self.imag * other)\n        return NotImplemented\n    \n    def __rmul__(self, other):\n        return self.__mul__(other)\n    \n    def __truediv__(self, other):\n        if type(other) is complex:\n            denominator = other.real ** 2 + other.imag ** 2\n            real_part = (self.real * other.real + self.imag * other.imag) / denominator\n            imag_part = (self.imag * other.real - self.real * other.imag) / denominator\n            return complex(real_part, imag_part)\n        if type(other) in (int, float):\n            return complex(self.real / other, self.imag / other)\n        return NotImplemented\n    \n    def __pow__(self, other: int | float):\n        if type(other) in (int, float):\n            return complex(self.__abs__() ** other * math.cos(other * phase(self)),\n                           self.__abs__() ** other * math.sin(other * phase(self)))\n        return NotImplemented\n    \n    def __abs__(self) -> float:\n        return math.sqrt(self.real ** 2 + self.imag ** 2)\n\n    def __neg__(self):\n        return complex(-self.real, -self.imag)\n    \n    def __hash__(self):\n        return hash((self.real, self.imag))\n\n\n# Conversions to and from polar coordinates\n\ndef phase(z: complex):\n    return math.atan2(z.imag, z.real)\n\ndef polar(z: complex):\n    return z.__abs__(), phase(z)\n\ndef rect(r: float, phi: float):\n    return r * math.cos(phi) + r * math.sin(phi) * 1j\n\n# Power and logarithmic functions\n\ndef exp(z: complex):\n    return math.exp(z.real) * rect(1, z.imag)\n\ndef log(z: complex, base=2.718281828459045):\n    return math.log(z.__abs__(), base) + phase(z) * 1j\n\ndef log10(z: complex):\n    return log(z, 10)\n\ndef sqrt(z: complex):\n    return z ** 0.5\n\n# Trigonometric functions\n\ndef acos(z: complex):\n    return -1j * log(z + sqrt(z * z - 1))\n\ndef asin(z: complex):\n    return -1j * log(1j * z + sqrt(1 - z * z))\n\ndef atan(z: complex):\n    return 1j / 2 * log((1 - 1j * z) / (1 + 1j * z))\n\ndef cos(z: complex):\n    return (exp(z) + exp(-z)) / 2\n\ndef sin(z: complex):\n    return (exp(z) - exp(-z)) / (2 * 1j)\n\ndef tan(z: complex):\n    return sin(z) / cos(z)\n\n# Hyperbolic functions\n\ndef acosh(z: complex):\n    return log(z + sqrt(z * z - 1))\n\ndef asinh(z: complex):\n    return log(z + sqrt(z * z + 1))\n\ndef atanh(z: complex):\n    return 1 / 2 * log((1 + z) / (1 - z))\n\ndef cosh(z: complex):\n    return (exp(z) + exp(-z)) / 2\n\ndef sinh(z: complex):\n    return (exp(z) - exp(-z)) / 2\n\ndef tanh(z: complex):\n    return sinh(z) / cosh(z)\n\n# Classification functions\n\ndef isfinite(z: complex):\n    return math.isfinite(z.real) and math.isfinite(z.imag)\n\ndef isinf(z: complex):\n    return math.isinf(z.real) or math.isinf(z.imag)\n\ndef isnan(z: complex):\n    return math.isnan(z.real) or math.isnan(z.imag)\n\ndef isclose(a: complex, b: complex):\n    return math.isclose(a.real, b.real) and math.isclose(a.imag, b.imag)\n\n# Constants\n\npi = math.pi\ne = math.e\ntau = 2 * pi\ninf = math.inf\ninfj = complex(0, inf)\nnan = math.nan\nnanj = complex(0, nan)\n";
 const char kPythonLibs_collections[] = "from typing import TypeVar, Iterable\n\ndef Counter[T](iterable: Iterable[T]):\n    a: dict[T, int] = {}\n    for x in iterable:\n        if x in a:\n            a[x] += 1\n        else:\n            a[x] = 1\n    return a\n\n\nclass defaultdict(dict):\n    def __init__(self, default_factory, *args):\n        super().__init__(*args)\n        self.default_factory = default_factory\n\n    def __missing__(self, key):\n        self[key] = self.default_factory()\n        return self[key]\n\n    def __repr__(self) -> str:\n        return f\"defaultdict({self.default_factory}, {super().__repr__()})\"\n\n    def copy(self):\n        return defaultdict(self.default_factory, self)\n\n\nclass deque[T]:\n    _data: list[T]\n    _head: int\n    _tail: int\n    _capacity: int\n\n    def __init__(self, iterable: Iterable[T] = None):\n        self._data = [None] * 8 # type: ignore\n        self._head = 0\n        self._tail = 0\n        self._capacity = len(self._data)\n\n        if iterable is not None:\n            self.extend(iterable)\n\n    def __resize_2x(self):\n        backup = list(self)\n        self._capacity *= 2\n        self._head = 0\n        self._tail = len(backup)\n        self._data.clear()\n        self._data.extend(backup)\n        self._data.extend([None] * (self._capacity - len(backup)))\n\n    def append(self, x: T):\n        self._data[self._tail] = x\n        self._tail = (self._tail + 1) % self._capacity\n        if (self._tail + 1) % self._capacity == self._head:\n            self.__resize_2x()\n\n    def appendleft(self, x: T):\n        self._head = (self._head - 1) % self._capacity\n        self._data[self._head] = x\n        if (self._tail + 1) % self._capacity == self._head:\n            self.__resize_2x()\n\n    def copy(self):\n        return deque(self)\n    \n    def count(self, x: T) -> int:\n        n = 0\n        for item in self:\n            if item == x:\n                n += 1\n        return n\n    \n    def extend(self, iterable: Iterable[T]):\n        for x in iterable:\n            self.append(x)\n\n    def extendleft(self, iterable: Iterable[T]):\n        for x in iterable:\n            self.appendleft(x)\n    \n    def pop(self) -> T:\n        if self._head == self._tail:\n            raise IndexError(\"pop from an empty deque\")\n        self._tail = (self._tail - 1) % self._capacity\n        return self._data[self._tail]\n    \n    def popleft(self) -> T:\n        if self._head == self._tail:\n            raise IndexError(\"pop from an empty deque\")\n        x = self._data[self._head]\n        self._head = (self._head + 1) % self._capacity\n        return x\n    \n    def clear(self):\n        i = self._head\n        while i != self._tail:\n            self._data[i] = None # type: ignore\n            i = (i + 1) % self._capacity\n        self._head = 0\n        self._tail = 0\n\n    def rotate(self, n: int = 1):\n        if len(self) == 0:\n            return\n        if n > 0:\n            n = n % len(self)\n            for _ in range(n):\n                self.appendleft(self.pop())\n        elif n < 0:\n            n = -n % len(self)\n            for _ in range(n):\n                self.append(self.popleft())\n\n    def __len__(self) -> int:\n        return (self._tail - self._head) % self._capacity\n\n    def __contains__(self, x: object) -> bool:\n        for item in self:\n            if item == x:\n                return True\n        return False\n    \n    def __iter__(self):\n        i = self._head\n        while i != self._tail:\n            yield self._data[i]\n            i = (i + 1) % self._capacity\n\n    def __eq__(self, other: object) -> bool:\n        if not isinstance(other, deque):\n            return NotImplemented\n        if len(self) != len(other):\n            return False\n        for x, y in zip(self, other):\n            if x != y:\n                return False\n        return True\n    \n    def __ne__(self, other: object) -> bool:\n        if not isinstance(other, deque):\n            return NotImplemented\n        return not self == other\n    \n    def __repr__(self) -> str:\n        return f\"deque({list(self)!r})\"\n\n";
 const char kPythonLibs_dataclasses[] = "def _get_annotations(cls: type):\n    inherits = []\n    while cls is not object:\n        inherits.append(cls)\n        cls = cls.__base__\n    inherits.reverse()\n    res = {}\n    for cls in inherits:\n        res.update(cls.__annotations__)\n    return res.keys()\n\ndef _wrapped__init__(self, *args, **kwargs):\n    cls = type(self)\n    cls_d = cls.__dict__\n    fields = _get_annotations(cls)\n    i = 0   # index into args\n    for field in fields:\n        if field in kwargs:\n            setattr(self, field, kwargs.pop(field))\n        else:\n            if i < len(args):\n                setattr(self, field, args[i])\n                i += 1\n            elif field in cls_d:    # has default value\n                setattr(self, field, cls_d[field])\n            else:\n                raise TypeError(f\"{cls.__name__} missing required argument {field!r}\")\n    if len(args) > i:\n        raise TypeError(f\"{cls.__name__} takes {len(fields)} positional arguments but {len(args)} were given\")\n    if len(kwargs) > 0:\n        raise TypeError(f\"{cls.__name__} got an unexpected keyword argument {next(iter(kwargs))!r}\")\n\ndef _wrapped__repr__(self):\n    fields = _get_annotations(type(self))\n    obj_d = self.__dict__\n    args: list = [f\"{field}={obj_d[field]!r}\" for field in fields]\n    return f\"{type(self).__name__}({', '.join(args)})\"\n\ndef _wrapped__eq__(self, other):\n    if type(self) is not type(other):\n        return False\n    fields = _get_annotations(type(self))\n    for field in fields:\n        if getattr(self, field) != getattr(other, field):\n            return False\n    return True\n\ndef _wrapped__ne__(self, other):\n    return not self.__eq__(other)\n\ndef dataclass(cls: type):\n    assert type(cls) is type\n    cls_d = cls.__dict__\n    if '__init__' not in cls_d:\n        cls.__init__ = _wrapped__init__\n    if '__repr__' not in cls_d:\n        cls.__repr__ = _wrapped__repr__\n    if '__eq__' not in cls_d:\n        cls.__eq__ = _wrapped__eq__\n    if '__ne__' not in cls_d:\n        cls.__ne__ = _wrapped__ne__\n    fields = _get_annotations(cls)\n    has_default = False\n    for field in fields:\n        if field in cls_d:\n            has_default = True\n        else:\n            if has_default:\n                raise TypeError(f\"non-default argument {field!r} follows default argument\")\n    return cls\n\ndef asdict(obj) -> dict:\n    fields = _get_annotations(type(obj))\n    obj_d = obj.__dict__\n    return {field: obj_d[field] for field in fields}";
@@ -4754,6 +5018,12 @@ void* c11_vector__submit(c11_vector* self, int* length) {
     self->length = 0;
     self->capacity = 0;
     return retval;
+}
+
+void c11_vector__swap(c11_vector *self, c11_vector *other){
+    c11_vector tmp = *self;
+    *self = *other;
+    *other = tmp;
 }
 
 // src/common/str.c
@@ -5163,196 +5433,9 @@ IntParsingResult c11__parse_uint(c11_sv text, int64_t* out, int base) {
 }
 // src/common/memorypool.c
 #include <stdlib.h>
-#include <string.h>
-#include <assert.h>
-#include <stdio.h>
 #include <stdbool.h>
 
-typedef struct LinkedListNode {
-    struct LinkedListNode* prev;
-    struct LinkedListNode* next;
-} LinkedListNode;
-
-typedef struct LinkedList {
-    int length;
-    LinkedListNode head;
-    LinkedListNode tail;
-} LinkedList;
-
-static void LinkedList__ctor(LinkedList* self) {
-    self->length = 0;
-    self->head.prev = NULL;
-    self->head.next = &self->tail;
-    self->tail.prev = &self->head;
-    self->tail.next = NULL;
-}
-
-static void LinkedList__push_back(LinkedList* self, LinkedListNode* node) {
-    node->prev = self->tail.prev;
-    node->next = &self->tail;
-    self->tail.prev->next = node;
-    self->tail.prev = node;
-    self->length++;
-}
-
-static void LinkedList__push_front(LinkedList* self, LinkedListNode* node) {
-    node->prev = &self->head;
-    node->next = self->head.next;
-    self->head.next->prev = node;
-    self->head.next = node;
-    self->length++;
-}
-
-static void LinkedList__pop_back(LinkedList* self) {
-    assert(self->length > 0);
-    self->tail.prev->prev->next = &self->tail;
-    self->tail.prev = self->tail.prev->prev;
-    self->length--;
-}
-
-static LinkedListNode* LinkedList__back(LinkedList* self) {
-    assert(self->length > 0);
-    return self->tail.prev;
-}
-
-static void LinkedList__erase(LinkedList* self, LinkedListNode* node) {
-    node->prev->next = node->next;
-    node->next->prev = node->prev;
-    self->length--;
-}
-
-#define LinkedList__apply(self, __STATEMENTS__) \
-    do { \
-        LinkedListNode* node = (self)->head.next; \
-        while(node != &(self)->tail) { \
-            LinkedListNode* next = node->next; \
-            __STATEMENTS__ \
-            node = next; \
-        } \
-    } while(0)
-
-typedef struct MemoryPoolBlock{
-    void* arena;
-    char data[kPoolObjectBlockSize];
-} MemoryPoolBlock;
-
-typedef struct MemoryPoolArena{
-    /* LinkedListNode */
-    LinkedListNode* prev;
-    LinkedListNode* next;
-    /* Arena */
-    MemoryPoolBlock _blocks[kPoolObjectMaxBlocks];
-    MemoryPoolBlock* _free_list[kPoolObjectMaxBlocks];
-    int _free_list_size;
-} MemoryPoolArena;
-
-typedef struct MemoryPool{
-    LinkedList _arenas;
-    LinkedList _empty_arenas;
-} MemoryPool;
-
-static void MemoryPoolArena__ctor(MemoryPoolArena* self) {
-    self->prev = NULL;
-    self->next = NULL;
-    self->_free_list_size = kPoolObjectMaxBlocks;
-    for(int i = 0; i < kPoolObjectMaxBlocks; i++) {
-        self->_blocks[i].arena = self;
-        self->_free_list[i] = &self->_blocks[i];
-    }
-}
-
-static bool MemoryPoolArena__empty(MemoryPoolArena* self) {
-    return self->_free_list_size == 0;
-}
-
-static bool MemoryPoolArena__full(MemoryPoolArena* self) {
-    return self->_free_list_size == kPoolObjectMaxBlocks;
-}
-
-static int MemoryPoolArena__total_bytes(MemoryPoolArena* self) {
-    return kPoolObjectArenaSize;
-}
-
-static int MemoryPoolArena__used_bytes(MemoryPoolArena* self) {
-    return kPoolObjectBlockSize * (kPoolObjectMaxBlocks - self->_free_list_size);
-}
-
-static MemoryPoolBlock* MemoryPoolArena__alloc(MemoryPoolArena* self) {
-    assert(!MemoryPoolArena__empty(self));
-    self->_free_list_size--;
-    return self->_free_list[self->_free_list_size];
-}
-
-static void MemoryPoolArena__dealloc(MemoryPoolArena* self, MemoryPoolBlock* block) {
-    assert(!MemoryPoolArena__full(self));
-    self->_free_list[self->_free_list_size] = block;
-    self->_free_list_size++;
-}
-
-static void MemoryPool__ctor(MemoryPool* self) {
-    LinkedList__ctor(&self->_arenas);
-    LinkedList__ctor(&self->_empty_arenas);
-}
-
-static void* MemoryPool__alloc(MemoryPool* self) {
-    MemoryPoolArena* arena;
-    if(self->_arenas.length == 0){
-        arena = PK_MALLOC(sizeof(MemoryPoolArena));
-        MemoryPoolArena__ctor(arena);
-        LinkedList__push_back(&self->_arenas, (LinkedListNode*)arena);
-    } else {
-        arena = (MemoryPoolArena*)LinkedList__back(&self->_arenas);
-    }
-    void* p = MemoryPoolArena__alloc(arena)->data;
-    if(MemoryPoolArena__empty(arena)) {
-        LinkedList__pop_back(&self->_arenas);
-        LinkedList__push_back(&self->_empty_arenas, (LinkedListNode*)arena);
-    }
-    return p;
-}
-
-static void MemoryPool__dealloc(MemoryPool* self, void* p) {
-    assert(p != NULL);
-    MemoryPoolBlock* block = (MemoryPoolBlock*)((char*)p - sizeof(void*));
-    assert(block->arena != NULL);
-    MemoryPoolArena* arena = (MemoryPoolArena*)block->arena;
-    if(MemoryPoolArena__empty(arena)) {
-        LinkedList__erase(&self->_empty_arenas, (LinkedListNode*)arena);
-        LinkedList__push_front(&self->_arenas, (LinkedListNode*)arena);
-    }
-    MemoryPoolArena__dealloc(arena, block);
-}
-
-static void MemoryPool__shrink_to_fit(MemoryPool* self) {
-    const int MIN_ARENA_COUNT = PK_GC_MIN_THRESHOLD * 100 / (kPoolObjectArenaSize);
-    if(self->_arenas.length < MIN_ARENA_COUNT) return;
-    LinkedList__apply(&self->_arenas,
-            MemoryPoolArena* arena = (MemoryPoolArena*)node;
-            if(MemoryPoolArena__full(arena)) {
-                LinkedList__erase(&self->_arenas, node);
-                PK_FREE(arena);
-            });
-}
-
-
-static void MemoryPool__dtor(MemoryPool* self) {
-    LinkedList__apply(&self->_arenas, PK_FREE(node););
-    LinkedList__apply(&self->_empty_arenas, PK_FREE(node););
-}
-
-typedef struct FixedMemoryPool {
-    int BlockSize;
-    int BlockCount;
-
-    char* data;
-    char* data_end;
-    int exceeded_bytes;
-
-    char** _free_list;
-    char** _free_list_end;
-} FixedMemoryPool;
-
-static void FixedMemoryPool__ctor(FixedMemoryPool* self, int BlockSize, int BlockCount) {
+void FixedMemoryPool__ctor(FixedMemoryPool* self, int BlockSize, int BlockCount) {
     self->BlockSize = BlockSize;
     self->BlockCount = BlockCount;
     self->exceeded_bytes = 0;
@@ -5365,12 +5448,12 @@ static void FixedMemoryPool__ctor(FixedMemoryPool* self, int BlockSize, int Bloc
     }
 }
 
-static void FixedMemoryPool__dtor(FixedMemoryPool* self) {
+void FixedMemoryPool__dtor(FixedMemoryPool* self) {
     PK_FREE(self->_free_list);
     PK_FREE(self->data);
 }
 
-static void* FixedMemoryPool__alloc(FixedMemoryPool* self) {
+void* FixedMemoryPool__alloc(FixedMemoryPool* self) {
     if(self->_free_list_end != self->_free_list) {
         self->_free_list_end--;
         return *self->_free_list_end;
@@ -5380,7 +5463,7 @@ static void* FixedMemoryPool__alloc(FixedMemoryPool* self) {
     }
 }
 
-static void FixedMemoryPool__dealloc(FixedMemoryPool* self, void* p) {
+void FixedMemoryPool__dealloc(FixedMemoryPool* self, void* p) {
     bool is_valid = (char*)p >= self->data && (char*)p < self->data_end;
     if(is_valid) {
         *self->_free_list_end = p;
@@ -5391,99 +5474,13 @@ static void FixedMemoryPool__dealloc(FixedMemoryPool* self, void* p) {
     }
 }
 
-static int FixedMemoryPool__used_bytes(FixedMemoryPool* self) {
-    return (self->_free_list_end - self->_free_list) * self->BlockSize;
-}
+// static int FixedMemoryPool__used_bytes(FixedMemoryPool* self) {
+//     return (self->_free_list_end - self->_free_list) * self->BlockSize;
+// }
 
-static int FixedMemoryPool__total_bytes(FixedMemoryPool* self) {
-    return self->BlockCount * self->BlockSize;
-}
-
-static FixedMemoryPool PoolExpr;
-static FixedMemoryPool PoolFrame;
-static MemoryPool PoolObject;
-
-void MemoryPools__initialize(){
-    FixedMemoryPool__ctor(&PoolExpr, kPoolExprBlockSize, 64);
-    FixedMemoryPool__ctor(&PoolFrame, kPoolFrameBlockSize, 128);
-    MemoryPool__ctor(&PoolObject);
-}
-
-void MemoryPools__finalize(){
-    FixedMemoryPool__dtor(&PoolExpr);
-    FixedMemoryPool__dtor(&PoolFrame);
-    MemoryPool__dtor(&PoolObject);
-}
-
-void* PoolExpr_alloc() {
-    return FixedMemoryPool__alloc(&PoolExpr);
-}
-
-void PoolExpr_dealloc(void* p) {
-    FixedMemoryPool__dealloc(&PoolExpr, p);
-}
-
-void* PoolFrame_alloc() {
-    return FixedMemoryPool__alloc(&PoolFrame);
-}
-
-void PoolFrame_dealloc(void* p) {
-    FixedMemoryPool__dealloc(&PoolFrame, p);
-}
-
-void* PoolObject_alloc() {
-    return MemoryPool__alloc(&PoolObject);
-}
-
-void PoolObject_dealloc(void* p) {
-    MemoryPool__dealloc(&PoolObject, p);
-}
-
-void PoolObject_shrink_to_fit() {
-    MemoryPool__shrink_to_fit(&PoolObject);
-}
-
-void Pools_debug_info(char* buffer, int size) {
-    double BYTES_PER_MB = 1024.0f * 1024.0f;
-    double BYTES_PER_KB = 1024.0f;
-    int n = 0;
-    n = snprintf(
-        buffer, size,  "PoolExpr: %.2f KB (used) / %.2f KB (total) - %.2f KB (exceeded)\n",
-        FixedMemoryPool__used_bytes(&PoolExpr) / BYTES_PER_KB,
-        FixedMemoryPool__total_bytes(&PoolExpr) / BYTES_PER_KB,
-        PoolExpr.exceeded_bytes / BYTES_PER_KB
-    );
-    buffer += n; size -= n;
-    n = snprintf(
-        buffer, size, "PoolFrame: %.2f KB (used) / %.2f KB (total) - %.2f KB (exceeded)\n",
-        FixedMemoryPool__used_bytes(&PoolFrame) / BYTES_PER_KB,
-        FixedMemoryPool__total_bytes(&PoolFrame) / BYTES_PER_KB,
-        PoolFrame.exceeded_bytes / BYTES_PER_KB
-    );
-    buffer += n; size -= n;
-    // PoolObject
-    int empty_arenas = PoolObject._empty_arenas.length;
-    int arenas = PoolObject._arenas.length;
-    // print empty arenas count
-    n = snprintf(
-        buffer, size, "PoolObject: %d empty arenas, %d arenas\n",
-        empty_arenas, arenas
-    );
-    buffer += n; size -= n;
-    // log each non-empty arena
-    LinkedList__apply(&PoolObject._arenas,
-        MemoryPoolArena* arena = (MemoryPoolArena*)node;
-        n = snprintf(
-            buffer, size, "  - %p: %.2f MB (used) / %.2f MB (total)\n",
-            (void*)arena,
-            MemoryPoolArena__used_bytes(arena) / BYTES_PER_MB,
-            MemoryPoolArena__total_bytes(arena) / BYTES_PER_MB
-        );
-        buffer += n; size -= n;
-    );
-}
-
-#undef LinkedList__apply
+// static int FixedMemoryPool__total_bytes(FixedMemoryPool* self) {
+//     return self->BlockCount * self->BlockSize;
+// }
 // src/common/smallmap.c
 #define SMALLMAP_T__SOURCE
 #define K uint16_t
@@ -6146,47 +6143,6 @@ void pk_sprintf(c11_sbuf* ss, const char* fmt, ...) {
     va_end(args);
 }
 
-int py_replinput(char* buf, int max_size) {
-    buf[0] = '\0';  // reset first char because we check '@' at the beginning
-
-    int size = 0;
-    bool multiline = false;
-    printf(">>> ");
-
-    while(true) {
-        char c = getchar();
-        if(c == EOF) return -1;
-
-        if(c == '\n') {
-            char last = '\0';
-            if(size > 0) last = buf[size - 1];
-            if(multiline) {
-                if(last == '\n') {
-                    break;  // 2 consecutive newlines to end multiline input
-                } else {
-                    printf("... ");
-                }
-            } else {
-                if(last == ':' || last == '(' || last == '[' || last == '{' || buf[0] == '@') {
-                    printf("... ");
-                    multiline = true;
-                } else {
-                    break;
-                }
-            }
-        }
-
-        if(size == max_size - 1) {
-            buf[size] = '\0';
-            return size;
-        }
-
-        buf[size++] = c;
-    }
-
-    buf[size] = '\0';
-    return size;
-}
 // src/common/algorithm.c
 #include <string.h>
 #include <stdlib.h>
@@ -6793,13 +6749,13 @@ static bool builtins_input(int argc, py_Ref argv) {
         if(!py_checkstr(argv)) return false;
         prompt = py_tostr(argv);
     }
-    printf("%s", prompt);
+    pk_current_vm->callbacks.print(prompt);
 
     c11_sbuf buf;
     c11_sbuf__ctor(&buf);
     while(true) {
-        int c = getchar();
-        if(c == '\n') break;
+        int c = pk_current_vm->callbacks.getchar();
+        if(c == '\n' || c == '\r') break;
         if(c == EOF) break;
         c11_sbuf__write_char(&buf, c);
     }
@@ -7045,8 +7001,7 @@ static bool builtins_chr(int argc, py_Ref argv) {
     PY_CHECK_ARG_TYPE(0, tp_int);
     py_i64 val = py_toint(py_arg(0));
     if(val < 0 || val > 128) { return ValueError("chr() arg not in range(128)"); }
-    char* data = py_newstrn(py_retval(), 1);
-    data[0] = (char)val;
+    py_assign(py_retval(), &pk_current_vm->ascii_literals[val]);
     return true;
 }
 
@@ -9296,7 +9251,6 @@ void py_initialize() {
     static_assert(sizeof(py_TValue) == 16, "sizeof(py_TValue) != 16");
     static_assert(offsetof(py_TValue, extra) == 4, "offsetof(py_TValue, extra) != 4");
 
-    MemoryPools__initialize();
     py_Name__initialize();
 
     pk_current_vm = pk_all_vm[0] = &pk_default_vm;
@@ -9332,7 +9286,6 @@ void py_finalize() {
     VM__dtor(&pk_default_vm);
     pk_current_vm = NULL;
     py_Name__finalize();
-    MemoryPools__finalize();
 }
 
 void py_switchvm(int index) {
@@ -9534,7 +9487,7 @@ bool py_callcfunc(py_CFunction f, int argc, py_Ref argv) {
     }
     if(py_checkexc(true)) {
         const char* name = py_tpname(pk_current_vm->curr_exception.type);
-        c11__abort("py_CFunction returns `true`, but `%s` is set!", name);
+        c11__abort("py_CFunction returns `true`, but `%s` was set!", name);
     }
     return true;
 }
@@ -10314,13 +10267,17 @@ static bool number__pow__(int argc, py_Ref argv) {
     return true;
 }
 
+static py_i64 i64_abs(py_i64 x) {
+    return x < 0 ? -x : x;
+}
+
 static py_i64 cpy11__fast_floor_div(py_i64 a, py_i64 b) {
     assert(b != 0);
     if(a == 0) return 0;
     if((a < 0) == (b < 0)) {
-        return labs(a) / labs(b);
+        return i64_abs(a) / i64_abs(b);
     } else {
-        return -1 - (labs(a) - 1) / labs(b);
+        return -1 - (i64_abs(a) - 1) / i64_abs(b);
     }
 }
 
@@ -10329,9 +10286,9 @@ static py_i64 cpy11__fast_mod(py_i64 a, py_i64 b) {
     if(a == 0) return 0;
     py_i64 res;
     if((a < 0) == (b < 0)) {
-        res = labs(a) % labs(b);
+        res = i64_abs(a) % i64_abs(b);
     } else {
-        res = labs(b) - 1 - (labs(a) - 1) % labs(b);
+        res = i64_abs(b) - 1 - (i64_abs(a) - 1) % i64_abs(b);
     }
     return b < 0 ? -res : res;
 }
@@ -11129,8 +11086,29 @@ char* py_newstrn(py_Ref out, int size) {
 }
 
 void py_newstrv(py_OutRef out, c11_sv sv) {
+    if(sv.size == 0) {
+        *out = pk_current_vm->ascii_literals[128];
+        return;
+    }
+    if(sv.size == 1) {
+        int c = sv.data[0];
+        if(c >= 0 && c < 128) {
+            *out = pk_current_vm->ascii_literals[c];
+            return;
+        }
+    }
     char* data = py_newstrn(out, sv.size);
     memcpy(data, sv.data, sv.size);
+}
+
+void py_newfstr(py_OutRef out, const char* fmt, ...) {
+    c11_sbuf buf;
+    c11_sbuf__ctor(&buf);
+    va_list args;
+    va_start(args, fmt);
+    pk_vsprintf(&buf, fmt, args);
+    va_end(args);
+    c11_sbuf__py_submit(&buf, out);
 }
 
 unsigned char* py_newbytes(py_Ref out, int size) {
@@ -11949,6 +11927,26 @@ DEF_TVALUE_METHODS(float, _f64)
 DEF_TVALUE_METHODS(vec2, _vec2)
 DEF_TVALUE_METHODS(vec2i, _vec2i)
 
+static bool pkpy_memory_usage(int argc, py_Ref argv) {
+    PY_CHECK_ARGC(0);
+    ManagedHeap* heap = &pk_current_vm->heap;
+    c11_string* small_objects_usage = MultiPool__summary(&heap->small_objects);
+    int large_object_count = heap->large_objects.length;
+    c11_sbuf buf;
+    c11_sbuf__ctor(&buf);
+    c11_sbuf__write_cstr(&buf, "== heap.small_objects ==\n");
+    c11_sbuf__write_cstr(&buf, small_objects_usage->data);
+    c11_sbuf__write_cstr(&buf, "== heap.large_objects ==\n");
+    pk_sprintf(&buf, "len(large_objects)=%d\n", large_object_count);
+    c11_sbuf__write_cstr(&buf, "== heap.gc ==\n");
+    pk_sprintf(&buf, "gc_counter=%d\n", heap->gc_counter);
+    pk_sprintf(&buf, "gc_threshold=%d", heap->gc_threshold);
+    // c11_sbuf__write_cstr(&buf, "== vm.pool_frame ==\n");
+    c11_sbuf__py_submit(&buf, py_retval());
+    c11_string__delete(small_objects_usage);
+    return true;
+}
+
 void pk__add_module_pkpy() {
     py_Ref mod = py_newmodule("pkpy");
 
@@ -11982,6 +11980,8 @@ void pk__add_module_pkpy() {
 
     py_setdict(mod, py_name("TValue"), TValue_dict);
     py_pop();
+
+    py_bindfunc(mod, "memory_usage", pkpy_memory_usage);
 }
 
 #undef DEF_TVALUE_METHODS
@@ -17031,8 +17031,6 @@ typedef struct ExprVt {
     void (*dtor)(Expr*);
 } ExprVt;
 
-#define static_assert_expr_size(T) static_assert(sizeof(T) <= kPoolExprBlockSize, "")
-
 #define vtcall(f, self, ctx) ((self)->vt->f((self), (ctx)))
 #define vtemit_(self, ctx) vtcall(emit_, (self), (ctx))
 #define vtemit_del(self, ctx) ((self)->vt->emit_del ? vtcall(emit_del, self, ctx) : false)
@@ -17045,7 +17043,7 @@ typedef struct ExprVt {
     do {                                                                                           \
         if(self) {                                                                                 \
             if((self)->vt->dtor) (self)->vt->dtor(self);                                           \
-            PoolExpr_dealloc(self);                                                                \
+            PK_FREE(self);                                                                         \
         }                                                                                          \
     } while(0)
 
@@ -17149,8 +17147,7 @@ NameExpr* NameExpr__new(int line, py_Name name, NameScope scope) {
                               .emit_del = NameExpr__emit_del,
                               .emit_store = NameExpr__emit_store,
                               .is_name = true};
-    static_assert_expr_size(NameExpr);
-    NameExpr* self = PoolExpr_alloc();
+    NameExpr* self = PK_MALLOC(sizeof(NameExpr));
     self->vt = &Vt;
     self->line = line;
     self->name = name;
@@ -17187,8 +17184,7 @@ StarredExpr* StarredExpr__new(int line, Expr* child, int level) {
                               .emit_store = StarredExpr__emit_store,
                               .is_starred = true,
                               .dtor = StarredExpr__dtor};
-    static_assert_expr_size(StarredExpr);
-    StarredExpr* self = PoolExpr_alloc();
+    StarredExpr* self = PK_MALLOC(sizeof(StarredExpr));
     self->vt = &Vt;
     self->line = line;
     self->child = child;
@@ -17217,8 +17213,7 @@ static void UnaryExpr__emit_(Expr* self_, Ctx* ctx) {
 
 UnaryExpr* UnaryExpr__new(int line, Expr* child, Opcode opcode) {
     const static ExprVt Vt = {.emit_ = UnaryExpr__emit_, .dtor = UnaryExpr__dtor};
-    static_assert_expr_size(UnaryExpr);
-    UnaryExpr* self = PoolExpr_alloc();
+    UnaryExpr* self = PK_MALLOC(sizeof(UnaryExpr));
     self->vt = &Vt;
     self->line = line;
     self->child = child;
@@ -17241,8 +17236,7 @@ void FStringSpecExpr__emit_(Expr* self_, Ctx* ctx) {
 
 FStringSpecExpr* FStringSpecExpr__new(int line, Expr* child, c11_sv spec) {
     const static ExprVt Vt = {.emit_ = FStringSpecExpr__emit_, .dtor = UnaryExpr__dtor};
-    static_assert_expr_size(FStringSpecExpr);
-    FStringSpecExpr* self = PoolExpr_alloc();
+    FStringSpecExpr* self = PK_MALLOC(sizeof(FStringSpecExpr));
     self->vt = &Vt;
     self->line = line;
     self->child = child;
@@ -17264,8 +17258,7 @@ void RawStringExpr__emit_(Expr* self_, Ctx* ctx) {
 
 RawStringExpr* RawStringExpr__new(int line, c11_sv value, Opcode opcode) {
     const static ExprVt Vt = {.emit_ = RawStringExpr__emit_};
-    static_assert_expr_size(RawStringExpr);
-    RawStringExpr* self = PoolExpr_alloc();
+    RawStringExpr* self = PK_MALLOC(sizeof(RawStringExpr));
     self->vt = &Vt;
     self->line = line;
     self->value = value;
@@ -17289,8 +17282,7 @@ void ImagExpr__emit_(Expr* self_, Ctx* ctx) {
 
 ImagExpr* ImagExpr__new(int line, double value) {
     const static ExprVt Vt = {.emit_ = ImagExpr__emit_};
-    static_assert_expr_size(ImagExpr);
-    ImagExpr* self = PoolExpr_alloc();
+    ImagExpr* self = PK_MALLOC(sizeof(ImagExpr));
     self->vt = &Vt;
     self->line = line;
     self->value = value;
@@ -17334,8 +17326,7 @@ void LiteralExpr__emit_(Expr* self_, Ctx* ctx) {
 
 LiteralExpr* LiteralExpr__new(int line, const TokenValue* value) {
     const static ExprVt Vt = {.emit_ = LiteralExpr__emit_, .is_literal = true};
-    static_assert_expr_size(LiteralExpr);
-    LiteralExpr* self = PoolExpr_alloc();
+    LiteralExpr* self = PK_MALLOC(sizeof(LiteralExpr));
     self->vt = &Vt;
     self->line = line;
     self->value = value;
@@ -17363,8 +17354,7 @@ void Literal0Expr__emit_(Expr* self_, Ctx* ctx) {
 
 Literal0Expr* Literal0Expr__new(int line, TokenIndex token) {
     const static ExprVt Vt = {.emit_ = Literal0Expr__emit_};
-    static_assert_expr_size(Literal0Expr);
-    Literal0Expr* self = PoolExpr_alloc();
+    Literal0Expr* self = PK_MALLOC(sizeof(Literal0Expr));
     self->vt = &Vt;
     self->line = line;
     self->token = token;
@@ -17404,8 +17394,7 @@ void SliceExpr__emit_(Expr* self_, Ctx* ctx) {
 
 SliceExpr* SliceExpr__new(int line) {
     const static ExprVt Vt = {.dtor = SliceExpr__dtor, .emit_ = SliceExpr__emit_};
-    static_assert_expr_size(SliceExpr);
-    SliceExpr* self = PoolExpr_alloc();
+    SliceExpr* self = PK_MALLOC(sizeof(SliceExpr));
     self->vt = &Vt;
     self->line = line;
     self->start = NULL;
@@ -17434,8 +17423,7 @@ static void DictItemExpr__emit_(Expr* self_, Ctx* ctx) {
 
 static DictItemExpr* DictItemExpr__new(int line) {
     const static ExprVt Vt = {.dtor = DictItemExpr__dtor, .emit_ = DictItemExpr__emit_};
-    static_assert_expr_size(DictItemExpr);
-    DictItemExpr* self = PoolExpr_alloc();
+    DictItemExpr* self = PK_MALLOC(sizeof(DictItemExpr));
     self->vt = &Vt;
     self->line = line;
     self->key = NULL;
@@ -17522,8 +17510,7 @@ bool TupleExpr__emit_del(Expr* self_, Ctx* ctx) {
 }
 
 static SequenceExpr* SequenceExpr__new(int line, const ExprVt* vt, int count, Opcode opcode) {
-    static_assert_expr_size(SequenceExpr);
-    SequenceExpr* self = PoolExpr_alloc();
+    SequenceExpr* self = PK_MALLOC(sizeof(SequenceExpr));
     self->vt = vt;
     self->line = line;
     self->opcode = opcode;
@@ -17609,8 +17596,7 @@ void CompExpr__emit_(Expr* self_, Ctx* ctx) {
 
 CompExpr* CompExpr__new(int line, Opcode op0, Opcode op1) {
     const static ExprVt Vt = {.dtor = CompExpr__dtor, .emit_ = CompExpr__emit_};
-    static_assert_expr_size(CompExpr);
-    CompExpr* self = PoolExpr_alloc();
+    CompExpr* self = PK_MALLOC(sizeof(CompExpr));
     self->vt = &Vt;
     self->line = line;
     self->op0 = op0;
@@ -17634,8 +17620,7 @@ static void LambdaExpr__emit_(Expr* self_, Ctx* ctx) {
 
 LambdaExpr* LambdaExpr__new(int line, int index) {
     const static ExprVt Vt = {.emit_ = LambdaExpr__emit_};
-    static_assert_expr_size(LambdaExpr);
-    LambdaExpr* self = PoolExpr_alloc();
+    LambdaExpr* self = PK_MALLOC(sizeof(LambdaExpr));
     self->vt = &Vt;
     self->line = line;
     self->index = index;
@@ -17666,8 +17651,7 @@ void LogicBinaryExpr__emit_(Expr* self_, Ctx* ctx) {
 
 LogicBinaryExpr* LogicBinaryExpr__new(int line, Opcode opcode) {
     const static ExprVt Vt = {.emit_ = LogicBinaryExpr__emit_, .dtor = LogicBinaryExpr__dtor};
-    static_assert_expr_size(LogicBinaryExpr);
-    LogicBinaryExpr* self = PoolExpr_alloc();
+    LogicBinaryExpr* self = PK_MALLOC(sizeof(LogicBinaryExpr));
     self->vt = &Vt;
     self->line = line;
     self->lhs = NULL;
@@ -17706,8 +17690,7 @@ GroupedExpr* GroupedExpr__new(int line, Expr* child) {
                               .emit_ = GroupedExpr__emit_,
                               .emit_del = GroupedExpr__emit_del,
                               .emit_store = GroupedExpr__emit_store};
-    static_assert_expr_size(GroupedExpr);
-    GroupedExpr* self = PoolExpr_alloc();
+    GroupedExpr* self = PK_MALLOC(sizeof(GroupedExpr));
     self->vt = &Vt;
     self->line = line;
     self->child = child;
@@ -17834,8 +17817,7 @@ BinaryExpr* BinaryExpr__new(int line, TokenIndex op, bool inplace) {
     const static ExprVt Vt = {.emit_ = BinaryExpr__emit_,
                               .dtor = BinaryExpr__dtor,
                               .is_binary = true};
-    static_assert_expr_size(BinaryExpr);
-    BinaryExpr* self = PoolExpr_alloc();
+    BinaryExpr* self = PK_MALLOC(sizeof(BinaryExpr));
     self->vt = &Vt;
     self->line = line;
     self->lhs = NULL;
@@ -17872,8 +17854,7 @@ void TernaryExpr__emit_(Expr* self_, Ctx* ctx) {
 
 TernaryExpr* TernaryExpr__new(int line) {
     const static ExprVt Vt = {.dtor = TernaryExpr__dtor, .emit_ = TernaryExpr__emit_};
-    static_assert_expr_size(TernaryExpr);
-    TernaryExpr* self = PoolExpr_alloc();
+    TernaryExpr* self = PK_MALLOC(sizeof(TernaryExpr));
     self->vt = &Vt;
     self->line = line;
     self->cond = NULL;
@@ -17943,8 +17924,7 @@ SubscrExpr* SubscrExpr__new(int line) {
         .emit_del = SubscrExpr__emit_del,
         .is_subscr = true,
     };
-    static_assert_expr_size(SubscrExpr);
-    SubscrExpr* self = PoolExpr_alloc();
+    SubscrExpr* self = PK_MALLOC(sizeof(SubscrExpr));
     self->vt = &Vt;
     self->line = line;
     self->lhs = NULL;
@@ -18006,8 +17986,7 @@ AttribExpr* AttribExpr__new(int line, Expr* child, py_Name name) {
                               .emit_istore = AttribExpr__emit_istore,
                               .dtor = AttribExpr__dtor,
                               .is_attrib = true};
-    static_assert_expr_size(AttribExpr);
-    AttribExpr* self = PoolExpr_alloc();
+    AttribExpr* self = PK_MALLOC(sizeof(AttribExpr));
     self->vt = &Vt;
     self->line = line;
     self->child = child;
@@ -18079,8 +18058,7 @@ void CallExpr__emit_(Expr* self_, Ctx* ctx) {
 
 CallExpr* CallExpr__new(int line, Expr* callable) {
     const static ExprVt Vt = {.dtor = CallExpr__dtor, .emit_ = CallExpr__emit_};
-    static_assert_expr_size(CallExpr);
-    CallExpr* self = PoolExpr_alloc();
+    CallExpr* self = PK_MALLOC(sizeof(CallExpr));
     self->vt = &Vt;
     self->line = line;
     self->callable = callable;
