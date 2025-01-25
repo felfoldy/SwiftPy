@@ -13,7 +13,7 @@ public final class Interpreter {
     public static let shared = Interpreter()
     static var isFailed = false
 
-    public var replBuffer = ""
+    public var replLines = [String]()
 
     public static var onImport: (String) -> String? = { module in
         log.fault("Tried to import \(module), but  Interpreter.onImport is not set")
@@ -42,6 +42,7 @@ public final class Interpreter {
             
             let filename = String(cString: cFilename)
             if let content = Interpreter.importFromBundle(name: filename) {
+                log.info("imported \(filename) from bundle")
                 return strdup(content)
             }
 
@@ -54,7 +55,28 @@ public final class Interpreter {
         }
         
         let builtins = py_getmodule("builtins")
+        // Remove exit, maybe do a custom action instead later?
         py_deldict(builtins, py_name("exit"))
+        
+        execute("""
+        from rlcompleter import Completer
+
+        def _completions(code: str) -> list[str]:
+            completer = Completer()
+
+            completion_list = []
+            state = 0
+            
+            # Get completions until no more are found
+            while True:
+                completion = completer.complete(code, state)
+                if completion is None:
+                    break
+                completion_list.append(completion)
+                state += 1
+            
+            return completion_list
+        """)
 
         log.info("PocketPython [\(PK_VERSION)] initialized")
     }
@@ -63,11 +85,13 @@ public final class Interpreter {
         py_finalize()
     }
     
-    func execute(_ code: String, mode: py_CompileMode = EXEC_MODE) {
-        let isExecuted = py_exec(code, "<string>", mode, nil)
+    func execute(_ code: String, filename: String = "<string>", mode: py_CompileMode = EXEC_MODE) {
+        let p0 = py_peek(0)
+        let isExecuted = py_exec(code, filename, mode, nil)
         if !isExecuted {
             Interpreter.isFailed = true
             py_printexc()
+            py_clearexc(p0)
         }
     }
 
@@ -86,42 +110,25 @@ public final class Interpreter {
 
     public func repl(input: String) -> String {
         for line in input.components(separatedBy: .newlines) {
-            repl(line: line)
+            if line.isEmpty, !replLines.isEmpty {
+                let joinedBuffer = replLines.joined(separator: "\n")
+                execute(joinedBuffer, filename: "<stdin>", mode: SINGLE_MODE)
+                replLines.removeAll()
+            }
+
+            guard let lastChar = line.last else {
+                continue
+            }
+
+            if !replLines.isEmpty || ":({[".contains(lastChar) {
+                replLines.append(line)
+                continue
+            }
+
+            execute(line, filename: "<stdin>", mode: SINGLE_MODE)
         }
 
-        return replBuffer
-    }
-
-    func repl(line input: String) {
-        if input.isEmpty, !replBuffer.isEmpty {
-            repl(replBuffer)
-            replBuffer = ""
-        }
-
-        guard !input.isEmpty else {
-            return
-        }
-
-        if !replBuffer.isEmpty || ":({[".contains(input.last!) {
-            replBuffer += "\(input)\n"
-            return
-        }
-
-        repl(input)
-    }
-    
-    func repl(_ code: String) {
-        let p0 = py_peek(0)
-        let ok = py_exec(code, "<stdin>", SINGLE_MODE, nil)
-        
-        if ok {
-            log.info("Ok")
-        } else {
-            Interpreter.isFailed = true
-            py_printexc()
-            py_clearexc(p0)
-            return
-        }
+        return replLines.joined(separator: "\n")
     }
 }
 
@@ -145,5 +152,19 @@ public extension Interpreter {
         let r0 = py_getreg(0)
         py_assign(r0, PyAPI.returnValue)
         return r0
+    }
+    
+    static func complete(_ text: String) -> [String] {
+        let list = evaluate("_completions('\(text)')")
+        
+        var values: [String] = []
+        
+        for i in 0..<py_list_len(list) {
+            if let str = String(py_list_getitem(list, i)) {
+                values.append(str)
+            }
+        }
+        
+        return values
     }
 }

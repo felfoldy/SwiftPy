@@ -10,14 +10,14 @@ import Testing
 import pocketpy
 
 @MainActor
-struct InterpreterTests {
+struct InterpreterTests {    
     @Test func buffer() {
         let buffer = Interpreter.input("""
         for i in range(3, 10):
         """)
 
         // Store in buffer instead of executing it.
-        #expect(buffer == "for i in range(3, 10):\n")
+        #expect(buffer == "for i in range(3, 10):")
 
         // Evaluate each i
         Interpreter.input("    i")

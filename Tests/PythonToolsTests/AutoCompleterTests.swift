@@ -34,4 +34,11 @@ struct AutoCompleterTests {
         Interpreter.input("x = completer.complete('completer.c', 0)")
         #expect(Interpreter.main["x"] == "completer.complete(")
     }
+    
+    @Test func autoComplete() {
+        let completions = Interpreter.complete("s")
+        
+        #expect(completions.contains("str("))
+        #expect(completions.contains("setattr("))
+    }
 }
