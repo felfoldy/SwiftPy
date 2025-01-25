@@ -35,7 +35,7 @@ struct AutoCompleterTests {
         #expect(Interpreter.main["x"] == "completer.complete(")
     }
     
-    @Test func autoComplete() {
+    @Test func complete() {
         let completions = Interpreter.complete("s")
         
         #expect(completions.contains("str("))

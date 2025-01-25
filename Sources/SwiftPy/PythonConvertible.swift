@@ -20,6 +20,11 @@ extension PythonConvertible {
         guard let reference else { return nil }
         self.init(reference)
     }
+    
+    @inlinable public func toPython(_ reference: PyAPI.Reference?) {
+        guard let reference else { return }
+        self.toPython(reference)
+    }
 }
 
 extension Bool: PythonConvertible {
@@ -72,4 +77,33 @@ extension Double: PythonConvertible {
     }
 
     public static let pyType = py_Type(tp_float.rawValue)
+}
+
+// MARK: - Arrays.
+
+// TODO: Add a generic solution?
+extension [String]: PythonConvertible {
+    public init?(_ reference: PyAPI.Reference) {
+        guard reference.isType(Self.self) else { return nil }
+        
+        var items: [String] = []
+        for i in 0 ..< py_list_len(reference) {
+            if let str = String(py_list_getitem(reference, i)) {
+                items.append(str)
+            }
+        }
+
+        self = items
+    }
+    
+    public func toPython(_ reference: PyAPI.Reference) {
+        py_newlist(reference)
+        let r0 = py_getreg(0)!
+        for value in self {
+            value.toPython(r0)
+            py_list_append(reference, r0)
+        }
+    }
+    
+    public static let pyType = py_Type(tp_list.rawValue)
 }

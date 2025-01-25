@@ -155,16 +155,6 @@ public extension Interpreter {
     }
     
     static func complete(_ text: String) -> [String] {
-        let list = evaluate("_completions('\(text)')")
-        
-        var values: [String] = []
-        
-        for i in 0..<py_list_len(list) {
-            if let str = String(py_list_getitem(list, i)) {
-                values.append(str)
-            }
-        }
-        
-        return values
+        [String](evaluate("_completions('\(text)')")) ?? []
     }
 }
