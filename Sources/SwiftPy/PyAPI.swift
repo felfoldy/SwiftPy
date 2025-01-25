@@ -15,19 +15,18 @@ public extension PyAPI {
     /// Python function signature `(argc: Int32, argv: StackRef?) -> Bool`.
     typealias CFunction = py_CFunction
 
-    typealias Reference = py_GlobalRef
-    
+    /// Just a type alias of an `OpaquePointer`.
+    typealias Reference = py_Ref
+
     @inlinable static var returnValue: Reference {
         py_retval()
     }
-    
-    static let TypeInt = py_Type(tp_int.rawValue)
 }
 
 public extension Interpreter {
     /// Returns the module with the given name.
     /// - Parameter name: Module name for example: `__main__`
-    /// - Returns: `PK.Module?`.
+    /// - Returns: Module reference.
     @inlinable func module(_ name: String) -> PyAPI.Reference? {
         py_getmodule(name)
     }

@@ -23,11 +23,12 @@ extension PythonConvertible {
 }
 
 extension Bool: PythonConvertible {
-    public init?(_ reference: PyAPI.Reference) {
+    @inlinable public init?(_ reference: PyAPI.Reference) {
+        guard reference.isType(Self.self) else { return nil }
         self = py_tobool(reference)
     }
 
-    public func toPython(_ reference: PyAPI.Reference) {
+    @inlinable public func toPython(_ reference: PyAPI.Reference) {
         py_newbool(reference, self)
     }
 
@@ -35,12 +36,12 @@ extension Bool: PythonConvertible {
 }
 
 extension Int: PythonConvertible {
-    public init?(_ reference: PyAPI.Reference) {
+    @inlinable public init?(_ reference: PyAPI.Reference) {
         guard reference.isType(Self.self) else { return nil }
         self = Int(py_toint(reference))
     }
 
-    public func toPython(_ reference: PyAPI.Reference) {
+    @inlinable public func toPython(_ reference: PyAPI.Reference) {
         py_newint(reference, py_i64(self))
     }
 
@@ -48,12 +49,12 @@ extension Int: PythonConvertible {
 }
 
 extension String: PythonConvertible {
-    public init?(_ reference: PyAPI.Reference) {
+    @inlinable public init?(_ reference: PyAPI.Reference) {
         guard reference.isType(Self.self) else { return nil }
         self = String(cString: py_tostr(reference))
     }
 
-    public func toPython(_ reference: PyAPI.Reference) {
+    @inlinable public func toPython(_ reference: PyAPI.Reference) {
         py_newstr(reference, self)
     }
 
@@ -61,12 +62,12 @@ extension String: PythonConvertible {
 }
 
 extension Double: PythonConvertible {
-    public init?(_ reference: PyAPI.Reference) {
+    @inlinable public init?(_ reference: PyAPI.Reference) {
         guard reference.isType(Self.self) else { return nil }
         self = Double(py_tofloat(reference))
     }
 
-    public func toPython(_ reference: PyAPI.Reference) {
+    @inlinable public func toPython(_ reference: PyAPI.Reference) {
         py_newfloat(reference, self)
     }
 

@@ -44,4 +44,9 @@ struct InterpreterTests {
         
         #expect(Interpreter.shared.module("justx")?["x"] == 10)
     }
+    
+    @Test func loadBundleModule() {
+        Interpreter.execute("from rlcompleter import Completer")
+        // TODO: expect no errors.
+    }
 }

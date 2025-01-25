@@ -27,6 +27,9 @@ let package = Package(
                 "pocketpy",
                 "PythonToolsMacros",
                 "LogTools"
+            ],
+            resources: [
+                .process("Resources")
             ]
         ),
         .testTarget(

@@ -41,6 +41,10 @@ public final class Interpreter {
             guard let cFilename else { return nil }
             
             let filename = String(cString: cFilename)
+            if let content = Interpreter.importFromBundle(name: filename) {
+                return strdup(content)
+            }
+
             guard let content = Interpreter.onImport(filename) else {
                 log.fault("Failed to load \(filename)")
                 return nil
@@ -59,12 +63,25 @@ public final class Interpreter {
         py_finalize()
     }
     
-    func execute(_ code: String) {
-        let isExecuted = py_exec(code, "<string>", EXEC_MODE, nil)
+    func execute(_ code: String, mode: py_CompileMode = EXEC_MODE) {
+        let isExecuted = py_exec(code, "<string>", mode, nil)
         if !isExecuted {
             Interpreter.isFailed = true
             py_printexc()
         }
+    }
+
+    static func importFromBundle(name: String) -> String? {
+        if let path = Bundle.module.path(forResource: name, ofType: nil) {
+            do {
+                let content = try String(contentsOfFile: path, encoding: .utf8)
+                return content
+            } catch {
+                log.error(error.localizedDescription)
+            }
+        }
+        
+        return nil
     }
 
     public func repl(input: String) -> String {
@@ -120,5 +137,13 @@ public extension Interpreter {
     @discardableResult
     static func input(_ input: String) -> String {
         shared.repl(input: input)
+    }
+    
+    static func evaluate(_ expression: String) -> PyAPI.Reference? {
+        shared.execute(expression, mode: EVAL_MODE)
+
+        let r0 = py_getreg(0)
+        py_assign(r0, PyAPI.returnValue)
+        return r0
     }
 }
