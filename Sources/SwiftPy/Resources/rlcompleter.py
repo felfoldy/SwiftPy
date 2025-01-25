@@ -12,10 +12,10 @@ import inspect
 def dir(object) -> list[str]:
     keys = []
     
-    for key, _ in object.__dict__.items():
+    for key in object.__dict__.keys():
         keys.append(key)
     if not isinstance(object, type):
-        for key, _ in type(object).__dict__.items():
+        for key in type(object).__dict__.keys():
             keys.append(key)
     
     return keys
