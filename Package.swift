@@ -25,7 +25,7 @@ let package = Package(
             name: "SwiftPy",
             dependencies: [
                 "pocketpy",
-                "PythonToolsMacros",
+                "SwiftPyMacros",
                 "LogTools"
             ],
             resources: [
@@ -33,11 +33,11 @@ let package = Package(
             ]
         ),
         .testTarget(
-            name: "PythonToolsTests",
+            name: "SwiftPyTests",
             dependencies: ["SwiftPy"]
         ),
         .macro(
-            name: "PythonToolsMacros",
+            name: "SwiftPyMacros",
             dependencies: [
                 .product(name: "SwiftSyntaxMacros", package: "swift-syntax"),
                 .product(name: "SwiftCompilerPlugin", package: "swift-syntax")

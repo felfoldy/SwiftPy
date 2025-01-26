@@ -13,7 +13,7 @@ public macro def<Out>(
     _ signature: String,
     block: @MainActor @escaping () -> Out
 ) -> FunctionRegistration = #externalMacro(
-    module: "PythonToolsMacros",
+    module: "SwiftPyMacros",
     type: "RegisterFunctionMacro"
 )
 
@@ -22,6 +22,6 @@ public macro def<Out>(
     _ signature: String,
     block: @MainActor @escaping (FunctionArguments) -> Out
 ) -> FunctionRegistration = #externalMacro(
-    module: "PythonToolsMacros",
+    module: "SwiftPyMacros",
     type: "RegisterFunctionMacro"
 )

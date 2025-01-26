@@ -1,5 +1,5 @@
 //
-//  GlobalFunctionMacro.swift
+//  SwiftPyMacros.swift
 //  PythonTools
 //
 //  Created by Tibor Felföldy on 2025-01-17.
