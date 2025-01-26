@@ -8,6 +8,11 @@
 import __main__
 import builtins
 import inspect
+import keyword
+
+# TODO: inspect.signature(val).parameters
+
+__all__ = ["Completer"]
 
 class Completer:
     def __init__(self, namespace = None):
@@ -37,8 +42,8 @@ class Completer:
 
         This is called successively with state == 0, 1, 2, ... until it
         returns None.  The completion should begin with 'text'.
-
         """
+
         if self.use_main_ns:
             self.namespace = __main__.__dict__
 
@@ -79,21 +84,21 @@ class Completer:
         Return a list of all keywords, built-in functions and names currently
         defined in self.namespace that match.
         """
+        
         matches = []
         seen = {"__builtins__"}
         n = len(text)
         
-        # TODO: no keyword module
-        # for word in keyword.kwlist + keyword.softkwlist:
-        #     if word[:n] == text:
-        #         seen.add(word)
-        #         if word in {'finally', 'try'}:
-        #             word = word + ':'
-        #         elif word not in {'False', 'None', 'True',
-        #                           'break', 'continue', 'pass',
-        #                           'else', '_'}:
-        #             word = word + ' '
-        #         matches.append(word)
+        for word in keyword.kwlist + keyword.softkwlist:
+            if word[:n] == text:
+                seen.add(word)
+                if word in {'finally', 'try'}:
+                    word = word + ':'
+                elif word not in {'False', 'None', 'True',
+                                  'break', 'continue', 'pass',
+                                  'else', '_'}:
+                    word = word + ' '
+                matches.append(word)
         
         for nspace in [self.namespace, builtins.__dict__]:
             for word, val in nspace.items():
@@ -111,18 +116,8 @@ class Completer:
         evaluable in self.namespace, it will be evaluated and its attributes
         (as revealed by dir()) are used as possible completions.  (For class
         instances, class members are also considered.)
-
-        WARNING: this can still invoke arbitrary C code, if an object
-        with a __getattr__ hook is evaluated.
         """
-        
-        # TODO: no re lib
-        # m = re.match(r"(\w+(\.\w+)*)\.(\w*)", text)
-        # if not m:
-        #     return []
-        # expr, attr = m.group(1, 3)
-        
-        # Workaround:
+
         parts = text.split('.')
 
         if len(parts) < 2:

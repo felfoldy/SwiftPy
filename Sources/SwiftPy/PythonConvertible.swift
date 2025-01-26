@@ -79,17 +79,15 @@ extension Double: PythonConvertible {
     public static let pyType = py_Type(tp_float.rawValue)
 }
 
-// MARK: - Arrays.
-
-// TODO: Add a generic solution?
-extension [String]: PythonConvertible {
+// TODO:
+extension Array: PythonConvertible where Element: PythonConvertible {
     public init?(_ reference: PyAPI.Reference) {
         guard reference.isType(Self.self) else { return nil }
         
-        var items: [String] = []
+        var items: [Element] = []
         for i in 0 ..< py_list_len(reference) {
-            if let str = String(py_list_getitem(reference, i)) {
-                items.append(str)
+            if let item = Element(py_list_getitem(reference, i)) {
+                items.append(item)
             }
         }
 
@@ -104,6 +102,6 @@ extension [String]: PythonConvertible {
             py_list_append(reference, r0)
         }
     }
-    
-    public static let pyType = py_Type(tp_list.rawValue)
+
+    public static var pyType: py_Type { py_Type(tp_list.rawValue) }
 }

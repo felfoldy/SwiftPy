@@ -41,4 +41,20 @@ struct AutoCompleterTests {
         #expect(completions.contains("str("))
         #expect(completions.contains("setattr("))
     }
+    
+    @Test func completeKeywords_addsColon() {
+        let completions = Interpreter.complete("try")
+        #expect(completions.contains("try:"))
+        
+        let completions2 = Interpreter.complete("finally")
+        #expect(completions2.contains("finally:"))
+    }
+    
+    @Test func completerKeywords_addsSpace() {
+        let completions = Interpreter.complete("if")
+        #expect(completions.contains("if "))
+        
+        let completions2 = Interpreter.complete("None")
+        #expect(completions2.contains("None"))
+    }
 }
