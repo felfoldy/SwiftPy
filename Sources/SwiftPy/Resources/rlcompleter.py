@@ -10,8 +10,6 @@ import builtins
 import inspect
 import keyword
 
-# TODO: inspect.signature(val).parameters
-
 __all__ = ["Completer"]
 
 class Completer:
@@ -134,10 +132,6 @@ class Completer:
         words = set(dir(thisobject))
         words.discard("__builtins__")
         
-        if hasattr(thisobject, '__class__'):
-            words.add('__class__')
-            words.update(get_class_members(thisobject.__class__))
-        
         matches = []
         n = len(attr)
         if attr == '':
@@ -179,10 +173,3 @@ class Completer:
         
         matches.sort()
         return matches
-        
-    def get_class_members(klass):
-        ret = dir(klass)
-        if hasattr(klass,'__bases__'):
-            for base in klass.__bases__:
-                ret = ret + get_class_members(base)
-        return ret
