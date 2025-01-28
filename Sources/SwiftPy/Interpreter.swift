@@ -11,6 +11,8 @@ import Foundation
 @MainActor
 public final class Interpreter {
     public static let shared = Interpreter()
+    public static var output: any OutputStream = DefaultOutputStream()
+
     static var isFailed = false
 
     public var replLines = [String]()
@@ -30,10 +32,10 @@ public final class Interpreter {
             if str.isEmpty { return }
             
             if Interpreter.isFailed {
-                log.critical(str)
+                Interpreter.output.stderr(str)
                 Interpreter.isFailed = false
             } else {
-                log.info(str)
+                Interpreter.output.stdout(str)
             }
         }
         

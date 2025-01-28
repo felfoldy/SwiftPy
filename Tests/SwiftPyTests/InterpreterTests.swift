@@ -10,7 +10,7 @@ import Testing
 import pocketpy
 
 @MainActor
-struct InterpreterTests {    
+struct InterpreterTests {
     @Test func buffer() {
         let buffer = Interpreter.input("""
         for i in range(3, 10):
@@ -30,8 +30,9 @@ struct InterpreterTests {
     }
     
     @Test func importModule() {
-        // TODO: Expect errors to output.
         Interpreter.execute("import justx")
+        
+        #expect(Interpreter.main["justx"] == nil)
         
         var moduleName: String?
         Interpreter.onImport = { module in
@@ -47,6 +48,6 @@ struct InterpreterTests {
     
     @Test func loadBundleModule() {
         Interpreter.execute("from rlcompleter import Completer")
-        // TODO: expect no errors.
+        #expect(Interpreter.main["Completer"] != nil)
     }
 }
