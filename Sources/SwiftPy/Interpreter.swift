@@ -89,7 +89,15 @@ public final class Interpreter {
     
     func execute(_ code: String, filename: String = "<string>", mode: py_CompileMode = EXEC_MODE) {
         let p0 = py_peek(0)
+        
+        let startTime = DispatchTime.now()
+
         let isExecuted = py_exec(code, filename, mode, nil)
+        
+        let endTime = DispatchTime.now()
+        let nanoTime = endTime.uptimeNanoseconds - startTime.uptimeNanoseconds
+        Interpreter.output.executionTime(nanoTime)
+
         if !isExecuted {
             Interpreter.isFailed = true
             py_printexc()
@@ -137,10 +145,17 @@ public extension Interpreter {
         shared.execute(code)
     }
 
+    /// Runs a code in execution mode.
+    ///
+    /// Performs profiling and outputs the input to the console.
+    static func run(_ code: String) {
+        output.input(code)
+        shared.execute(code, filename: "<string>", mode: EXEC_MODE)
+    }
+
     /// Interactive interpreter input.
     ///
     /// - Parameter input: Input to run.
-    /// - Returns: The current buffer if the input was not executed.
     static func input(_ input: String) {
         output.input(input)
         shared.repl(input: input)

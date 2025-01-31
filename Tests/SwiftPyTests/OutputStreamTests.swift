@@ -10,7 +10,7 @@ import SwiftPy
 
 @MainActor
 struct OutputStreamTests {
-    @Test func outputEvaluation() {
+    @Test func outputEvaluation() throws {
         let outputStream = TestOutputStream()
         Interpreter.output = outputStream
 
@@ -18,6 +18,34 @@ struct OutputStreamTests {
 
         #expect(outputStream.lastInput == "3 + 4")
         #expect(outputStream.lastStdOut == "7")
+        
+        let time = try #require(outputStream.lastExecutionTime)
+        #expect(time > 0)
+    }
+    
+    @Test func runOutput() throws {
+        let outputStream = TestOutputStream()
+        Interpreter.output = outputStream
+
+        Interpreter.run("print('str')")
+
+        #expect(outputStream.lastInput == "print('str')")
+        #expect(outputStream.lastStdOut == "str")
+        
+        let time = try #require(outputStream.lastExecutionTime)
+        #expect(time > 0)
+    }
+    
+    @Test func multileREPLOutput() throws {
+        let outputStream = TestOutputStream()
+        Interpreter.output = outputStream
+        
+        Interpreter.input("for i in range(0, 3):")
+        Interpreter.input("    i")
+        Interpreter.input("")
+        
+        #expect(outputStream.lastInput == "")
+        #expect(outputStream.lastStdOut == "2")
     }
     
     @Test func outputPrint() {
@@ -54,9 +82,14 @@ class TestOutputStream: OutputStream {
     var lastInput: String?
     var lastStdOut: String?
     var lastStdErr: String?
+    var lastExecutionTime: UInt64?
     
     func input(_ str: String) {
         lastInput = str
+    }
+    
+    func executionTime(_ time: UInt64) {
+        lastExecutionTime = time
     }
     
     func stdout(_ str: String) {
