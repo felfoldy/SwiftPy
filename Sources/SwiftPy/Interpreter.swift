@@ -110,7 +110,7 @@ public final class Interpreter {
         return nil
     }
 
-    public func repl(input: String) -> String {
+    public func repl(input: String) {
         for line in input.components(separatedBy: .newlines) {
             if line.isEmpty, !replLines.isEmpty {
                 let joinedBuffer = replLines.joined(separator: "\n")
@@ -129,8 +129,6 @@ public final class Interpreter {
 
             execute(line, filename: "<stdin>", mode: SINGLE_MODE)
         }
-
-        return replLines.joined(separator: "\n")
     }
 }
 
@@ -143,8 +141,8 @@ public extension Interpreter {
     ///
     /// - Parameter input: Input to run.
     /// - Returns: The current buffer if the input was not executed.
-    @discardableResult
-    static func input(_ input: String) -> String {
+    static func input(_ input: String) {
+        output.input(input)
         shared.repl(input: input)
     }
     

@@ -16,6 +16,7 @@ struct OutputStreamTests {
 
         Interpreter.input("3 + 4")
 
+        #expect(outputStream.lastInput == "3 + 4")
         #expect(outputStream.lastStdOut == "7")
     }
     
@@ -50,8 +51,13 @@ struct OutputStreamTests {
 }
 
 class TestOutputStream: OutputStream {
+    var lastInput: String?
     var lastStdOut: String?
     var lastStdErr: String?
+    
+    func input(_ str: String) {
+        lastInput = str
+    }
     
     func stdout(_ str: String) {
         lastStdOut = str
