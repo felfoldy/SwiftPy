@@ -7,13 +7,40 @@
 
 import pocketpy
 import Foundation
+import OSLog
+
+@available(macOS 12.0, iOS 15.0, *)
+@MainActor
+final class PerformanceMonitor {
+    static let standard = PerformanceMonitor()
+    
+    let signposter: OSSignposter
+    var state: OSSignpostIntervalState?
+    
+    init() {
+        signposter = OSSignposter(logger: Logger(OSLog(subsystem: "com.felfoldy.SwiftPy", category: .pointsOfInterest)))
+    }
+    
+    @inlinable static func begin() {
+        standard.state = standard.signposter.beginInterval("Python")
+    }
+    
+    @inlinable static func end() {
+        if let state = standard.state {
+            standard.signposter.endInterval("Python", state)
+        }
+    }
+}
 
 @MainActor
 public final class Interpreter {
     public static let shared = Interpreter()
+    
+    /// IO stream for console output.
     public static var output: any OutputStream = DefaultOutputStream()
 
-    static var isFailed = false
+    /// Bundles to import from python scripts.
+    public static var bundles = [Bundle.module]
 
     public var replLines = [String]()
 
@@ -21,6 +48,8 @@ public final class Interpreter {
         log.fault("Tried to import \(module), but  Interpreter.onImport is not set")
         return nil
     }
+    
+    static var isFailed = false
 
     init() {
         py_initialize()
@@ -39,12 +68,13 @@ public final class Interpreter {
             }
         }
         
+        log.info("PocketPython [\(PK_VERSION)] initialized")
+        
         py_callbacks().pointee.importfile = { cFilename in
             guard let cFilename else { return nil }
             
             let filename = String(cString: cFilename)
             if let content = Interpreter.importFromBundle(name: filename) {
-                log.info("imported \(filename) from bundle")
                 return strdup(content)
             }
 
@@ -62,8 +92,10 @@ public final class Interpreter {
         
         execute("""
         from rlcompleter import Completer
+        
+        _text_to_complete = ''
 
-        def _completions(code: str) -> list[str]:
+        def _completions() -> list[str]:
             completer = Completer()
 
             completion_list = []
@@ -71,7 +103,7 @@ public final class Interpreter {
             
             # Get completions until no more are found
             while True:
-                completion = completer.complete(code, state)
+                completion = completer.complete(_text_to_complete, state)
                 if completion is None:
                     break
                 completion_list.append(completion)
@@ -79,20 +111,26 @@ public final class Interpreter {
             
             return completion_list
         """)
-
-        log.info("PocketPython [\(PK_VERSION)] initialized")
     }
 
     deinit {
         py_finalize()
     }
     
-    func execute(_ code: String, filename: String = "<string>", mode: py_CompileMode = EXEC_MODE) {
+    func execute(_ code: String, filename: String = "<string>", mode: py_CompileMode = EXEC_MODE, module: PyAPI.Reference? = nil) {
         let p0 = py_peek(0)
         
         let startTime = DispatchTime.now()
 
-        let isExecuted = py_exec(code, filename, mode, nil)
+        if #available(macOS 12.0, iOS 15.0, *) {
+            PerformanceMonitor.begin()
+        }
+
+        let isExecuted = py_exec(code, filename, mode, module)
+
+        if #available(macOS 12.0, iOS 15.0, *) {
+            PerformanceMonitor.end()
+        }
         
         let endTime = DispatchTime.now()
         let nanoTime = endTime.uptimeNanoseconds - startTime.uptimeNanoseconds
@@ -106,12 +144,15 @@ public final class Interpreter {
     }
 
     static func importFromBundle(name: String) -> String? {
-        if let path = Bundle.module.path(forResource: name, ofType: nil) {
-            do {
-                let content = try String(contentsOfFile: path, encoding: .utf8)
-                return content
-            } catch {
-                log.error(error.localizedDescription)
+        for bundle in bundles {
+            if let path = bundle.path(forResource: name, ofType: nil) {
+                do {
+                    let content = try String(contentsOfFile: path, encoding: .utf8)
+                    log.trace("Imported \(name) from \(bundle.bundleURL.lastPathComponent)")
+                    return content
+                } catch {
+                    log.error(error.localizedDescription)
+                }
             }
         }
         
@@ -141,13 +182,18 @@ public final class Interpreter {
 }
 
 public extension Interpreter {
+    /// Runs a code in execution mode.
+    ///
+    /// Does not output the input to the console.
+    /// - Parameter code: Code to execute.
     static func execute(_ code: String) {
         shared.execute(code)
     }
 
     /// Runs a code in execution mode.
-    ///
+    /// 
     /// Performs profiling and outputs the input to the console.
+    /// - Parameter code: Code to execute.
     static func run(_ code: String) {
         output.input(code)
         shared.execute(code, filename: "<string>", mode: EXEC_MODE)
@@ -161,15 +207,24 @@ public extension Interpreter {
         shared.repl(input: input)
     }
     
-    static func evaluate(_ expression: String) -> PyAPI.Reference? {
-        shared.execute(expression, mode: EVAL_MODE)
+    /// Evaluates the expression and returns the result.
+    ///
+    /// - Parameter expression: Expression to evaluate.
+    /// - Returns: The result of the expression.
+    static func evaluate(_ expression: String, module: PyAPI.Reference? = nil) -> PyAPI.Reference? {
+        shared.execute(expression, mode: EVAL_MODE, module: module)
 
         let r0 = py_getreg(0)
         py_assign(r0, PyAPI.returnValue)
         return r0
     }
-    
+
+    /// Completes the text.
+    ///
+    /// - Parameter text: Text to complete.
+    /// - Returns: Array of possible results.
     static func complete(_ text: String) -> [String] {
-        [String](evaluate("_completions('\(text)')")) ?? []
+        main["_text_to_complete"]?.set(text)
+        return [String](evaluate("_completions()")) ?? []
     }
 }

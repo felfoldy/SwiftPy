@@ -57,4 +57,13 @@ struct AutoCompleterTests {
         let completions2 = Interpreter.complete("None")
         #expect(completions2.contains("None"))
     }
+    
+    @Test func completerDoesntFailOnQuotes() {
+        let output = TestOutputStream()
+        Interpreter.output = output
+        
+        _ = Interpreter.complete("\"")
+        
+        #expect(output.lastStdErr == nil)
+    }
 }
