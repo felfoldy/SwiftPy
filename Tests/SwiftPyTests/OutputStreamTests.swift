@@ -78,7 +78,7 @@ struct OutputStreamTests {
     }
 }
 
-class TestOutputStream: OutputStream {
+class TestOutputStream: IOStream {
     var lastInput: String?
     var lastStdOut: String?
     var lastStdErr: String?

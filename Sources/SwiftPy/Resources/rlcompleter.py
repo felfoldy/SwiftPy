@@ -1,10 +1,3 @@
-#
-#  rlcompleter.py
-#  SwiftPy
-#
-#  Created by Tibor Felföldy on 2025-01-24.
-#
-
 import __main__
 import builtins
 import inspect

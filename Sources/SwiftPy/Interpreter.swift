@@ -37,7 +37,7 @@ public final class Interpreter {
     public static let shared = Interpreter()
     
     /// IO stream for console output.
-    public static var output: any OutputStream = DefaultOutputStream()
+    public static var output: any IOStream = DefaultIOStream()
 
     /// Bundles to import from python scripts.
     public static var bundles = [Bundle.module]
@@ -89,28 +89,6 @@ public final class Interpreter {
         let builtins = py_getmodule("builtins")
         // Remove exit, maybe do a custom action instead later?
         py_deldict(builtins, py_name("exit"))
-        
-        execute("""
-        from rlcompleter import Completer
-        
-        _text_to_complete = ''
-
-        def _completions() -> list[str]:
-            completer = Completer()
-
-            completion_list = []
-            state = 0
-            
-            # Get completions until no more are found
-            while True:
-                completion = completer.complete(_text_to_complete, state)
-                if completion is None:
-                    break
-                completion_list.append(completion)
-                state += 1
-            
-            return completion_list
-        """)
     }
 
     deinit {
@@ -224,7 +202,11 @@ public extension Interpreter {
     /// - Parameter text: Text to complete.
     /// - Returns: Array of possible results.
     static func complete(_ text: String) -> [String] {
-        main["_text_to_complete"]?.set(text)
-        return [String](evaluate("_completions()")) ?? []
+        var module = py_getmodule("interpreter")
+        if module == nil, py_import("interpreter") == 1 {
+            module = PyAPI.returnValue
+        }
+        module?["text_to_complete"]?.set(text)
+        return [String](evaluate("completions()", module: module)) ?? []
     }
 }
