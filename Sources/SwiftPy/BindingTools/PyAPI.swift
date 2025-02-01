@@ -24,11 +24,17 @@ public extension PyAPI {
 }
 
 public extension Interpreter {
-    /// Returns the module with the given name.
+    /// Returns the module with the given name. If it can't find it, tries to import it.
     /// - Parameter name: Module name for example: `__main__`
     /// - Returns: Module reference.
     @inlinable func module(_ name: String) -> PyAPI.Reference? {
-        py_getmodule(name)
+        if let module = py_getmodule(name) {
+            return module
+        }
+        if py_import(name) == 1 {
+            return PyAPI.returnValue
+        }
+        return nil
     }
 
     /// Returns the `__main__` module.

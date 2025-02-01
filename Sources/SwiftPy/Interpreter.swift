@@ -16,6 +16,8 @@ final class PerformanceMonitor {
     
     let signposter: OSSignposter
     var state: OSSignpostIntervalState?
+    var startTime: DispatchTime = .now()
+    static var executionTime: UInt64 = 0
     
     init() {
         signposter = OSSignposter(logger: Logger(OSLog(subsystem: "com.felfoldy.SwiftPy", category: .pointsOfInterest)))
@@ -23,10 +25,12 @@ final class PerformanceMonitor {
     
     @inlinable static func begin() {
         standard.state = standard.signposter.beginInterval("Python")
+        standard.startTime = DispatchTime.now()
     }
     
     @inlinable static func end() {
         if let state = standard.state {
+            executionTime = DispatchTime.now().uptimeNanoseconds - standard.startTime.uptimeNanoseconds
             standard.signposter.endInterval("Python", state)
         }
     }
@@ -96,28 +100,21 @@ public final class Interpreter {
     }
     
     func execute(_ code: String, filename: String = "<string>", mode: py_CompileMode = EXEC_MODE, module: PyAPI.Reference? = nil) {
-        let p0 = py_peek(0)
-        
-        let startTime = DispatchTime.now()
+        catchAndPrint {
+            if #available(macOS 12.0, iOS 15.0, *) {
+                PerformanceMonitor.begin()
+            }
 
-        if #available(macOS 12.0, iOS 15.0, *) {
-            PerformanceMonitor.begin()
-        }
+            let isExecuted = py_exec(code, filename, mode, module)
 
-        let isExecuted = py_exec(code, filename, mode, module)
-
-        if #available(macOS 12.0, iOS 15.0, *) {
-            PerformanceMonitor.end()
-        }
-        
-        let endTime = DispatchTime.now()
-        let nanoTime = endTime.uptimeNanoseconds - startTime.uptimeNanoseconds
-        Interpreter.output.executionTime(nanoTime)
-
-        if !isExecuted {
-            Interpreter.isFailed = true
-            py_printexc()
-            py_clearexc(p0)
+            if #available(macOS 12.0, iOS 15.0, *) {
+                PerformanceMonitor.end()
+                Interpreter.output.executionTime(
+                    PerformanceMonitor.executionTime
+                )
+            }
+            
+            return isExecuted
         }
     }
 
@@ -137,7 +134,7 @@ public final class Interpreter {
         return nil
     }
 
-    public func repl(input: String) {
+    func repl(input: String) {
         for line in input.components(separatedBy: .newlines) {
             if line.isEmpty, !replLines.isEmpty {
                 let joinedBuffer = replLines.joined(separator: "\n")
@@ -156,6 +153,14 @@ public final class Interpreter {
 
             execute(line, filename: "<stdin>", mode: SINGLE_MODE)
         }
+    }
+
+    func catchAndPrint(_ call: () -> Bool) {
+        let p0 = py_peek(0)
+        if call() { return }
+        Interpreter.isFailed = true
+        py_printexc()
+        py_clearexc(p0)
     }
 }
 
@@ -202,11 +207,21 @@ public extension Interpreter {
     /// - Parameter text: Text to complete.
     /// - Returns: Array of possible results.
     static func complete(_ text: String) -> [String] {
-        var module = py_getmodule("interpreter")
-        if module == nil, py_import("interpreter") == 1 {
-            module = PyAPI.returnValue
+        let module = Interpreter.shared.module("interpreter")
+        let r0 = py_getreg(0)
+        text.toPython(r0)
+        return [String](Interpreter.call(module?["completions"], r0)) ?? []
+    }
+    
+    /// Calls a function with the given arguments.
+    /// - Parameters:
+    ///   - function: Function to call
+    ///   - arguments: Arguments to pass.
+    /// - Returns: Return value from the function.
+    static func call(_ function: PyAPI.Reference?, _ arguments: PyAPI.Reference?...) -> PyAPI.Reference? {
+        shared.catchAndPrint {
+            py_call(function, Int32(arguments.count), arguments[0])
         }
-        module?["text_to_complete"]?.set(text)
-        return [String](evaluate("completions()", module: module)) ?? []
+        return PyAPI.returnValue
     }
 }

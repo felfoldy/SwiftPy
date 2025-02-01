@@ -40,9 +40,13 @@ struct OutputStreamTests {
         let outputStream = TestOutputStream()
         Interpreter.output = outputStream
         
+        _ = Interpreter.complete("fo")
         Interpreter.input("for i in range(0, 3):")
+        #expect(outputStream.lastExecutionTime == nil)
         Interpreter.input("    i")
+        #expect(outputStream.lastExecutionTime == nil)
         Interpreter.input("")
+        #expect(outputStream.lastExecutionTime != nil)
         
         #expect(outputStream.lastInput == "")
         #expect(outputStream.lastStdOut == "2")

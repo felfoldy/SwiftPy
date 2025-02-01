@@ -1,8 +1,6 @@
 from rlcompleter import Completer
 
-text_to_complete = ''
-
-def completions() -> list[str]:
+def completions(text: str) -> list[str]:
     completer = Completer()
 
     completion_list = []
@@ -10,7 +8,7 @@ def completions() -> list[str]:
     
     # Get completions until no more are found
     while True:
-        completion = completer.complete(text_to_complete, state)
+        completion = completer.complete(text, state)
         if completion is None:
             break
         completion_list.append(completion)
