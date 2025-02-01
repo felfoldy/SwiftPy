@@ -63,20 +63,33 @@ public enum RegisterFunctionMacro: ExpressionMacro {
                 block = "{ _ in" + block.dropFirst()
             }
             
-            let functions = returnType == "None" ? "voidFunctions" :  "returningFunctions"
-            let returnSetter = returnType == "None" ? "setNone()" : "set(result)"
+            if returnType == "None" {
+                return ExprSyntax("""
+                FunctionRegistration.void(
+                    id: "\(raw: id)",
+                    signature: \(raw: signature),
+                    block: \(raw: block),
+                    cFunction: { argc, argv in
+                        FunctionStore.voidFunctions["\(raw: id)"]?(\(raw: createArguments))
+                        PyAPI.returnValue.setNone()
+                        return true
+                    }
+                )
+                """)
+            }
             
             return ExprSyntax("""
-        FunctionRegistration(
-            id: "\(raw: id)",
-            signature: \(raw: signature)
-        ) \(raw: block)
-        cFunction: { argc, argv in
-            let result = FunctionStore.\(raw: functions)["\(raw: id)"]?(\(raw: createArguments))
-            PyAPI.returnValue.\(raw: returnSetter)
-            return true
-        }
-        """)
+            FunctionRegistration.returning(
+                id: "\(raw: id)",
+                signature: \(raw: signature),
+                block: \(raw: block),
+                cFunction: { argc, argv in
+                    let result = FunctionStore.returningFunctions["\(raw: id)"]?(\(raw: createArguments))
+                    PyAPI.returnValue.set(result)
+                    return true
+                }
+            )
+            """)
         }
         
         throw MacroExpansionErrorMessage("Macro is not available in this context.")

@@ -47,30 +47,32 @@ public struct FunctionRegistration {
     public init(
         id: String,
         signature: String,
-        block: @escaping VoidFunction,
         cFunction: PyAPI.CFunction
     ) {
-        FunctionStore.voidFunctions[id] = block
-        
         self.id = id
         self.cFunction = cFunction
         self.signature = signature
         
         log.info("Register function: \(signature)")
     }
-
-    public init(
+    
+    public static func void(
+        id: String,
+        signature: String,
+        block: @escaping VoidFunction,
+        cFunction: PyAPI.CFunction
+    ) -> FunctionRegistration {
+        FunctionStore.voidFunctions[id] = block
+        return FunctionRegistration(id: id, signature: signature, cFunction: cFunction)
+    }
+    
+    public static func returning(
         id: String,
         signature: String,
         block: @escaping ReturningFunction,
         cFunction: PyAPI.CFunction
-    ) {
+    ) -> FunctionRegistration {
         FunctionStore.returningFunctions[id] = block
-
-        self.id = id
-        self.cFunction = cFunction
-        self.signature = signature
-
-        log.info("Register function: \(signature)")
+        return FunctionRegistration(id: id, signature: signature, cFunction: cFunction)
     }
 }

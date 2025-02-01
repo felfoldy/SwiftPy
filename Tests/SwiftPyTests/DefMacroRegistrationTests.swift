@@ -15,34 +15,34 @@ struct DefMacroRegistrationTests {
     
     @Test func voidFunctionRegistrationByName() {
         var executed = false
-
+        
         let function = #def("custom") {
             executed = true
         }
-
+        
         #expect(FunctionStore.voidFunctions[function.id] != nil)
-
+        
         main.bind(function)
         Interpreter.execute("custom()")
-
+        
         #expect(executed)
     }
     
     @Test func voidFunctionRegistrationBySignature() {
         var executed = false
-
+        
         let function = #def("custom() -> None") {
             executed = true
         }
-
+        
         #expect(FunctionStore.voidFunctions[function.id] != nil)
-
+        
         main.bind(function)
         Interpreter.execute("custom()")
-
+        
         #expect(executed)
     }
-
+    
     @Test func intFunctionRegistration() {
         let function = #def("value() -> int") {
             42
@@ -98,4 +98,5 @@ struct DefMacroRegistrationTests {
         Interpreter.execute("x = add(10, 3)")
 
         #expect(main["x"] == 13)
-    }}
+    }
+}
