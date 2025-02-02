@@ -32,4 +32,8 @@ struct InterpreterTests {
         Interpreter.execute("from rlcompleter import Completer")
         #expect(Interpreter.main["Completer"] != nil)
     }
+    
+    @Test func evaluate() {
+        #expect(Interpreter.evaluate("3 + 4") == 7)
+    }
 }
