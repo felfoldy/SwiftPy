@@ -73,6 +73,11 @@ public extension PyAPI.Reference {
         py_getdict(self, py_name(name))
     }
     
+    @inlinable subscript(index: Int) -> PyAPI.Reference? {
+        let argument = Int(bitPattern: self) + (index << 4)
+        return PyAPI.Reference(bitPattern: argument)
+    }
+    
     @inlinable func bind(_ function: FunctionRegistration) {
         py_bind(self, function.signature, function.cFunction)
     }

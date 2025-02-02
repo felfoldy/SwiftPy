@@ -18,8 +18,7 @@ public struct FunctionArguments {
     }
 
     @inlinable public subscript(index: Int) -> PyAPI.Reference? {
-        let argument = Int(bitPattern: argv) + (index << 4)
-        return PyAPI.Reference(bitPattern: argument)
+        argv?[index]
     }
     
     @inlinable public subscript<T: PythonConvertible>(index: Int) -> T? {
