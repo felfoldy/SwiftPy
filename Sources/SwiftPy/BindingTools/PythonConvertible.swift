@@ -10,7 +10,7 @@ import pocketpy
 @MainActor
 public protocol PythonConvertible {
     @inlinable init?(_ reference: PyAPI.Reference)
-    @inlinable func toPython(_ reference: PyAPI.Reference)
+    @inlinable mutating func toPython(_ reference: PyAPI.Reference)
 
     static var pyType: py_Type { get }
 }
@@ -23,7 +23,8 @@ extension PythonConvertible {
     
     @inlinable public func toPython(_ reference: PyAPI.Reference?) {
         guard let reference else { return }
-        self.toPython(reference)
+        var copy = self
+        copy.toPython(reference)
     }
 }
 

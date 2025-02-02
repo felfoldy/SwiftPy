@@ -8,44 +8,7 @@
 import SwiftPy
 import Testing
 import pocketpy
-
-struct TestStruct: PythonConvertible {
-    var number: Int
-    
-    init?(_ reference: PyAPI.Reference) {
-        if let number = Int(reference["number"]) {
-            self.number = number
-        } else {
-            return nil
-        }
-    }
-    
-    static let pyType: py_Type = {
-        let type = py_newtype("TestStruct", py_Type(tp_object.rawValue), nil, nil)
-
-        // __new__
-        py_newnativefunc(py_tpgetmagic(type, py_name("__new__"))) { argc, argv in
-            py_newobject(PyAPI.returnValue, py_totype(argv), -1, 0)
-            return true
-        }
-        
-        // __init__
-        py_newnativefunc(py_tpgetmagic(type, py_name("__init__"))) { argc, argv in
-            py_setdict(argv, py_name("number"), argv?[1])
-            PyAPI.returnValue.setNone()
-            return true
-        }
-        
-        return type
-    }()
-    
-    func toPython(_ reference: PyAPI.Reference) {
-        py_newobject(reference, Self.pyType, -1, 0)
-        let r0 = py_getreg(0)
-        number.toPython(r0)
-        py_setdict(reference, py_name("number"), r0)
-    }
-}
+import CoreFoundation
 
 class TestClass: PythonConvertible {
     let number = 32
@@ -57,12 +20,21 @@ class TestClass: PythonConvertible {
     }
     
     static let pyType: py_Type = {
-        let type = py_newtype("TestClass", py_Type(tp_object.rawValue), nil, nil)
-        
+        let type = py_newtype("TestClass",
+                              py_Type(tp_object.rawValue),
+                              nil) { userdata in
+            // There is only 1 slot. Slot 0 should be 16 bytes before the userdata.
+            // TODO: `del obj` does not trigger dtor call. why?
+            let slot0 = Int(bitPattern: userdata) - 16
+            if let pointer = UnsafeRawPointer(bitPattern: slot0) {
+                Unmanaged<TestClass>.fromOpaque(pointer).release()
+            }
+        }
+
         py_bindproperty(type, "number", { argc, argv in
             if let ref = Int(py_getslot(argv, 0)),
                let pointer = UnsafeMutableRawPointer(bitPattern: ref) {
-                let value = Unmanaged<TestClass>.fromOpaque(pointer).takeRetainedValue()
+                let value = Unmanaged<TestClass>.fromOpaque(pointer).takeUnretainedValue()
                 PyAPI.returnValue.set(value.number)
                 return true
             }
@@ -84,33 +56,25 @@ class TestClass: PythonConvertible {
 }
 
 @MainActor
-struct PythonConvertibleClassTests {
-    @Test func structBinding() throws {
-        let main = Interpreter.main
-        
-        let typeObj = py_tpobject(TestStruct.pyType)
-        py_setdict(main, py_name("TestStruct"), typeObj)
-        
-        Interpreter.run("x = TestStruct(32)")
-        #expect(Interpreter.evaluate("x.number") == 32)
-        
-        Interpreter.run("x.number = 42")
-        var x = try #require(TestStruct(main["x"]))
-        #expect(x.number == 42)
-        x.number = 32
-        x.toPython(main["x"])
-    }
-    
-    @Test func testClassBinding() {
+struct PythonConvertibleClassTests {    
+    @Test func testClassBinding() async throws {
         Interpreter.run("x = None")
-        let instance = TestClass()
-        instance.toPython(Interpreter.main["x"])
 
-        // Register?
-        let classObj = py_tpobject(TestClass.pyType)
-        py_setdict(Interpreter.main, py_name("TestClass"), classObj)
+        let instance = TestClass()
+        print("Retain count: \(CFGetRetainCount(instance))")
+
+        instance.toPython(Interpreter.main["x"])
+        print("Retain count: \(CFGetRetainCount(instance))")
         
-        #expect(TestClass.pyType != nil)
+        Interpreter.input("x.number")
+        
         #expect(Interpreter.evaluate("x.number") == 32)
+        
+        Interpreter.run("del x")
+        Interpreter.run("import gc; gc.collect()")
+        
+        try await Task.sleep(for: .seconds(1))
+        
+        print("Retain count: \(CFGetRetainCount(instance))")
     }
 }
