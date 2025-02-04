@@ -23,6 +23,18 @@ public extension PyAPI {
     }
 }
 
+public typealias PyType = py_Type
+
+public extension PyType {
+    static let None = PyType(tp_NoneType.rawValue)
+    static let bool = PyType(tp_bool.rawValue)
+    static let int = PyType(tp_int.rawValue)
+    static let str = PyType(tp_str.rawValue)
+    static let float = PyType(tp_float.rawValue)
+    static let list = PyType(tp_list.rawValue)
+    static let object = PyType(tp_object.rawValue)
+}
+
 public extension Interpreter {
     /// Returns the module with the given name. If it can't find it, tries to import it.
     /// - Parameter name: Module name for example: `__main__`
@@ -54,7 +66,7 @@ public extension PyAPI.Reference {
     }
 
     @inlinable func isNone() -> Bool {
-        py_istype(self, py_Type(tp_NoneType.rawValue))
+        py_istype(self, PyType.None)
     }
 
     @inlinable func set(_ value: PythonConvertible?) {

@@ -12,7 +12,7 @@ public protocol PythonConvertible {
     @inlinable init?(_ reference: PyAPI.Reference)
     @inlinable mutating func toPython(_ reference: PyAPI.Reference)
 
-    static var pyType: py_Type { get }
+    static var pyType: PyType { get }
 }
 
 extension PythonConvertible {
@@ -38,7 +38,7 @@ extension Bool: PythonConvertible {
         py_newbool(reference, self)
     }
 
-    public static let pyType = py_Type(tp_bool.rawValue)
+    public static let pyType = PyType.bool
 }
 
 extension Int: PythonConvertible {
@@ -51,7 +51,7 @@ extension Int: PythonConvertible {
         py_newint(reference, py_i64(self))
     }
 
-    public static let pyType = py_Type(tp_int.rawValue)
+    public static let pyType = PyType.int
 }
 
 extension String: PythonConvertible {
@@ -64,7 +64,7 @@ extension String: PythonConvertible {
         py_newstr(reference, self)
     }
 
-    public static let pyType = py_Type(tp_str.rawValue)
+    public static let pyType = PyType.str
 }
 
 extension Double: PythonConvertible {
@@ -77,10 +77,9 @@ extension Double: PythonConvertible {
         py_newfloat(reference, self)
     }
 
-    public static let pyType = py_Type(tp_float.rawValue)
+    public static let pyType = PyType.float
 }
 
-// TODO:
 extension Array: PythonConvertible where Element: PythonConvertible {
     public init?(_ reference: PyAPI.Reference) {
         guard reference.isType(Self.self) else { return nil }
@@ -104,5 +103,5 @@ extension Array: PythonConvertible where Element: PythonConvertible {
         }
     }
 
-    public static var pyType: py_Type { py_Type(tp_list.rawValue) }
+    public static var pyType: PyType { .list }
 }

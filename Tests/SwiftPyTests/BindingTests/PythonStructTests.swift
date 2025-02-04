@@ -24,8 +24,8 @@ struct TestStruct: PythonConvertible {
         }
     }
     
-    static let pyType: py_Type = {
-        let type = py_newtype("TestStruct", py_Type(tp_object.rawValue), Interpreter.main, nil)
+    static let pyType: PyType = {
+        let type = py_newtype("TestStruct", .object, Interpreter.main, nil)
 
         // __new__
         py_newnativefunc(py_tpgetmagic(type, py_name("__new__"))) { argc, argv in

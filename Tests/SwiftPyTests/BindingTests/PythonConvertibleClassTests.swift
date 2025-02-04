@@ -19,10 +19,8 @@ class TestClass: PythonConvertible {
         self.init()
     }
     
-    static let pyType: py_Type = {
-        let type = py_newtype("TestClass",
-                              py_Type(tp_object.rawValue),
-                              nil) { userdata in
+    static let pyType: PyType = {
+        let type = py_newtype("TestClass", .object, nil) { userdata in
             if let pointer = userdata?.load(as: UnsafeRawPointer.self) {
                 Unmanaged<TestClass>.fromOpaque(pointer).release()
             }
@@ -65,3 +63,26 @@ struct PythonConvertibleClassTests {
         print("Retain count: \(CFGetRetainCount(instance))") // Still 3?
     }
 }
+
+//@MainActor var isDtorCalled = false
+//
+//@MainActor
+//@Test func testDtor() {
+//    py_initialize()
+//
+//    py_import("gc")
+//    
+//    let main = py_getmodule("__main__")
+//    let tp_MyClass = py_newtype("MyClass", py_Type(tp_object.rawValue), main) { _ in
+//        isDtorCalled = true
+//    }
+//    
+//    // Create test object.
+//    py_newobject(py_emplacedict(main, py_name("test")), tp_MyClass, 0, 0)
+//    
+//    // del test
+//    py_deldict(main, py_name("test"))
+//    py_exec("gc.collect()", "<string>", EXEC_MODE, main)
+//
+//    #expect(isDtorCalled)
+//}
