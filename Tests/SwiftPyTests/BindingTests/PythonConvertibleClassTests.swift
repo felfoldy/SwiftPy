@@ -47,42 +47,27 @@ class TestClass: PythonConvertible {
 
 @MainActor
 struct PythonConvertibleClassTests {    
-    @Test func testClassBinding() async throws {
+    @Test func testClassReferenceCounting() async throws {
         let main = Interpreter.main
         
-        let instance = TestClass()
-        print("Retain count: \(CFGetRetainCount(instance))") // 2
-
-        let r0 = py_getreg(0)
-        instance.toPython(r0)
-        main.setAttribute("test", r0)
-        print("Retain count: \(CFGetRetainCount(instance))") // 3
+        var instance: TestClass? = TestClass()
+        func retainCount() -> Int {
+            if let instance {
+                Int(CFGetRetainCount(instance))
+            } else { 0 }
+        }
+        
+        var lastRetainCount = retainCount()
+        
+        instance!.toPython(py_emplacedict(main, py_name("test")))
+        #expect(lastRetainCount < retainCount())
+        lastRetainCount = retainCount()
 
         #expect(Interpreter.evaluate("test.number") == 32)
         
-        print("Retain count: \(CFGetRetainCount(instance))") // Still 3?
+        Interpreter.run("del test")
+        Interpreter.run("import gc; gc.collect()")
+        instance = nil
+        #expect(retainCount() == 0)
     }
 }
-
-//@MainActor var isDtorCalled = false
-//
-//@MainActor
-//@Test func testDtor() {
-//    py_initialize()
-//
-//    py_import("gc")
-//    
-//    let main = py_getmodule("__main__")
-//    let tp_MyClass = py_newtype("MyClass", py_Type(tp_object.rawValue), main) { _ in
-//        isDtorCalled = true
-//    }
-//    
-//    // Create test object.
-//    py_newobject(py_emplacedict(main, py_name("test")), tp_MyClass, 0, 0)
-//    
-//    // del test
-//    py_deldict(main, py_name("test"))
-//    py_exec("gc.collect()", "<string>", EXEC_MODE, main)
-//
-//    #expect(isDtorCalled)
-//}

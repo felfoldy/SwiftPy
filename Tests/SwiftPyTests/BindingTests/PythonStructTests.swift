@@ -55,7 +55,7 @@ struct TestStruct: PythonConvertible {
 struct PythonStructTests {
     @Test func structBinding() throws {
         let main = Interpreter.main
-        TestStruct.pyType
+        _ = TestStruct.pyType
         
         // Create from python.
         Interpreter.run("x = TestStruct(32)")

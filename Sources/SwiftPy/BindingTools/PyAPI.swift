@@ -33,6 +33,7 @@ public extension PyType {
     static let float = PyType(tp_float.rawValue)
     static let list = PyType(tp_list.rawValue)
     static let object = PyType(tp_object.rawValue)
+    static let dict = PyType(tp_dict.rawValue)
 }
 
 public extension Interpreter {
