@@ -21,6 +21,12 @@ public extension PyAPI {
     @inlinable static var returnValue: Reference {
         py_retval()
     }
+
+    @inlinable static func `return`(_ value: PythonConvertible?) {
+        py_retval().set(value)
+    }
+
+    static let pointerSize = Int32(MemoryLayout<UnsafeRawPointer>.size)
 }
 
 public typealias PyType = py_Type
@@ -34,6 +40,18 @@ public extension PyType {
     static let list = PyType(tp_list.rawValue)
     static let object = PyType(tp_object.rawValue)
     static let dict = PyType(tp_dict.rawValue)
+    
+    @discardableResult
+    @inlinable func bindMagic(_ name: String, function: PyAPI.CFunction) -> PyType {
+        py_newnativefunc(py_tpgetmagic(self, py_name(name)), function)
+        return self
+    }
+    
+    @discardableResult
+    func bindProperty(_ name: String, getter: PyAPI.CFunction) -> PyType {
+        py_bindproperty(self, name, getter, nil)
+        return self
+    }
 }
 
 public extension Interpreter {

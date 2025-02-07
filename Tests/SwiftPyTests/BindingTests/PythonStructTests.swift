@@ -49,6 +49,10 @@ struct TestStruct: PythonConvertible {
         number.toPython(r0)
         py_setdict(reference, py_name("number"), r0)
     }
+    
+    static func fromPython(_ reference: PyAPI.Reference) -> TestStruct {
+        TestStruct(number: Int(py_getdict(reference, py_name("number"))) ?? 0)
+    }
 }
 
 @MainActor

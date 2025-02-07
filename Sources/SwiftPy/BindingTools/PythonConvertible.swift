@@ -9,90 +9,105 @@ import pocketpy
 
 @MainActor
 public protocol PythonConvertible {
-    @inlinable init?(_ reference: PyAPI.Reference)
     @inlinable mutating func toPython(_ reference: PyAPI.Reference)
+    @inlinable static func fromPython(_ reference: PyAPI.Reference) -> Self
 
     static var pyType: PyType { get }
 }
 
-extension PythonConvertible {
-    @inlinable public init?(_ reference: PyAPI.Reference?) {
-        guard let reference else { return nil }
-        self.init(reference)
+public extension PythonConvertible {
+    @inlinable init?(_ reference: PyAPI.Reference?) {
+        guard let value = Self.fromPython(reference) else { return nil }
+        self = value
     }
     
-    @inlinable public func toPython(_ reference: PyAPI.Reference?) {
+    @inlinable func toPython(_ reference: PyAPI.Reference?) {
         guard let reference else { return }
         var copy = self
         copy.toPython(reference)
     }
+    
+    @inlinable static func fromPython(_ reference: PyAPI.Reference?) -> Self? {
+        guard let reference, py_istype(reference, pyType) else { return nil }
+        return fromPython(reference)
+    }
+}
+
+public extension UnsafeMutableRawPointer {
+    @inlinable func store(in userdata: UnsafeMutableRawPointer?) {
+        userdata?.storeBytes(of: self, as: UnsafeRawPointer.self)
+    }
+}
+
+public extension PythonConvertible where Self: AnyObject {
+    @inlinable static func release(from userdata: UnsafeRawPointer?) {
+        if let pointer = userdata?.load(as: UnsafeRawPointer.self) {
+            Unmanaged<Self>.fromOpaque(pointer).release()
+        }
+    }
+    
+    @inlinable func retainedReference() -> UnsafeMutableRawPointer {
+        Unmanaged.passRetained(self).toOpaque()
+    }
+    
+    @inlinable static func load(from userdata: UnsafeRawPointer?) -> Unmanaged<Self>? {
+        if let pointer = userdata?.load(as: UnsafeRawPointer.self) {
+            return Unmanaged<Self>.fromOpaque(pointer)
+        }
+        return nil
+    }
 }
 
 extension Bool: PythonConvertible {
-    @inlinable public init?(_ reference: PyAPI.Reference) {
-        guard reference.isType(Self.self) else { return nil }
-        self = py_tobool(reference)
-    }
-
+    public static let pyType = PyType.bool
+    
     @inlinable public func toPython(_ reference: PyAPI.Reference) {
         py_newbool(reference, self)
     }
-
-    public static let pyType = PyType.bool
+    
+    @inlinable public static func fromPython(_ reference: PyAPI.Reference) -> Bool {
+        py_tobool(reference)
+    }
 }
 
 extension Int: PythonConvertible {
-    @inlinable public init?(_ reference: PyAPI.Reference) {
-        guard reference.isType(Self.self) else { return nil }
-        self = Int(py_toint(reference))
-    }
+    public static let pyType = PyType.int
 
     @inlinable public func toPython(_ reference: PyAPI.Reference) {
         py_newint(reference, py_i64(self))
     }
 
-    public static let pyType = PyType.int
+    @inlinable public static func fromPython(_ reference: PyAPI.Reference) -> Int {
+        Int(py_toint(reference))
+    }
 }
 
 extension String: PythonConvertible {
-    @inlinable public init?(_ reference: PyAPI.Reference) {
-        guard reference.isType(Self.self) else { return nil }
-        self = String(cString: py_tostr(reference))
-    }
+    public static let pyType = PyType.str
 
     @inlinable public func toPython(_ reference: PyAPI.Reference) {
         py_newstr(reference, self)
     }
 
-    public static let pyType = PyType.str
+    @inlinable public static func fromPython(_ reference: PyAPI.Reference) -> String {
+        String(cString: py_tostr(reference))
+    }
 }
 
 extension Double: PythonConvertible {
-    @inlinable public init?(_ reference: PyAPI.Reference) {
-        guard reference.isType(Self.self) else { return nil }
-        self = Double(py_tofloat(reference))
-    }
+    public static let pyType = PyType.float
 
     @inlinable public func toPython(_ reference: PyAPI.Reference) {
         py_newfloat(reference, self)
     }
 
-    public static let pyType = PyType.float
+    @inlinable public static func fromPython(_ reference: PyAPI.Reference) -> Double {
+        Double(py_tofloat(reference))
+    }
 }
 
 extension Array: PythonConvertible where Element: PythonConvertible {
-    public init?(_ reference: PyAPI.Reference) {
-        guard reference.isType(Self.self) else { return nil }
-        
-        var items: [Element] = []
-        for i in 0 ..< py_list_len(reference) {
-            if let item = Element(py_list_getitem(reference, i)) {
-                items.append(item)
-            }
-        }
-
-        self = items
-    }
+    public static var pyType: PyType { .list }
     
     public func toPython(_ reference: PyAPI.Reference) {
         py_newlist(reference)
@@ -103,5 +118,14 @@ extension Array: PythonConvertible where Element: PythonConvertible {
         }
     }
 
-    public static var pyType: PyType { .list }
+    public static func fromPython(_ reference: PyAPI.Reference) -> [Element] {
+        var items: [Element] = []
+        for i in 0 ..< py_list_len(reference) {
+            if let item = Element.fromPython(py_list_getitem(reference, i)) {
+                items.append(item)
+            }
+        }
+
+        return items
+    }
 }

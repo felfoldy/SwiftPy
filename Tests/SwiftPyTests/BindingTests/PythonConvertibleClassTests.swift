@@ -10,38 +10,46 @@ import Testing
 import pocketpy
 import CoreFoundation
 
-class TestClass: PythonConvertible {
-    var number = 32
+final class TestClass {
+    let number: Int
     
-    init() {}
-    
-    required convenience init?(_ reference: PyAPI.Reference) {
-        self.init()
+    init(number: Int) {
+        self.number = number
     }
-    
+}
+
+extension TestClass: PythonConvertible {
     static let pyType: PyType = {
-        let type = py_newtype("TestClass", .object, nil) { userdata in
-            if let pointer = userdata?.load(as: UnsafeRawPointer.self) {
-                Unmanaged<TestClass>.fromOpaque(pointer).release()
-            }
+        py_newtype("TestClass", .object, Interpreter.main) { userdata in
+            TestClass.load(from: userdata)?.release()
         }
-
-        py_bindproperty(type, "number", { argc, argv in
-            let pointer = py_touserdata(argv)
-                .load(as: UnsafeRawPointer.self)
-            let obj = Unmanaged<TestClass>.fromOpaque(pointer)
-                .takeUnretainedValue()
-            PyAPI.returnValue.set(obj.number)
+        .bindMagic("__new__") { _, _ in
+            py_newobject(PyAPI.returnValue, pyType, 0, PyAPI.pointerSize)
             return true
-        }, nil)
+        }
+        .bindMagic("__init__") { argc, argv in
+            let userdata = py_touserdata(argv?[0])
+            let number = Int.fromPython(argv?[1])!
+            TestClass(number: number)
+                .retainedReference()
+                .store(in: userdata)
 
-        return type
+            PyAPI.return(.none)
+            return true
+        }
+        .bindProperty("number") { argc, argv in
+            PyAPI.return(TestClass(argv)?.number)
+            return true
+        }
     }()
     
     func toPython(_ reference: PyAPI.Reference) {
-        let pointer = Unmanaged.passRetained(self).toOpaque()
-        let userdata = py_newobject(reference, TestClass.pyType, 0, Int32(MemoryLayout<UnsafeRawPointer>.size))
-        userdata?.storeBytes(of: pointer, as: UnsafeRawPointer.self)
+        let userdata = py_newobject(reference, TestClass.pyType, 0, PyAPI.pointerSize)
+        retainedReference().store(in: userdata)
+    }
+
+    static func fromPython(_ reference: PyAPI.Reference) -> TestClass {
+        load(from: py_touserdata(reference))!.takeUnretainedValue()
     }
 }
 
@@ -50,7 +58,7 @@ struct PythonConvertibleClassTests {
     @Test func testClassReferenceCounting() async throws {
         let main = Interpreter.main
         
-        var instance: TestClass? = TestClass()
+        var instance: TestClass? = TestClass(number: 32)
         func retainCount() -> Int {
             if let instance {
                 Int(CFGetRetainCount(instance))
@@ -69,5 +77,10 @@ struct PythonConvertibleClassTests {
         Interpreter.run("import gc; gc.collect()")
         instance = nil
         #expect(retainCount() == 0)
+    }
+    
+    @Test func initFromPython() async throws {
+        Interpreter.run("test = TestClass(32)")
+        #expect(Interpreter.evaluate("test.number") == 32)
     }
 }
