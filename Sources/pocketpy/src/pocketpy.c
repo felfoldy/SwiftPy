@@ -534,7 +534,7 @@ void ModuleDict__dtor(ModuleDict* self);
 void ModuleDict__set(ModuleDict* self, const char* key, py_TValue val);
 py_TValue* ModuleDict__try_get(ModuleDict* self, const char* path);
 bool ModuleDict__contains(ModuleDict* self, const char* path);
-void ModuleDict__apply_mark(ModuleDict* self, void (*marker)(PyObject*));
+void ModuleDict__apply_mark(ModuleDict* self);
 
 // objects/object.h
 
@@ -560,6 +560,7 @@ void* PyObject__userdata(PyObject* self);
 #define PK_OBJ_SLOTS_SIZE(slots) ((slots) >= 0 ? sizeof(py_TValue) * (slots) : sizeof(NameDict))
 
 void PyObject__dtor(PyObject* self);
+void PyObject__mark(PyObject* self);
 
 // interpreter/heap.h
 typedef struct ManagedHeap {
@@ -1485,7 +1486,7 @@ void VM__pop_frame(VM* self);
 bool pk__parse_int_slice(py_Ref slice, int length, int* start, int* stop, int* step);
 bool pk__normalize_index(int* index, int length);
 
-void pk__mark_value(py_TValue*);
+#define pk__mark_value(val) if((val)->is_ptr && !(val)->_obj->gc_marked) PyObject__mark((val)->_obj)
 void pk__mark_namedict(NameDict*);
 void pk__tp_set_marker(py_Type type, void (*gc_mark)(void*));
 bool pk__object_new(int argc, py_Ref argv);
@@ -2563,12 +2564,6 @@ void PyObject__dtor(PyObject* self) {
     if(self->slots == -1) NameDict__dtor(PyObject__dict(self));
 }
 
-static void mark_object(PyObject* obj);
-
-void pk__mark_value(py_TValue* val) {
-    if(val->is_ptr) mark_object(val->_obj);
-}
-
 void pk__mark_namedict(NameDict* dict) {
     for(int i = 0; i < dict->length; i++) {
         NameDict_KV* kv = c11__at(NameDict_KV, dict, i);
@@ -2582,8 +2577,9 @@ void pk__tp_set_marker(py_Type type, void (*gc_mark)(void*)) {
     ti->gc_mark = gc_mark;
 }
 
-static void mark_object(PyObject* obj) {
-    if(obj->gc_marked) return;
+void PyObject__mark(PyObject* obj) {
+    assert(!obj->gc_marked);
+
     obj->gc_marked = true;
 
     if(obj->slots > 0) {
@@ -2629,7 +2625,7 @@ void ManagedHeap__mark(ManagedHeap* self) {
         pk__mark_value(&vm->ascii_literals[i]);
     }
     // mark modules
-    ModuleDict__apply_mark(&vm->modules, mark_object);
+    ModuleDict__apply_mark(&vm->modules);
     // mark types
     int types_length = vm->types.length;
     // 0-th type is placeholder
@@ -4925,10 +4921,10 @@ bool ModuleDict__contains(ModuleDict* self, const char* path) {
     return ModuleDict__try_get(self, path) != NULL;
 }
 
-void ModuleDict__apply_mark(ModuleDict *self, void (*marker)(PyObject*)) {
-    if(self->left) ModuleDict__apply_mark(self->left, marker);
-    if(self->right) ModuleDict__apply_mark(self->right, marker);
-    marker(self->module._obj);
+void ModuleDict__apply_mark(ModuleDict *self) {
+    if(!self->module._obj->gc_marked) PyObject__mark(self->module._obj);
+    if(self->left) ModuleDict__apply_mark(self->left);
+    if(self->right) ModuleDict__apply_mark(self->right);
 }
 
 // src/common/_generated.c
@@ -14107,6 +14103,21 @@ static bool Random__new__(int argc, py_Ref argv) {
     return TypeError("Random(): expected 0 or 1 arguments, got %d", argc - 1);
 }
 
+static bool Random__init__(int argc, py_Ref argv) {
+    if(argc == 1) {
+        // do nothing
+    } else if(argc == 2) {
+        mt19937* ud = py_touserdata(py_arg(0));
+        PY_CHECK_ARG_TYPE(1, tp_int);
+        py_i64 seed = py_toint(py_arg(1));
+        mt19937__seed(ud, (uint32_t)seed);
+    } else {
+        return TypeError("Random(): expected 1 or 2 arguments, got %d");
+    }
+    py_newnone(py_retval());
+    return true;
+}
+
 static bool Random_seed(int argc, py_Ref argv) {
     PY_CHECK_ARGC(2);
     PY_CHECK_ARG_TYPE(1, tp_int);
@@ -14238,6 +14249,7 @@ void pk__add_module_random() {
     py_Type type = py_newtype("Random", tp_object, mod, NULL);
 
     py_bindmagic(type, __new__, Random__new__);
+    py_bindmagic(type, __init__, Random__init__);
     py_bindmethod(type, "seed", Random_seed);
     py_bindmethod(type, "random", Random_random);
     py_bindmethod(type, "uniform", Random_uniform);
