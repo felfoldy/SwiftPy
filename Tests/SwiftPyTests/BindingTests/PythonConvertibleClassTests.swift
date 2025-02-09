@@ -16,12 +16,20 @@ final class TestClass {
     init(number: Int) {
         self.number = number
     }
+    
+    private(set) var _cachedPythonReference: PyAPI.Reference?
 }
 
 extension TestClass: PythonConvertible {
-    static let pyType: PyType = {
-        py_newtype("TestClass", .object, Interpreter.main) { userdata in
-            TestClass.load(from: userdata)?.release()
+    static let pyType: PyType = PyType
+        .make("TestClass") { userdata in
+            guard let userdata,
+                  let unmanaged = TestClass.load(from: userdata)
+            else { return }
+            
+            let obj = unmanaged.takeRetainedValue()
+            UnsafeRawPointer(obj._cachedPythonReference)?.deallocate()
+            obj._cachedPythonReference = nil
         }
         .bindMagic("__new__") { _, _ in
             py_newobject(PyAPI.returnValue, pyType, 0, PyAPI.pointerSize)
@@ -34,6 +42,14 @@ extension TestClass: PythonConvertible {
                 .retainedReference()
                 .store(in: userdata)
 
+            let obj = TestClass(number: number)
+            obj.retainedReference().store(in: userdata)
+            
+            let pointer = UnsafeMutableRawPointer.allocate(byteCount: 16, alignment: 8)
+            let opaquePointer = OpaquePointer(pointer)
+            py_assign(opaquePointer, argv)
+            obj._cachedPythonReference = opaquePointer
+
             PyAPI.return(.none)
             return true
         }
@@ -41,11 +57,21 @@ extension TestClass: PythonConvertible {
             PyAPI.return(TestClass(argv)?.number)
             return true
         }
-    }()
     
     func toPython(_ reference: PyAPI.Reference) {
-        let userdata = py_newobject(reference, TestClass.pyType, 0, PyAPI.pointerSize)
+        if let _cachedPythonReference {
+            py_assign(reference, _cachedPythonReference)
+            return
+        }
+        
+        let userdata = TestClass.newPythonObject(reference)
         retainedReference().store(in: userdata)
+
+        // sizeof(py_TValue) == 16
+        let pointer = UnsafeMutableRawPointer.allocate(byteCount: 16, alignment: 8)
+        let opaquePointer = OpaquePointer(pointer)
+        py_assign(opaquePointer, reference)
+        _cachedPythonReference = opaquePointer
     }
 
     static func fromPython(_ reference: PyAPI.Reference) -> TestClass {
@@ -54,33 +80,39 @@ extension TestClass: PythonConvertible {
 }
 
 @MainActor
-struct PythonConvertibleClassTests {    
-    @Test func testClassReferenceCounting() async throws {
+struct PythonConvertibleClassTests {
+    let type = TestClass.pyType
+    
+    @Test func returnCachedFromToPython() throws {
         let main = Interpreter.main
-        
-        var instance: TestClass? = TestClass(number: 32)
-        func retainCount() -> Int {
-            if let instance {
-                Int(CFGetRetainCount(instance))
-            } else { 0 }
-        }
-        
-        var lastRetainCount = retainCount()
-        
-        instance!.toPython(py_emplacedict(main, py_name("test")))
-        #expect(lastRetainCount < retainCount())
-        lastRetainCount = retainCount()
+        Interpreter.run("import gc")
 
-        #expect(Interpreter.evaluate("test.number") == 32)
+        let obj = TestClass(number: 12)
         
-        Interpreter.run("del test")
-        Interpreter.run("import gc; gc.collect()")
-        instance = nil
-        #expect(retainCount() == 0)
+        #expect(obj._cachedPythonReference == nil)
+        
+        obj.toPython(main.emplace("test3"))
+        
+        Interpreter.input("test3.number")
+        #expect(obj._cachedPythonReference != nil)
+        
+        // Uses cache.
+        obj.toPython(main.emplace("test4"))
+        
+        // TODO: Needed to remove reference. How to workaround?
+        py_newnone(obj._cachedPythonReference)
+        
+        Interpreter.run("del test3")
+        Interpreter.input("gc.collect()")
+        #expect(obj._cachedPythonReference != nil)
+        
+        Interpreter.run("del test4")
+        Interpreter.input("gc.collect()")
+        #expect(obj._cachedPythonReference == nil)
     }
     
-    @Test func initFromPython() async throws {
-        Interpreter.run("test = TestClass(32)")
-        #expect(Interpreter.evaluate("test.number") == 32)
+    @Test func createFromPython() throws {
+        let obj = try #require(Interpreter.evaluate("TestClass(12)"))
+        #expect(TestClass(obj)?.number == 12)
     }
 }

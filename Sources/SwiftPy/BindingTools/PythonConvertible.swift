@@ -31,6 +31,10 @@ public extension PythonConvertible {
         guard let reference, py_istype(reference, pyType) else { return nil }
         return fromPython(reference)
     }
+    
+    @inlinable static func newPythonObject(_ reference: PyAPI.Reference) -> UnsafeMutableRawPointer {
+        py_newobject(reference, pyType, 0, PyAPI.pointerSize)
+    }
 }
 
 public extension UnsafeMutableRawPointer {

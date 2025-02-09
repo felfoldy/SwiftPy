@@ -31,6 +31,7 @@ public extension PyAPI {
 
 public typealias PyType = py_Type
 
+@MainActor
 public extension PyType {
     static let None = PyType(tp_NoneType.rawValue)
     static let bool = PyType(tp_bool.rawValue)
@@ -51,6 +52,13 @@ public extension PyType {
     func bindProperty(_ name: String, getter: PyAPI.CFunction) -> PyType {
         py_bindproperty(self, name, getter, nil)
         return self
+    }
+
+    @inlinable static func make(_ name: String,
+                                base: PyType = .object,
+                                module: PyAPI.Reference = Interpreter.main,
+                                dtor: py_Dtor) -> PyType {
+        py_newtype(name, base, module, dtor)
     }
 }
 
@@ -98,6 +106,10 @@ public extension PyAPI.Reference {
     
     @inlinable func setAttribute(_ name: String, _ value: PyAPI.Reference?) {
         py_setattr(self, py_name(name), value)
+    }
+    
+    @inlinable func emplace(_ name: String) -> PyAPI.Reference {
+        py_emplacedict(self, py_name(name))
     }
 
     @inlinable subscript(name: String) -> PyAPI.Reference? {
