@@ -64,14 +64,15 @@ extension TestClass: PythonConvertible {
             return
         }
         
+        // py_newobject
         let userdata = TestClass.newPythonObject(reference)
         retainedReference().store(in: userdata)
 
         // sizeof(py_TValue) == 16
         let pointer = UnsafeMutableRawPointer.allocate(byteCount: 16, alignment: 8)
-        let opaquePointer = OpaquePointer(pointer)
-        py_assign(opaquePointer, reference)
-        _cachedPythonReference = opaquePointer
+        let cPointer = OpaquePointer(pointer)
+        py_assign(cPointer, reference)
+        _cachedPythonReference = cPointer
     }
 
     static func fromPython(_ reference: PyAPI.Reference) -> TestClass {
