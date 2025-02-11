@@ -25,7 +25,7 @@ public enum RegisterFunctionMacro: ExpressionMacro {
                 "\""
             }
             
-            let id = UUID().uuidString
+            let id = context.makeUniqueName("function")
             
             var signature = node.arguments.first!.expression.description
             let block = node.trailingClosure?.description
@@ -66,11 +66,11 @@ public enum RegisterFunctionMacro: ExpressionMacro {
             if returnType == "None" {
                 return ExprSyntax("""
                 FunctionRegistration.void(
-                    id: "\(raw: id)",
+                    id: "\(id)",
                     signature: \(raw: signature),
                     block: \(raw: block),
                     cFunction: { argc, argv in
-                        FunctionStore.voidFunctions["\(raw: id)"]?(\(raw: createArguments))
+                        FunctionStore.voidFunctions["\(id)"]?(\(raw: createArguments))
                         PyAPI.returnValue.setNone()
                         return true
                     }
@@ -80,11 +80,11 @@ public enum RegisterFunctionMacro: ExpressionMacro {
             
             return ExprSyntax("""
             FunctionRegistration.returning(
-                id: "\(raw: id)",
+                id: "\(id)",
                 signature: \(raw: signature),
                 block: \(raw: block),
                 cFunction: { argc, argv in
-                    let result = FunctionStore.returningFunctions["\(raw: id)"]?(\(raw: createArguments))
+                    let result = FunctionStore.returningFunctions["\(id)"]?(\(raw: createArguments))
                     PyAPI.returnValue.set(result)
                     return true
                 }

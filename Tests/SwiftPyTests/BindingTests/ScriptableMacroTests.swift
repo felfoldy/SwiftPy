@@ -1,5 +1,5 @@
 //
-//  RegisterFunctionMacroTests.swift
+//  ScriptableMacroTests.swift
 //  SwiftPy
 //
 //  Created by Tibor Felföldy on 2025-02-09.
@@ -11,22 +11,32 @@ import SwiftPyMacros
 import XCTest
 
 let testMacros: [String: Macro.Type] = [
-    "def": RegisterFunctionMacro.self
+    "Scriptable": ScriptableMacro.self
 ]
 
 class RegisterFunctionMacroTests: XCTestCase {
     func testRegisterFunctionMacro() async throws {
         assertMacroExpansion(
         """
-        #def("macro") {
-            print("macro")
+        @Scriptable
+        class TestClass {
+            let number = 10
         }
         """,
         expandedSource:
         """
+        class TestClass {
+            let number = 10
+
+            private(set) var _cachedPythonReference: PyAPI.Reference?
+        }
+
+        extension TestClass: PythonConvertible {
+            static let pyType: PyType = .make("TestClass") { userdata in
+
+            }
+        }
         """,
         macros: testMacros)
     }
 }
-
-

@@ -11,6 +11,7 @@ import SwiftSyntaxMacros
 @main
 struct PythonToolsPlugin: CompilerPlugin {
     var providingMacros: [Macro.Type] = [
-        RegisterFunctionMacro.self
+        RegisterFunctionMacro.self,
+        ScriptableMacro.self,
     ]
 }
