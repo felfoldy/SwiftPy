@@ -26,6 +26,6 @@ public macro def<Out>(
     type: "RegisterFunctionMacro"
 )
 
-@attached(member, names: named(pyType), named(_cachedPythonReference))
-@attached(extension, conformances: PythonConvertible)
+@attached(member, names: named(_cachedPythonReference))
+@attached(extension, conformances: PythonBindable, names: named(pyType))
 public macro Scriptable() = #externalMacro(module: "SwiftPyMacros", type: "ScriptableMacro")

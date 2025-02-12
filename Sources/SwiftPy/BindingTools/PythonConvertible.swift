@@ -32,33 +32,12 @@ public extension PythonConvertible {
         return fromPython(reference)
     }
     
-    @inlinable static func newPythonObject(_ reference: PyAPI.Reference) -> UnsafeMutableRawPointer {
-        py_newobject(reference, pyType, 0, PyAPI.pointerSize)
-    }
-}
-
-public extension UnsafeMutableRawPointer {
-    @inlinable func store(in userdata: UnsafeMutableRawPointer?) {
-        userdata?.storeBytes(of: self, as: UnsafeRawPointer.self)
-    }
-}
-
-public extension PythonConvertible where Self: AnyObject {
-    @inlinable static func release(from userdata: UnsafeRawPointer?) {
-        if let pointer = userdata?.load(as: UnsafeRawPointer.self) {
-            Unmanaged<Self>.fromOpaque(pointer).release()
-        }
-    }
-    
-    @inlinable func retainedReference() -> UnsafeMutableRawPointer {
-        Unmanaged.passRetained(self).toOpaque()
-    }
-    
-    @inlinable static func load(from userdata: UnsafeRawPointer?) -> Unmanaged<Self>? {
-        if let pointer = userdata?.load(as: UnsafeRawPointer.self) {
-            return Unmanaged<Self>.fromOpaque(pointer)
-        }
-        return nil
+    @discardableResult
+    @inlinable
+    static func newPythonObject(_ reference: PyAPI.Reference) -> UnsafeMutableRawPointer {
+        let ud = py_newobject(reference, pyType, 0, PyAPI.pointerSize)
+        ud?.storeBytes(of: nil, as: UnsafeRawPointer?.self)
+        return ud!
     }
 }
 

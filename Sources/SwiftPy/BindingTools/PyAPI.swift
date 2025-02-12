@@ -25,6 +25,10 @@ public extension PyAPI {
     @inlinable static func `return`(_ value: PythonConvertible?) {
         py_retval().set(value)
     }
+    
+    @inlinable static func `throw`(_ error: PyType, _ message: String?) -> Bool {
+        py_throw(error, message)
+    }
 
     static let pointerSize = Int32(MemoryLayout<UnsafeRawPointer>.size)
 }
@@ -42,10 +46,23 @@ public extension PyType {
     static let object = PyType(tp_object.rawValue)
     static let dict = PyType(tp_dict.rawValue)
     
+    // Errors:
+    static let TypeError = PyType(tp_TypeError.rawValue)
+    
     @discardableResult
     @inlinable func bindMagic(_ name: String, function: PyAPI.CFunction) -> PyType {
         py_newnativefunc(py_tpgetmagic(self, py_name(name)), function)
         return self
+    }
+    
+    @inlinable
+    func magic(_ name: String, function: PyAPI.CFunction) {
+        py_newnativefunc(py_tpgetmagic(self, py_name(name)), function)
+    }
+    
+    @inlinable
+    func property(_ name: String, getter: PyAPI.CFunction, setter: PyAPI.CFunction? = nil) {
+        py_bindproperty(self, name, getter, setter)
     }
     
     @discardableResult
@@ -57,8 +74,11 @@ public extension PyType {
     @inlinable static func make(_ name: String,
                                 base: PyType = .object,
                                 module: PyAPI.Reference = Interpreter.main,
-                                dtor: py_Dtor) -> PyType {
-        py_newtype(name, base, module, dtor)
+                                dtor: py_Dtor,
+                                bind: (PyType) -> Void) -> PyType {
+        let type = py_newtype(name, base, module, dtor)
+        bind(type)
+        return type
     }
 }
 

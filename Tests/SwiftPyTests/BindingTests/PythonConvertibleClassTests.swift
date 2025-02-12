@@ -11,81 +11,62 @@ import pocketpy
 import CoreFoundation
 
 final class TestClass {
-    let number: Int
+    var number: Int
     
     init(number: Int) {
         self.number = number
     }
     
-    private(set) var _cachedPythonReference: PyAPI.Reference?
+    var _cachedPythonReference: PyAPI.Reference?
 }
 
-extension TestClass: PythonConvertible {
-    static let pyType: PyType = PyType
-        .make("TestClass") { userdata in
-            guard let userdata,
-                  let unmanaged = TestClass.load(from: userdata)
-            else { return }
-            
-            let obj = unmanaged.takeRetainedValue()
-            UnsafeRawPointer(obj._cachedPythonReference)?.deallocate()
-            obj._cachedPythonReference = nil
-        }
-        .bindMagic("__new__") { _, _ in
-            py_newobject(PyAPI.returnValue, pyType, 0, PyAPI.pointerSize)
+extension TestClass: PythonBindable {
+    static let pyType: PyType = .make("TestClass") { userdata in
+        deinitFromPython(userdata)
+    } bind: { type in
+        type.magic("__new__") { _, _ in
+            newPythonObject(PyAPI.returnValue)
             return true
         }
-        .bindMagic("__init__") { argc, argv in
-            let userdata = py_touserdata(argv?[0])
-            let number = Int.fromPython(argv?[1])!
-            TestClass(number: number)
-                .retainedReference()
-                .store(in: userdata)
-
-            let obj = TestClass(number: number)
-            obj.retainedReference().store(in: userdata)
+        type.magic("__init__") { argc, argv in
+            guard let number = Int(argv?[1]) else {
+                return PyAPI.throw(.TypeError, "missing 1 required positional argument: 'number'")
+            }
             
-            let pointer = UnsafeMutableRawPointer.allocate(byteCount: 16, alignment: 8)
-            let opaquePointer = OpaquePointer(pointer)
-            py_assign(opaquePointer, argv)
-            obj._cachedPythonReference = opaquePointer
-
+            TestClass(
+                number: number
+            )
+            .storeInPython(argv, userdata: py_touserdata(argv))
+            
             PyAPI.return(.none)
             return true
         }
-        .bindProperty("number") { argc, argv in
-            PyAPI.return(TestClass(argv)?.number)
-            return true
-        }
-    
-    func toPython(_ reference: PyAPI.Reference) {
-        if let _cachedPythonReference {
-            py_assign(reference, _cachedPythonReference)
-            return
-        }
-        
-        // py_newobject
-        let userdata = TestClass.newPythonObject(reference)
-        retainedReference().store(in: userdata)
+        type.property(
+            "number",
+            getter: { argc, argv in
+                PyAPI.return(TestClass(argv)?.number)
+                return true
+            },
+            setter: { argc, argv in
+                guard let value = Int(argv?[1]) else {
+                    return PyAPI.throw(.TypeError, "Expected Int at position 1")
+                }
 
-        // sizeof(py_TValue) == 16
-        let pointer = UnsafeMutableRawPointer.allocate(byteCount: 16, alignment: 8)
-        let cPointer = OpaquePointer(pointer)
-        py_assign(cPointer, reference)
-        _cachedPythonReference = cPointer
-    }
-
-    static func fromPython(_ reference: PyAPI.Reference) -> TestClass {
-        load(from: py_touserdata(reference))!.takeUnretainedValue()
+                TestClass(argv)?.number = value
+                
+                PyAPI.return(.none)
+                return true
+            }
+        )
     }
 }
 
 @MainActor
 struct PythonConvertibleClassTests {
+    let main = Interpreter.main
     let type = TestClass.pyType
     
     @Test func returnCachedFromToPython() throws {
-        let main = Interpreter.main
         Interpreter.run("import gc")
 
         let obj = TestClass(number: 12)
@@ -99,10 +80,7 @@ struct PythonConvertibleClassTests {
         
         // Uses cache.
         obj.toPython(main.emplace("test4"))
-        
-        // TODO: Needed to remove reference. How to workaround?
-        py_newnone(obj._cachedPythonReference)
-        
+                
         Interpreter.run("del test3")
         Interpreter.input("gc.collect()")
         #expect(obj._cachedPythonReference != nil)
@@ -115,5 +93,18 @@ struct PythonConvertibleClassTests {
     @Test func createFromPython() throws {
         let obj = try #require(Interpreter.evaluate("TestClass(12)"))
         #expect(TestClass(obj)?.number == 12)
+    }
+    
+    @Test func wrongInit() throws {
+        let test = try #require(Interpreter.evaluate("TestClass('str')"))
+        #expect(!test.isType(TestClass.self))
+    }
+    
+    @Test func pythonMutation() {
+        let obj = TestClass(number: 32)
+        obj.toPython(main.emplace("test4"))
+        Interpreter.run("test4.number = 'asd'")
+        
+        #expect(obj.number == 32)
     }
 }

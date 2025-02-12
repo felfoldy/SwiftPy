@@ -663,6 +663,8 @@ PK_API int py_import(const char* path) PY_RAISE PY_RETURN;
 
 /// Raise an exception by type and message. Always return false.
 PK_API bool py_exception(py_Type type, const char* fmt, ...) PY_RAISE;
+PK_API bool py_throw(py_Type type, const char* fmt) PY_RAISE;
+
 /// Raise an expection object. Always return false.
 PK_API bool py_raise(py_Ref) PY_RAISE;
 /// Print the current exception.

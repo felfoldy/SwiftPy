@@ -20,20 +20,29 @@ class RegisterFunctionMacroTests: XCTestCase {
         """
         @Scriptable
         class TestClass {
-            let number = 10
+            let intProperty: Int = 10
         }
         """,
         expandedSource:
         """
         class TestClass {
-            let number = 10
+            let intProperty: Int = 10
 
-            private(set) var _cachedPythonReference: PyAPI.Reference?
+            var _cachedPythonReference: PyAPI.Reference?
         }
 
-        extension TestClass: PythonConvertible {
+        extension TestClass: PythonBindable {
             static let pyType: PyType = .make("TestClass") { userdata in
-
+                deinitFromPython(userdata)
+            } bind: { type in
+                type.property(
+                    "int_property",
+                    getter: { _, argv in
+                        PyAPI.return(TestClass(argv)?.intProperty)
+                        return true
+                    },
+                    setter: nil
+                )
             }
         }
         """,
