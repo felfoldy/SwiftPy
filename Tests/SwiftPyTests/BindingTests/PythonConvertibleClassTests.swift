@@ -21,6 +21,10 @@ final class TestClass {
         number = 10
     }
     
+    func getNumber() -> Int {
+        number
+    }
+    
     var _cachedPythonReference: PyAPI.Reference?
 }
 
@@ -62,6 +66,10 @@ extension TestClass: PythonBindable {
         type.function("set_number(self) -> None") { _, argv in
             TestClass(argv)?.setNumber()
             return PyAPI.return(.none)
+        }
+        type.function("get_number(self) -> int") { _, argv in
+            let result = TestClass(argv)?.getNumber()
+            return PyAPI.return(result)
         }
     }
 }
@@ -122,5 +130,12 @@ struct PythonConvertibleClassTests {
         
         Interpreter.run("test5.set_number()")
         #expect(obj.number == 10)
+    }
+    
+    @Test func getNumber() {
+        let obj = TestClass(number: 32)
+        obj.toPython(main.emplace("test6"))
+        
+        #expect(Interpreter.evaluate("test6.get_number()") == 32)
     }
 }

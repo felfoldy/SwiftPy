@@ -98,7 +98,7 @@ extension VariableDeclSyntax {
             return """
             { _, argv in
                 guard let value = \(annotation)(argv?[1]) else {
-                    return PyAPI.throw(.TypeError, "Expected \(annotation) at position 1")
+                    return PyAPI.throw(.TypeError, "Expected \(annotation.pyType) at position 1")
                 }
                 \(className)(argv)?.\(identifier) = value
                 return PyAPI.return(.none)
@@ -125,17 +125,36 @@ extension FunctionDeclSyntax {
         
         let parameters = signature.parameterClause.parameters
         
+        let returnType: String = {
+            if let returnType = signature.returnClause?.type {
+                if let identifier = returnType.as(IdentifierTypeSyntax.self)?.name.text {
+                    return identifier.pyType
+                }
+                
+                context.warning(self, "unknown return type")
+            }
+            return "None"
+        }()
+        
         if parameters.isEmpty {
-            pySignature.append("(self) -> None")
+            pySignature.append("(self) -> \(returnType)")
         } else {
             context.warning(self, "parameters are not supported yet")
             return nil
         }
+        if returnType == "None" {
+            return """
+            type.function("\(pySignature)") { _, argv in
+                \(className)(argv)?.\(identifier)()
+                return PyAPI.return(.none) 
+            }
+            """
+        }
         
         return """
         type.function("\(pySignature)") { _, argv in
-            \(className)(argv)?.\(identifier)()
-            return PyAPI.return(.none) 
+            let result = \(className)(argv)?.\(identifier)()
+            return PyAPI.return(result) 
         }
         """
     }
@@ -152,6 +171,16 @@ extension String {
             result.append(character.lowercased())
         }
         return result.joined()
+    }
+
+    var pyType: String {
+        switch self {
+        case "Int": "int"
+        case "Double": "float"
+        case "String": "str"
+        case "Bool": "bool"
+        default: self
+        }
     }
 }
 

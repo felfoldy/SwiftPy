@@ -42,7 +42,7 @@ class ScriptableMacroTests: XCTestCase {
                     },
                     setter: { _, argv in
                     guard let value = Int(argv? [1]) else {
-                        return PyAPI.throw(.TypeError, "Expected Int at position 1")
+                        return PyAPI.throw(.TypeError, "Expected int at position 1")
                     }
                     TestClass(argv)?.intProperty = value
                     return PyAPI.return(.none)
@@ -114,5 +114,32 @@ class ScriptableMacroTests: XCTestCase {
             """,
             macros: testMacros
         )
+    }
+    
+    func testFunctionBinding() {
+        assertMacroExpansion("""
+        @Scriptable
+        class TestClass {
+            func testFunction() -> Int { 10 }
+        }
+        """, expandedSource: """
+        class TestClass {
+            func testFunction() -> Int { 10 }
+        
+            var _cachedPythonReference: PyAPI.Reference?
+        }
+        
+        extension TestClass: PythonBindable {
+            static let pyType: PyType = .make("TestClass") { userdata in
+                deinitFromPython(userdata)
+            } bind: { type in
+                type.function("test_function(self) -> int") { _, argv in
+                    let result = TestClass(argv)?.testFunction()
+                    return PyAPI.return(result)
+                }
+            }
+        }
+        """,
+        macros: testMacros)
     }
 }
