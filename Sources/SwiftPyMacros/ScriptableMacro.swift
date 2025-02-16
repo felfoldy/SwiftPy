@@ -26,12 +26,24 @@ extension ScriptableMacro: ExtensionMacro {
         
         let className = classDecl.name.text
         let members = declaration.memberBlock.members
-
-        let properties = members.compactMap { $0.decl.as(VariableDeclSyntax.self) }
+    
+        let propertyBindings = members
+            // Properties
+            .compactMap { $0.decl.as(VariableDeclSyntax.self) }
+            // Bindings.
+            .compactMap { property in
+            property.propertyBinding(className: className, context: context)
+            }.joined(separator: "\n")
         
-        let propertyBindings = properties.compactMap { property in
-            property.pythonBinding(className: className, context: context)
-        }.joined(separator: "\n")
+        let functionBindings = members
+            .compactMap { $0.decl.as(FunctionDeclSyntax.self) }
+            .compactMap { function in
+                function.binding(className: className, context: context)
+            }.joined(separator: "\n")
+        
+        let bindings = [propertyBindings, functionBindings]
+            .filter { !$0.isEmpty }
+            .joined(separator: "\n")
 
         return try [
             ExtensionDeclSyntax("extension \(raw: className): PythonBindable") {
@@ -39,7 +51,7 @@ extension ScriptableMacro: ExtensionMacro {
             static let pyType: PyType = .make("\(raw: className)") { userdata in
                 deinitFromPython(userdata)
             } bind: { type in
-            \(raw: propertyBindings)
+            \(raw: bindings)
             }
             """
             }
@@ -48,7 +60,7 @@ extension ScriptableMacro: ExtensionMacro {
 }
 
 extension VariableDeclSyntax {
-    func pythonBinding(className: String, context: some MacroExpansionContext) -> String? {
+    func propertyBinding(className: String, context: some MacroExpansionContext) -> String? {
         let specifier = bindingSpecifier.text
         guard let binding = bindings.first else {
             context.warning(self, "Unable to read binding")
@@ -102,6 +114,29 @@ extension VariableDeclSyntax {
             },
             setter: \(setter)
         )
+        """
+    }
+}
+
+extension FunctionDeclSyntax {
+    func binding(className: String, context: some MacroExpansionContext) -> String? {
+        let identifier = name.text
+        var pySignature = identifier.snakeCased
+        
+        let parameters = signature.parameterClause.parameters
+        
+        if parameters.isEmpty {
+            pySignature.append("(self) -> None")
+        } else {
+            context.warning(self, "parameters are not supported yet")
+            return nil
+        }
+        
+        return """
+        type.function("\(pySignature)") { _, argv in
+            \(className)(argv)?.\(identifier)()
+            return PyAPI.return(.none) 
+        }
         """
     }
 }

@@ -59,7 +59,7 @@ extension TestClass: PythonBindable {
                 return PyAPI.return(.none)
             }
         )
-        py_bind(py_tpobject(type), "set_number(self) -> None") { _, argv in
+        type.function("set_number(self) -> None") { _, argv in
             TestClass(argv)?.setNumber()
             return PyAPI.return(.none)
         }

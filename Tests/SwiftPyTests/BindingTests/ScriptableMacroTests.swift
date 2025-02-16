@@ -86,7 +86,7 @@ class ScriptableMacroTests: XCTestCase {
             macros: testMacros)
     }
     
-    func testFunctionBinding() {
+    func testMethodBinding() {
         assertMacroExpansion(
             """
             @Scriptable
@@ -105,13 +105,10 @@ class ScriptableMacroTests: XCTestCase {
                 static let pyType: PyType = .make("TestClass") { userdata in
                     deinitFromPython(userdata)
                 } bind: { type in
-                    type.property(
-                        "int_property",
-                        getter: { _, argv in
-                            return PyAPI.return(TestClass(argv)?.intProperty)
-                        },
-                        setter: nil
-                    )
+                    type.function("test_function(self) -> None") { _, argv in
+                        TestClass(argv)?.testFunction()
+                        return PyAPI.return(.none)
+                    }
                 }
             }
             """,
