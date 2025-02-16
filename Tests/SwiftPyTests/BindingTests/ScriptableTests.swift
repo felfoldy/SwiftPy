@@ -11,6 +11,11 @@ import SwiftPy
 @Scriptable
 class TestClassWithProperties {
     let intProperty: Int = 12
+    var content: String = "content"
+    
+    func testFunction() {
+        content = "changed"
+    }
 }
 
 @MainActor
@@ -35,5 +40,21 @@ struct ScriptableTests {
         testClass.toPython(main.emplace("tc2"))
         
         #expect(Interpreter.evaluate("tc2.int_property") == 12)
+    }
+
+    @Test func bindStringProperty() {
+        let testClass = TestClassWithProperties()
+        testClass.toPython(main.emplace("tc3"))
+        Interpreter.run("tc3.content = 'new content'")
+        
+        #expect(Interpreter.evaluate("tc3.content") == "new content")
+    }
+    
+    @Test func functionCall() {
+        let testClass = TestClassWithProperties()
+        testClass.toPython(main.emplace("tc4"))
+        Interpreter.run("tc4.test_function()")
+        
+        #expect(testClass.content == "changed")
     }
 }

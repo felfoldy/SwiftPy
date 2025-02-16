@@ -11,11 +11,7 @@ import SwiftSyntaxBuilder
 
 public struct ScriptableMacro: MemberMacro {
     public static func expansion(of node: AttributeSyntax, providingMembersOf declaration: some DeclGroupSyntax, conformingTo protocols: [TypeSyntax], in context: some MacroExpansionContext) throws -> [DeclSyntax] {
-        guard let classDecl = declaration.as(ClassDeclSyntax.self) else {
-            throw MacroExpansionErrorMessage("'@Scriptable' can only be applied to a 'class'")
-        }
-        
-        return [
+        [
         // Add cache.
         "var _cachedPythonReference: PyAPI.Reference?",
         ]
@@ -53,6 +49,7 @@ extension ScriptableMacro: ExtensionMacro {
 
 extension VariableDeclSyntax {
     func pythonBinding(className: String, context: some MacroExpansionContext) -> String? {
+        let specifier = bindingSpecifier.text
         guard let binding = bindings.first else {
             context.warning(self, "Unable to read binding")
             return nil
@@ -74,14 +71,36 @@ extension VariableDeclSyntax {
         
         let annotation = type.name.text
         
+        let setter: String = {
+            if specifier != "var" {
+                return "nil"
+            }
+            
+            if let accessors = binding.accessorBlock?.as(AccessorBlockSyntax.self)?.accessors {
+                // { computed }
+                if accessors.is(CodeBlockItemListSyntax.self) {
+                    return "nil"
+                }
+            }
+            
+            return """
+            { _, argv in
+                guard let value = \(annotation)(argv?[1]) else {
+                    return PyAPI.throw(.TypeError, "Expected \(annotation) at position 1")
+                }
+                \(className)(argv)?.\(identifier) = value
+                return PyAPI.return(.none)
+            }
+            """
+        }()
+        
         return """
         type.property(
             "\(identifier.snakeCased)",
             getter: { _, argv in
-                PyAPI.return(\(className)(argv)?.\(identifier))
-                return true
+                return PyAPI.return(\(className)(argv)?.\(identifier))
             },
-            setter: nil
+            setter: \(setter)
         )
         """
     }

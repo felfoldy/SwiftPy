@@ -22,8 +22,9 @@ public extension PyAPI {
         py_retval()
     }
 
-    @inlinable static func `return`(_ value: PythonConvertible?) {
+    @inlinable static func `return`(_ value: PythonConvertible?) -> Bool {
         py_retval().set(value)
+        return true
     }
     
     @inlinable static func `throw`(_ error: PyType, _ message: String?) -> Bool {

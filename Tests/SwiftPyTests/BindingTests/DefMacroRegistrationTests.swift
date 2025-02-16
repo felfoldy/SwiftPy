@@ -49,9 +49,7 @@ struct DefMacroRegistrationTests {
         }
         
         main.bind(function)
-        Interpreter.execute("x = value()")
-
-        #expect(main["x"] == 42)
+        #expect(Interpreter.evaluate("value()") == 42)
     }
     
     @Test func stringFunctionRegistration() {
@@ -60,9 +58,7 @@ struct DefMacroRegistrationTests {
         }
         
         main.bind(function)
-        Interpreter.execute("x = value()")
-
-        #expect(main["x"] == "Hello, World!")
+        #expect(Interpreter.evaluate("value()") == "Hello, World!")
     }
     
     @Test func boolFunctionRegistration() {
@@ -95,8 +91,7 @@ struct DefMacroRegistrationTests {
         }
 
         main.bind(function)
-        Interpreter.execute("x = add(10, 3)")
 
-        #expect(main["x"] == 13)
+        #expect(Interpreter.evaluate("add(10, 3)") == 13)
     }
 }

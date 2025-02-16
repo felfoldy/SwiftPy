@@ -17,6 +17,10 @@ final class TestClass {
         self.number = number
     }
     
+    func setNumber() {
+        number = 10
+    }
+    
     var _cachedPythonReference: PyAPI.Reference?
 }
 
@@ -38,14 +42,12 @@ extension TestClass: PythonBindable {
             )
             .storeInPython(argv, userdata: py_touserdata(argv))
             
-            PyAPI.return(.none)
-            return true
+            return PyAPI.return(.none)
         }
         type.property(
             "number",
             getter: { argc, argv in
-                PyAPI.return(TestClass(argv)?.number)
-                return true
+                return PyAPI.return(TestClass(argv)?.number)
             },
             setter: { argc, argv in
                 guard let value = Int(argv?[1]) else {
@@ -54,10 +56,13 @@ extension TestClass: PythonBindable {
 
                 TestClass(argv)?.number = value
                 
-                PyAPI.return(.none)
-                return true
+                return PyAPI.return(.none)
             }
         )
+        py_bind(py_tpobject(type), "set_number(self) -> None") { _, argv in
+            TestClass(argv)?.setNumber()
+            return PyAPI.return(.none)
+        }
     }
 }
 
@@ -103,8 +108,19 @@ struct PythonConvertibleClassTests {
     @Test func pythonMutation() {
         let obj = TestClass(number: 32)
         obj.toPython(main.emplace("test4"))
+
         Interpreter.run("test4.number = 'asd'")
-        
         #expect(obj.number == 32)
+        
+        Interpreter.run("test4.number = 42")
+        #expect(obj.number == 42)
+    }
+    
+    @Test func functionBinding() {
+        let obj = TestClass(number: 32)
+        obj.toPython(main.emplace("test5"))
+        
+        Interpreter.run("test5.set_number()")
+        #expect(obj.number == 10)
     }
 }
