@@ -70,12 +70,6 @@ public extension PyType {
     func function(_ signature: String, block: PyAPI.CFunction) {
         py_bind(py_tpobject(self), signature, block)
     }
-    
-    @discardableResult
-    func bindProperty(_ name: String, getter: PyAPI.CFunction) -> PyType {
-        py_bindproperty(self, name, getter, nil)
-        return self
-    }
 
     @inlinable static func make(_ name: String,
                                 base: PyType = .object,

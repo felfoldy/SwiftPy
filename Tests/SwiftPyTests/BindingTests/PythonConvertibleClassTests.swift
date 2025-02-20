@@ -28,6 +28,12 @@ final class TestClass {
     var _cachedPythonReference: PyAPI.Reference?
 }
 
+extension TestClass: CustomStringConvertible {
+    var description: String {
+        "TestClass(number: \(number))"
+    }
+}
+
 extension TestClass: PythonBindable {
     static let pyType: PyType = .make("TestClass") { userdata in
         deinitFromPython(userdata)
@@ -41,12 +47,13 @@ extension TestClass: PythonBindable {
                 return PyAPI.throw(.TypeError, "missing 1 required positional argument: 'number'")
             }
             
-            TestClass(
-                number: number
-            )
-            .storeInPython(argv, userdata: py_touserdata(argv))
+            TestClass(number: number)
+                .storeInPython(argv, userdata: py_touserdata(argv))
             
             return PyAPI.return(.none)
+        }
+        type.magic("__repr__") { _, argv in
+            return PyAPI.return(customString(argv))
         }
         type.property(
             "number",
@@ -55,11 +62,9 @@ extension TestClass: PythonBindable {
             },
             setter: { argc, argv in
                 guard let value = Int(argv?[1]) else {
-                    return PyAPI.throw(.TypeError, "Expected Int at position 1")
+                    return PyAPI.throw(.TypeError, "Expected int at position 1")
                 }
-
                 TestClass(argv)?.number = value
-                
                 return PyAPI.return(.none)
             }
         )
@@ -137,5 +142,12 @@ struct PythonConvertibleClassTests {
         obj.toPython(main.emplace("test6"))
         
         #expect(Interpreter.evaluate("test6.get_number()") == 32)
+    }
+
+    @Test func repr() {
+        let obj = TestClass(number: 32)
+        obj.toPython(main.emplace("test7"))
+        
+        #expect(Interpreter.evaluate("test7.__repr__()") == "TestClass(number: 32)")
     }
 }
