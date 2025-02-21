@@ -28,11 +28,11 @@ struct ScriptableTests {
         
         let testClass = TestClassWithProperties()
         testClass.toPython(main.emplace("tc1"))
-        #expect(testClass._cachedPythonReference != nil)
+        #expect(testClass._pythonCache.reference != nil)
         
         Interpreter.run("del tc1")
         Interpreter.run("gc.collect()")
-        #expect(testClass._cachedPythonReference == nil)
+        #expect(testClass._pythonCache.reference == nil)
     }
     
     @Test func bindIntProperty() {

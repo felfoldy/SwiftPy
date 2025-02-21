@@ -28,7 +28,7 @@ class ScriptableMacroTests: XCTestCase {
         class TestClass {
             var intProperty: Int = 10
 
-            var _cachedPythonReference: PyAPI.Reference?
+            var _pythonCache = PythonBindingCache()
         }
 
         extension TestClass: PythonBindable {
@@ -66,7 +66,7 @@ class ScriptableMacroTests: XCTestCase {
             class TestClass {
                 var intProperty: Int { 10 }
 
-                var _cachedPythonReference: PyAPI.Reference?
+                var _pythonCache = PythonBindingCache()
             }
 
             extension TestClass: PythonBindable {
@@ -98,7 +98,7 @@ class ScriptableMacroTests: XCTestCase {
             class TestClass {
                 func testFunction() {}
 
-                var _cachedPythonReference: PyAPI.Reference?
+                var _pythonCache = PythonBindingCache()
             }
 
             extension TestClass: PythonBindable {
@@ -126,7 +126,7 @@ class ScriptableMacroTests: XCTestCase {
         class TestClass {
             func testFunction() -> Int { 10 }
         
-            var _cachedPythonReference: PyAPI.Reference?
+            var _pythonCache = PythonBindingCache()
         }
         
         extension TestClass: PythonBindable {

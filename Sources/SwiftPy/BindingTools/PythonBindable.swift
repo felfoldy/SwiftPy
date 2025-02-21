@@ -8,7 +8,14 @@
 import pocketpy
 
 public protocol PythonBindable: AnyObject, PythonConvertible {
-    var _cachedPythonReference: PyAPI.Reference? { get set }
+    var _pythonCache: PythonBindingCache { get set }
+}
+
+public struct PythonBindingCache {
+    public var reference: PyAPI.Reference?
+    public var bindings: [String: PythonBindable] = [:]
+    
+    public init() {}
 }
 
 public extension PythonBindable {
@@ -22,8 +29,8 @@ public extension PythonBindable {
         let obj = unmanaged.takeRetainedValue()
 
         // Clear cache.
-        UnsafeRawPointer(obj._cachedPythonReference)?.deallocate()
-        obj._cachedPythonReference = nil
+        UnsafeRawPointer(obj._pythonCache.reference)?.deallocate()
+        obj._pythonCache.reference = nil
     }
     
     @inlinable
@@ -38,13 +45,13 @@ public extension PythonBindable {
         let pointer = UnsafeMutableRawPointer.allocate(byteCount: 16, alignment: 8)
         let opaquePointer = OpaquePointer(pointer)
         py_assign(opaquePointer, reference)
-        _cachedPythonReference = opaquePointer
+        _pythonCache.reference = opaquePointer
     }
     
     @inlinable
     func toPython(_ reference: PyAPI.Reference) {
-        if let _cachedPythonReference {
-            py_assign(reference, _cachedPythonReference)
+        if let cached = _pythonCache.reference {
+            py_assign(reference, cached)
             return
         }
         
