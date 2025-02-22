@@ -42,18 +42,14 @@ extension TestClass: PythonBindable {
             newPythonObject(PyAPI.returnValue)
             return true
         }
-        type.magic("__init__") { argc, argv in
-            guard let number = Int(argv?[1]) else {
-                return PyAPI.throw(.TypeError, "missing 1 required positional argument: 'number'")
+        type.magic("__init__") { _, argv in
+            ensureArgument(argv?[1], Int.self) { number in
+                TestClass(number: number)
+                    .storeInPython(argv, userdata: py_touserdata(argv))
             }
-            
-            TestClass(number: number)
-                .storeInPython(argv, userdata: py_touserdata(argv))
-            
-            return PyAPI.return(.none)
         }
         type.magic("__repr__") { _, argv in
-            return PyAPI.return(customString(argv))
+            reprDescription(argv)
         }
         type.property(
             "number",
@@ -61,11 +57,9 @@ extension TestClass: PythonBindable {
                 return PyAPI.return(TestClass(argv)?.number)
             },
             setter: { argc, argv in
-                guard let value = Int(argv?[1]) else {
-                    return PyAPI.throw(.TypeError, "Expected int at position 1")
+                ensureArguments(argv, Int.self) { base, value in
+                    base.number = value
                 }
-                TestClass(argv)?.number = value
-                return PyAPI.return(.none)
             }
         )
         type.function("set_number(self) -> None") { _, argv in

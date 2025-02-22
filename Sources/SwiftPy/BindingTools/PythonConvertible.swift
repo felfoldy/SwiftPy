@@ -39,10 +39,6 @@ public extension PythonConvertible {
         ud?.storeBytes(of: nil, as: UnsafeRawPointer?.self)
         return ud!
     }
-    
-    static func customString(_ reference: PyAPI.Reference?) -> String? {
-        (fromPython(reference) as? CustomStringConvertible)?.description
-    }
 }
 
 extension Bool: PythonConvertible {

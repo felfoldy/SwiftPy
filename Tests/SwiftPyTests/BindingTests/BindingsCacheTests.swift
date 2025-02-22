@@ -44,11 +44,11 @@ struct BindingsCacheTests {
                     BindableStruct.Binding(obj, \.base)
                 }
             } setter: { _, argv in
-                guard let arg1 = BindableStruct.Binding(argv?[1])?.get() else {
-                    return PyAPI.throw(.TypeError, "Invalid argument")
+                ensureArguments(argv, BindableStruct.Binding.self) { root, binding in
+                    if let value = binding.get() {
+                        root.base = value
+                    }
                 }
-                TestClass(argv)?.base = arg1
-                return PyAPI.return(.none)
             }
         }
     }

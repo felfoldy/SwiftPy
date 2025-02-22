@@ -45,22 +45,3 @@ open class PythonValueReference<Value> {
 }
 
 public typealias PythonValueBindable<Value> = PythonValueReference<Value> & PythonBindable
-
-public extension PythonBindable {
-    /// Stores the binding in the `_pythonCache`.
-    ///
-    /// Useful for storing wrapper classes without recreating them.
-    ///
-    /// - Parameters:
-    ///   - key: key.
-    ///   - makeBinding: Creates the binding, will only be called if the cache is empty.
-    /// - Returns: `true` indicating no errors were thrown.
-    @inlinable func _cached(_ key: String, makeBinding: () -> PythonBindable) -> Bool {
-        if let cached = _pythonCache.bindings[key] {
-            return PyAPI.return(cached)
-        }
-        let binding = makeBinding()
-        _pythonCache.bindings[key] = binding
-        return PyAPI.return(binding)
-    }
-}

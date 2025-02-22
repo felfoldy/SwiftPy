@@ -71,6 +71,10 @@ public extension PyType {
         py_bind(py_tpobject(self), signature, block)
     }
 
+    @inlinable var name: String {
+        String(cString: py_tpname(self))
+    }
+
     @inlinable static func make(_ name: String,
                                 base: PyType = .object,
                                 module: PyAPI.Reference = Interpreter.main,
