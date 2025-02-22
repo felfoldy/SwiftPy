@@ -83,15 +83,6 @@ public extension PythonConvertible {
 }
 
 public extension PythonBindable {
-    @inlinable func _cached(_ key: String, makeBinding: () -> PythonBindable) -> Bool {
-        if let cached = _pythonCache.bindings[key] {
-            return PyAPI.return(cached)
-        }
-        let binding = makeBinding()
-        _pythonCache.bindings[key] = binding
-        return PyAPI.return(binding)
-    }
-    
     @inlinable static func cachedBinding(_ argv: PyAPI.Reference?, key: String, makeBinding: (Self) -> PythonBindable) -> Bool {
         guard let obj = Self(argv) else {
             return .throwTypeError(argv, 0)

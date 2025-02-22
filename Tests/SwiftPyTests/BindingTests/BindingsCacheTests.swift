@@ -37,11 +37,8 @@ struct BindingsCacheTests {
             deinitFromPython(userdata)
         } bind: { type in
             type.property("base") { _, argv in
-                guard let obj = TestClass(argv) else {
-                    return PyAPI.return(.none)
-                }
-                return obj._cached("base") {
-                    BindableStruct.Binding(obj, \.base)
+                cachedBinding(argv, key: "base") { root in
+                    BindableStruct.Binding(root, \.base)
                 }
             } setter: { _, argv in
                 ensureArguments(argv, BindableStruct.Binding.self) { root, binding in
@@ -68,7 +65,8 @@ struct BindingsCacheTests {
         let obj = TestClass()
         obj.toPython(main.emplace("obj"))
         
-        BindableStruct.Binding(.init(value: 2)).toPython(main.emplace("newbase"))
+        BindableStruct.Binding(.init(value: 2))
+            .toPython(main.emplace("newbase"))
         #expect(Interpreter.evaluate("obj.base.value") == 1)
         
         Interpreter.input("obj.base = newbase")
