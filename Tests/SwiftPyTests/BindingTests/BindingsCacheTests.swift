@@ -20,9 +20,9 @@ struct BindingsCacheTests {
                 type.property("value") { _, argv in
                     PyAPI.return(Binding(argv)?.get()?.value)
                 } setter: { _, argv in
-                    let binding = Binding(argv)
-                    binding?.value?.value = Int(argv?[1])!
-                    return PyAPI.return(.none)
+                    ensureArguments(argv, Int.self) { binding, newValue in
+                        binding.value?.value = newValue
+                    }
                 }
             }
         }

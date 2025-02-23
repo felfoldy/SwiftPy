@@ -83,7 +83,7 @@ public extension PythonConvertible {
 }
 
 public extension PythonBindable {
-    @inlinable static func cachedBinding(_ argv: PyAPI.Reference?, key: String, makeBinding: (Self) -> PythonBindable) -> Bool {
+    @inlinable static func cachedBinding(_ argv: PyAPI.Reference?, key: String, makeBinding: (Self) -> PythonBindable?) -> Bool {
         guard let obj = Self(argv) else {
             return .throwTypeError(argv, 0)
         }
@@ -111,6 +111,7 @@ public extension PythonBindable {
         return T.throwTypeError(argv?[1], 1)
     }
     
+    /// `(self, Arg1) -> Void`
     @inlinable static func ensureArguments<Arg1: PythonConvertible>(_ argv: PyAPI.Reference?, _ arg1: Arg1.Type, block: (Self, Arg1) -> Void) -> Bool {
         guard let obj = Self(argv) else {
             return .throwTypeError(argv, 0)
@@ -122,5 +123,18 @@ public extension PythonBindable {
 
         block(obj, value1)
         return PyAPI.return(.none)
+    }
+    
+    /// `(self, Arg1) -> Result?`
+    @inlinable static func ensureArguments<Arg1: PythonConvertible, Result: PythonConvertible>(_ argv: PyAPI.Reference?, _ arg1: Arg1.Type, block: (Self, Arg1) -> Result?) -> Bool {
+        guard let obj = Self(argv) else {
+            return .throwTypeError(argv, 0)
+        }
+        
+        guard let value1 = Arg1(argv?[1]) else {
+            return Arg1.throwTypeError(argv?[1], 1)
+        }
+        
+        return PyAPI.return(block(obj, value1))
     }
 }
