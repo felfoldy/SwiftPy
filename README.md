@@ -3,19 +3,62 @@
 ![Swift Version](https://img.shields.io/badge/Swift-6.0-orange.svg)
 ![Platform](https://img.shields.io/badge/platform-iOS%20%7C%20macOS%20%7C%20visionOS-blue.svg)
 
-## Usage
+SwiftPy is a fast and lightweight Python interpreter built on [pocketpy](https://github.com/pocketpy/pocketpy) with Swift macro binding tools.
+
+## Installation
 
 ```swift
-// Create a function.
-let function = #def("add(a: int, b: int) -> int") { args in
-    let a: Int = args[0]!
-    let b: Int = args[1]!
-    return a + b
+dependencies: [
+    .package(url: "https://github.com/felfoldy/SwiftPy.git", from: "0.4.0")
+]
+```
+
+## Usage
+
+### @Scriptable
+
+Annotate your Swift classes with the `@Scriptable` macro to automatically generate a corresponding Python interface. For example:
+
+```swift
+@Scriptable
+@Observable class LoginViewModel {
+    var username: String = ""
+    var password: String = ""
+    
+    func login() {
+        ...
+    }
 }
+```
 
-// Set the function to the __main__ module
-Interpreter.main.bind(function)
+This will generate an equivalent type for Python:
+```py
+class LoginViewModel:
+    username: str
+    password: str
+    
+    def login(self) -> None:
+        ...
+```
 
-// Run a script.
-Interpreter.execute("x = add(10, 3)")
+#### Integrating with SwiftUI
+
+Inject the view model into Python using the `interactable` modifier:
+```swift
+struct LoginView {
+    @State private var viewModel = LoginViewModel()
+    
+    var body: some View {
+        viewImplementation
+            .interactable("viewmodel", viewModel)
+    }
+}
+```
+
+After injection, Python scripts can interact with the Swift view model:
+```py
+viewmodel = viewcontext.viewmodel
+viewmodel.username = "username"
+viewmodel.password = "password"
+viewmodel.login()
 ```
