@@ -132,6 +132,10 @@ public extension PyAPI.Reference {
         py_setattr(self, py_name(name), value)
     }
     
+    @inlinable func deleteAttribute(_ name: String) {
+        py_delattr(self, py_name(name))
+    }
+    
     @inlinable func emplace(_ name: String) -> PyAPI.Reference {
         py_emplacedict(self, py_name(name))
     }
