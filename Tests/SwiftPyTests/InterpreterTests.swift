@@ -11,21 +11,12 @@ import pocketpy
 
 @MainActor
 struct InterpreterTests {
-    @Test func importModule() {
-        Interpreter.execute("import justx")
+    @Test func createModule() {
+        let newModule = Interpreter.module("newmodule")
+        "content".toPython(newModule?.emplace("something"))
         
-        #expect(Interpreter.main["justx"] == nil)
-        
-        var moduleName: String?
-        Interpreter.onImport = { module in
-            moduleName = module
-            return "x = 10"
-        }
-
-        Interpreter.execute("import justx")
-        #expect(moduleName == "justx.py")
-        
-        #expect(Interpreter.shared.module("justx")?["x"] == 10)
+        Interpreter.run("import newmodule")
+        #expect(Interpreter.evaluate("newmodule.something") == "content")
     }
     
     @Test func loadBundleModule() {

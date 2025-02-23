@@ -87,9 +87,6 @@ public extension PyType {
 }
 
 public extension Interpreter {
-    /// Returns the module with the given name. If it can't find it, tries to import it.
-    /// - Parameter name: Module name for example: `__main__`
-    /// - Returns: Module reference.
     @inlinable func module(_ name: String) -> PyAPI.Reference? {
         if let module = py_getmodule(name) {
             return module
@@ -97,9 +94,16 @@ public extension Interpreter {
         if py_import(name) == 1 {
             return PyAPI.returnValue
         }
-        return nil
+        return py_newmodule(name)
     }
 
+    /// Returns the module with the given name. If it can't find it, tries to import it. If can't import it it will created.
+    /// - Parameter name: Module name for example: `__main__`
+    /// - Returns: Module reference.
+    @inlinable static func module(_ name: String) -> PyAPI.Reference? {
+        shared.module(name)
+    }
+    
     /// Returns the `__main__` module.
     ///
     /// Equivalent to `Interpreter.module("__main__")!`

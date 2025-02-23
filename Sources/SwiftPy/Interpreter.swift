@@ -19,11 +19,6 @@ public final class Interpreter {
     public static var bundles = [Bundle.module]
 
     public var replLines = [String]()
-
-    public static var onImport: (String) -> String? = { module in
-        log.fault("Tried to import \(module), but  Interpreter.onImport is not set")
-        return nil
-    }
     
     static var isFailed = false
 
@@ -54,12 +49,7 @@ public final class Interpreter {
                 return strdup(content)
             }
 
-            guard let content = Interpreter.onImport(filename) else {
-                log.fault("Failed to load \(filename)")
-                return nil
-            }
-
-            return strdup(content)
+            return nil
         }
         
         let builtins = py_getmodule("builtins")
