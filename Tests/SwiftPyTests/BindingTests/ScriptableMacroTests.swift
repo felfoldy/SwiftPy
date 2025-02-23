@@ -41,11 +41,9 @@ class ScriptableMacroTests: XCTestCase {
                         return PyAPI.return(TestClass(argv)?.intProperty)
                     },
                     setter: { _, argv in
-                    guard let value = Int(argv? [1]) else {
-                        return PyAPI.throw(.TypeError, "Expected int at position 1")
+                    ensureArguments(argv, Int.self) { obj, value in
+                        obj.intProperty = value
                     }
-                    TestClass(argv)?.intProperty = value
-                    return PyAPI.return(.none)
                     }
                 )
             }

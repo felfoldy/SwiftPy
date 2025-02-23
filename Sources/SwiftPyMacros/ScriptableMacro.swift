@@ -88,7 +88,7 @@ extension VariableDeclSyntax {
                 return "nil"
             }
             
-            if let accessors = binding.accessorBlock?.as(AccessorBlockSyntax.self)?.accessors {
+            if let accessors = binding.accessorBlock?.accessors {
                 // { computed }
                 if accessors.is(CodeBlockItemListSyntax.self) {
                     return "nil"
@@ -97,11 +97,9 @@ extension VariableDeclSyntax {
             
             return """
             { _, argv in
-                guard let value = \(annotation)(argv?[1]) else {
-                    return PyAPI.throw(.TypeError, "Expected \(annotation.pyType) at position 1")
+                ensureArguments(argv, \(annotation).self) { obj, value in
+                    obj.\(identifier) = value
                 }
-                \(className)(argv)?.\(identifier) = value
-                return PyAPI.return(.none)
             }
             """
         }()
