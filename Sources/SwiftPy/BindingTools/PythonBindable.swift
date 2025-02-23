@@ -34,7 +34,13 @@ public extension PythonBindable {
     }
     
     @inlinable
-    func storeInPython(_ reference: PyAPI.Reference?, userdata: UnsafeMutableRawPointer?) {
+    func storeInPython(_ reference: PyAPI.Reference?, userdata: UnsafeMutableRawPointer? = nil) {
+        var userdata = userdata
+        
+        if userdata == nil {
+            userdata = py_touserdata(reference)
+        }
+        
         // Store retained self pointer in python userdata.
         let retainedSelfPointer = Unmanaged.passRetained(self)
             .toOpaque()

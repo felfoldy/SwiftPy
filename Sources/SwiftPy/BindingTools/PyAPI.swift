@@ -49,13 +49,7 @@ public extension PyType {
     
     // Errors:
     static let TypeError = PyType(tp_TypeError.rawValue)
-    
-    @discardableResult
-    @inlinable func bindMagic(_ name: String, function: PyAPI.CFunction) -> PyType {
-        py_newnativefunc(py_tpgetmagic(self, py_name(name)), function)
-        return self
-    }
-    
+
     @inlinable
     func magic(_ name: String, function: PyAPI.CFunction) {
         py_newnativefunc(py_tpgetmagic(self, py_name(name)), function)
@@ -73,6 +67,10 @@ public extension PyType {
 
     @inlinable var name: String {
         String(cString: py_tpname(self))
+    }
+    
+    @inlinable var object: PyAPI.Reference? {
+        py_tpobject(self)
     }
 
     @inlinable static func make(_ name: String,
@@ -116,10 +114,6 @@ public extension Interpreter {
 
 @MainActor
 public extension PyAPI.Reference {
-    @inlinable func setNone() {
-        py_newnone(self)
-    }
-
     @inlinable func isNone() -> Bool {
         py_istype(self, PyType.None)
     }
@@ -138,6 +132,14 @@ public extension PyAPI.Reference {
     
     @inlinable func deleteAttribute(_ name: String) {
         py_delattr(self, py_name(name))
+    }
+    
+    /// Adds the types to the module.
+    /// - Parameter types: types to add.
+    @inlinable func insertTypes(_ types: PyType...) {
+        for type in types {
+            py_setattr(self, py_name(type.name), type.object)
+        }
     }
     
     @inlinable func emplace(_ name: String) -> PyAPI.Reference {

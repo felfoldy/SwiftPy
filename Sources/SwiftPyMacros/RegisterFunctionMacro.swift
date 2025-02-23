@@ -71,8 +71,7 @@ public enum RegisterFunctionMacro: ExpressionMacro {
                     block: \(raw: block),
                     cFunction: { argc, argv in
                         FunctionStore.voidFunctions["\(id)"]?(\(raw: createArguments))
-                        PyAPI.returnValue.setNone()
-                        return true
+                        return PyAPI.return(.none)
                     }
                 )
                 """)
@@ -85,8 +84,7 @@ public enum RegisterFunctionMacro: ExpressionMacro {
                 block: \(raw: block),
                 cFunction: { argc, argv in
                     let result = FunctionStore.returningFunctions["\(id)"]?(\(raw: createArguments))
-                    PyAPI.returnValue.set(result)
-                    return true
+                    return PyAPI.return(result)
                 }
             )
             """)

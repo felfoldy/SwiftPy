@@ -17,8 +17,8 @@ final class TestClass {
         self.number = number
     }
     
-    func setNumber() {
-        number = 10
+    func setNumber(value: Int) {
+        number = value
     }
     
     func getNumber() -> Int {
@@ -44,8 +44,7 @@ extension TestClass: PythonBindable {
         }
         type.magic("__init__") { _, argv in
             ensureArgument(argv?[1], Int.self) { number in
-                TestClass(number: number)
-                    .storeInPython(argv, userdata: py_touserdata(argv))
+                TestClass(number: number).storeInPython(argv)
             }
         }
         type.magic("__repr__") { _, argv in
@@ -54,7 +53,7 @@ extension TestClass: PythonBindable {
         type.property(
             "number",
             getter: { argc, argv in
-                return PyAPI.return(TestClass(argv)?.number)
+                PyAPI.return(TestClass(argv)?.number)
             },
             setter: { argc, argv in
                 ensureArguments(argv, Int.self) { base, value in
@@ -62,9 +61,10 @@ extension TestClass: PythonBindable {
                 }
             }
         )
-        type.function("set_number(self) -> None") { _, argv in
-            TestClass(argv)?.setNumber()
-            return PyAPI.return(.none)
+        type.function("set_number(self, value: int) -> None") { _, argv in
+            ensureArguments(argv, Int.self) { obj, value in
+                obj.setNumber(value: value)
+            }
         }
         type.function("get_number(self) -> int") { _, argv in
             let result = TestClass(argv)?.getNumber()
@@ -127,7 +127,7 @@ struct PythonConvertibleClassTests {
         let obj = TestClass(number: 32)
         obj.toPython(main.emplace("test5"))
         
-        Interpreter.run("test5.set_number()")
+        Interpreter.run("test5.set_number(10)")
         #expect(obj.number == 10)
     }
     
