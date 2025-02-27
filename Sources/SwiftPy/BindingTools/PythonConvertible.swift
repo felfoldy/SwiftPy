@@ -89,6 +89,18 @@ extension Double: PythonConvertible {
     }
 }
 
+extension Float: PythonConvertible {
+    public static let pyType = PyType.float
+
+    @inlinable public func toPython(_ reference: PyAPI.Reference) {
+        py_newfloat(reference, Double(self))
+    }
+
+    @inlinable public static func fromPython(_ reference: PyAPI.Reference) -> Float {
+        Float(py_tofloat(reference))
+    }
+}
+
 extension Array: PythonConvertible where Element: PythonConvertible {
     public static var pyType: PyType { .list }
     

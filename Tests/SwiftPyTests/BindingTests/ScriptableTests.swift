@@ -11,6 +11,7 @@ import SwiftPy
 @Scriptable
 class TestClassWithProperties {
     let intProperty: Int = 12
+    var floatProperty: Float = 3.14
     var content: String = "content"
     
     func changeContent() { content = "changed" }
@@ -40,6 +41,16 @@ struct ScriptableTests {
         testClass.toPython(main.emplace("tc2"))
         
         #expect(Interpreter.evaluate("tc2.int_property") == 12)
+    }
+    
+    @Test func bindFloatProperty() {
+        let testClass = TestClassWithProperties()
+        testClass.toPython(main.emplace("tc5"))
+        
+        #expect(Interpreter.evaluate("tc5.float_property") == Float(3.14))
+
+        Interpreter.run("tc5.float_property = 1000.0")        
+        #expect(testClass.floatProperty == 1000.0)
     }
 
     @Test func bindStringProperty() {
