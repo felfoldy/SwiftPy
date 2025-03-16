@@ -984,3 +984,4 @@ enum py_PredefinedTypes {
 #ifdef __cplusplus
 }
 #endif
+#include "pocketpy_extensions.h"
