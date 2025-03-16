@@ -1,5 +1,5 @@
 /*
- *  Copyright (c) 2024 blueloveTH
+ *  Copyright (c) 2025 blueloveTH
  *  Distributed Under The MIT License
  *  https://github.com/pocketpy/pocketpy
  */
@@ -133,9 +133,12 @@
 
 
 
+#include <stdint.h>
+
 typedef union c11_vec2i {
     struct { int x, y; };
     int data[2];
+    int64_t _i64;
 } c11_vec2i;
 
 typedef union c11_vec3i {
@@ -297,7 +300,6 @@ PK_API bool py_compile(const char* source,
 /// Python equivalent to `globals()`.
 PK_API void py_newglobals(py_OutRef);
 /// Python equivalent to `locals()`.
-/// @return a temporary object, which expires on the associated function return.
 PK_API void py_newlocals(py_OutRef);
 
 /************* Values Creation *************/
@@ -338,7 +340,7 @@ PK_API void py_newellipsis(py_OutRef);
 PK_API void py_newnil(py_OutRef);
 /// Create a `tuple` with `n` UNINITIALIZED elements.
 /// You should initialize all elements before using it.
-PK_API void py_newtuple(py_OutRef, int n);
+PK_API py_ObjectRef py_newtuple(py_OutRef, int n);
 /// Create an empty `list`.
 PK_API void py_newlist(py_OutRef);
 /// Create a `list` with `n` UNINITIALIZED elements.
@@ -366,6 +368,8 @@ PK_API void py_newboundmethod(py_OutRef out, py_Ref self, py_Ref func);
 PK_API py_Name py_name(const char*);
 /// Convert a name to a null-terminated string.
 PK_API const char* py_name2str(py_Name);
+/// Convert a name to a python `str` object with cache.
+PK_API py_GlobalRef py_name2ref(py_Name);
 /// Convert a `c11_sv` to a name.
 PK_API py_Name py_namev(c11_sv);
 /// Convert a name to a `c11_sv`.
@@ -464,9 +468,13 @@ PK_API const char* py_tpname(py_Type type);
 /// Call a type to create a new instance.
 PK_API bool py_tpcall(py_Type type, int argc, py_Ref argv) PY_RAISE PY_RETURN;
 
-/// Check if the object is an instance of the given type.
+/// Check if the object is an instance of the given type exactly.
 /// Raise `TypeError` if the check fails.
 PK_API bool py_checktype(py_Ref self, py_Type type) PY_RAISE;
+
+/// Check if the object is an instance of the given type or its subclass.
+/// Raise `TypeError` if the check fails.
+PK_API bool py_checkinstance(py_Ref self, py_Type type) PY_RAISE;
 
 #define py_checkint(self) py_checktype(self, tp_int)
 #define py_checkfloat(self) py_checktype(self, tp_float)
@@ -663,8 +671,6 @@ PK_API int py_import(const char* path) PY_RAISE PY_RETURN;
 
 /// Raise an exception by type and message. Always return false.
 PK_API bool py_exception(py_Type type, const char* fmt, ...) PY_RAISE;
-PK_API bool py_throw(py_Type type, const char* fmt) PY_RAISE;
-
 /// Raise an expection object. Always return false.
 PK_API bool py_raise(py_Ref) PY_RAISE;
 /// Print the current exception.
@@ -695,7 +701,7 @@ PK_API void py_clearexc(py_StackRef p0);
 #define AttributeError(self, n)                                                                    \
     py_exception(tp_AttributeError, "'%t' object has no attribute '%n'", (self)->type, (n))
 #define UnboundLocalError(n)                                                                       \
-    py_exception(tp_UnboundLocalError, "local variable '%n' referenced before assignment", (n))
+    py_exception(tp_UnboundLocalError, "cannot access local variable '%n' where it is not associated with a value", (n))
 
 PK_API bool StopIteration() PY_RAISE;
 PK_API bool KeyError(py_Ref key) PY_RAISE;
@@ -968,8 +974,11 @@ enum py_PredefinedTypes {
     tp_vec3i,
     tp_mat3x3,
     /* array2d */
+    tp_array2d_like,
+    tp_array2d_like_iterator,
     tp_array2d,
-    tp_array2d_iterator,
+    tp_array2d_view,
+    tp_chunked_array2d,
 };
 
 #ifdef __cplusplus
