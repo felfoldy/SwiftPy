@@ -55,6 +55,16 @@ let package = Package(
             cxxSettings: [
                 .headerSearchPath("./include"),
             ]
-        )
+        ),
+        .plugin(
+            name: "UpdatePocketPy",
+            capability: .command(
+                intent: .custom(verb: "update-pocketpy", description: "Update pocketpy"),
+                permissions: [
+                    .allowNetworkConnections(scope: .all(), reason: "Download latest pocketpy"),
+                    .writeToPackageDirectory(reason: "Update pocketpy")
+                ]
+            )
+        ),
     ]
 )
