@@ -175,6 +175,20 @@ public extension Interpreter {
         return [String](Interpreter.call(module?["completions"], r0)) ?? []
     }
     
+    /// Calls a function with no arguments.
+    /// - Parameters:
+    ///   - function: Function to call
+    /// - Returns: Return value from the function.
+    static func call(_ function: PyAPI.Reference?) -> PyAPI.Reference? {
+        shared.catchAndPrint {
+            guard let function, py_istype(function, .function) else {
+                return PyAPI.throw(.TypeError, "Invalid function")
+            }
+            return py_call(function, 0, nil)
+        }
+        return PyAPI.returnValue
+    }
+    
     /// Calls a function with the given arguments.
     /// - Parameters:
     ///   - function: Function to call
@@ -182,7 +196,10 @@ public extension Interpreter {
     /// - Returns: Return value from the function.
     static func call(_ function: PyAPI.Reference?, _ arguments: PyAPI.Reference?...) -> PyAPI.Reference? {
         shared.catchAndPrint {
-            py_call(function, Int32(arguments.count), arguments[0])
+            guard let function, py_istype(function, .function) else {
+                return PyAPI.throw(.TypeError, "Invalid function")
+            }
+            return py_call(function, Int32(arguments.count), arguments[0])
         }
         return PyAPI.returnValue
     }

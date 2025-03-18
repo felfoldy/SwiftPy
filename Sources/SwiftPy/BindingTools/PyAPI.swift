@@ -46,6 +46,7 @@ public extension PyType {
     static let list = PyType(tp_list.rawValue)
     static let object = PyType(tp_object.rawValue)
     static let dict = PyType(tp_dict.rawValue)
+    static let function = PyType(tp_function.rawValue)
     
     // Errors:
     static let TypeError = PyType(tp_TypeError.rawValue)
