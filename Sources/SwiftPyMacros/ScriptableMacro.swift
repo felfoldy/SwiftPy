@@ -121,25 +121,44 @@ extension FunctionDeclSyntax {
         let identifier = name.text
         var pySignature = identifier.snakeCased
         
-        let parameters = signature.parameterClause.parameters
+        guard let parameters = extractParameters(context: context) else {
+            return nil
+        }
+        
+        // TODO: Make it work.
+        if parameters.count > 1 {
+            context.warning(self, "Multiple parameters not yet supported")
+            return nil
+        }
         
         let returnType: String = {
             if let returnType = signature.returnClause?.type {
                 if let identifier = returnType.as(IdentifierTypeSyntax.self)?.name.text {
                     return identifier.pyType
                 }
-                
                 context.warning(self, "unknown return type")
             }
             return "None"
         }()
         
-        if parameters.isEmpty {
-            pySignature.append("(self) -> \(returnType)")
-        } else {
-            context.warning(self, "parameters are not supported yet")
-            return nil
+        // Parameters.
+        let paramsString = (["self"] + parameters.map { param in
+            "\(param.name): \(param.type.pyType)"
+        })
+        .joined(separator: ", ")
+
+        pySignature.append("(\(paramsString)) -> \(returnType)")
+
+        if !parameters.isEmpty {
+            return """
+            type.function("\(pySignature)") { _, argv in
+                ensureArguments(argv, \(parameters[0].type).self) { obj, value in
+                    obj.\(identifier)(\(parameters[0].name): value)
+                }
+            }
+            """
         }
+
         if returnType == "None" {
             return """
             type.function("\(pySignature)") { _, argv in
@@ -155,6 +174,36 @@ extension FunctionDeclSyntax {
             return PyAPI.return(result) 
         }
         """
+    }
+    
+    // MARK: Extract function parameters
+    
+    struct ParameterDefinition {
+        let name: String
+        let type: String
+    }
+    
+    func extractParameters(context: some MacroExpansionContext) -> [ParameterDefinition]? {
+        var parameters: [ParameterDefinition] = []
+        
+        for parameter in signature.parameterClause.parameters {
+            guard let type = parameter.type.as(IdentifierTypeSyntax.self)?.name.text else {
+                context.warning(self, "Unable to read parameter type")
+                return nil
+            }
+            
+            // Python doesn't support named paramters so just go with the second name in this case.
+            let name = parameter.secondName ?? parameter.firstName
+            
+            parameters.append(
+                ParameterDefinition(
+                    name: name.text,
+                    type: type
+                )
+            )
+        }
+
+        return parameters
     }
 }
 

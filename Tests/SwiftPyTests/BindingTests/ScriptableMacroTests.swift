@@ -140,4 +140,32 @@ class ScriptableMacroTests: XCTestCase {
         """,
         macros: testMacros)
     }
+    
+    func testFunctionWithOneParameter() {
+        assertMacroExpansion("""
+        @Scriptable
+        class TestClass {
+            func testFunction(_ value: String) -> Int { 10 }
+        }
+        """, expandedSource: """
+        class TestClass {
+            func testFunction(_ value: String) -> Int { 10 }
+        
+            var _pythonCache = PythonBindingCache()
+        }
+        
+        extension TestClass: PythonBindable {
+            static let pyType: PyType = .make("TestClass") { userdata in
+                deinitFromPython(userdata)
+            } bind: { type in
+                type.function("test_function(self, value: str) -> int") { _, argv in
+                    ensureArguments(argv, String.self) { obj, value in
+                        obj.testFunction(value: value)
+                    }
+                }
+            }
+        }
+        """, macros: testMacros
+        )
+    }
 }

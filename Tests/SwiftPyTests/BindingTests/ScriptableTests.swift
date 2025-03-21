@@ -14,8 +14,7 @@ class TestClassWithProperties {
     var floatProperty: Float = 3.14
     var content: String = "content"
     
-    func changeContent() { content = "changed" }
-    
+    func changeContent(value: String) { content = value }
     func getContent() -> String { content }
 }
 
@@ -64,7 +63,7 @@ struct ScriptableTests {
     @Test func functionCall() {
         let testClass = TestClassWithProperties()
         testClass.toPython(main.emplace("tc4"))
-        Interpreter.run("tc4.change_content()")
+        Interpreter.run("tc4.change_content('changed')")
         
         #expect(Interpreter.evaluate("tc4.get_content()") == "changed")
     }
