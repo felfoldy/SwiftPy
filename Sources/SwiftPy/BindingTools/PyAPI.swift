@@ -103,12 +103,14 @@ public extension Interpreter {
         shared.module(name)
     }
     
-    /// Returns the `__main__` module.
-    ///
-    /// Equivalent to `Interpreter.module("__main__")!`
-    @inlinable static var main: PyAPI.Reference {
-        Interpreter.shared.module("__main__")!
-    }
+    /// `__main__` module.
+    static let main = Interpreter.shared.module("__main__")!
+
+    /// `builtins` module
+    static let builtins = Interpreter.shared.module("builtins")!
+
+    static let eval = builtins["eval"]!
+    static let exec = builtins["exec"]!
 }
 
 // MARK: - Reference extensions

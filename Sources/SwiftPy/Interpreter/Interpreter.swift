@@ -63,11 +63,20 @@ public final class Interpreter {
     
     func execute(_ code: String, filename: String = "<string>", mode: py_CompileMode = EXEC_MODE, module: PyAPI.Reference? = nil) {
         catchAndPrint {
+            let isCompiled = py_compile(code, filename, mode, false)
+
+            guard isCompiled else { return false }
+            
+            let code = py_getreg(0)
+            py_assign(code, py_retval())
+            
+            let function = mode == EVAL_MODE ? Interpreter.eval : Interpreter.exec
+            
             if #available(macOS 12.0, iOS 15.0, *) {
                 PerformanceMonitor.begin()
             }
-
-            let isExecuted = py_exec(code, filename, mode, module)
+            
+            let isExecuted =  py_call(function, 1, code)
 
             if #available(macOS 12.0, iOS 15.0, *) {
                 PerformanceMonitor.end()
