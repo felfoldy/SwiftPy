@@ -61,10 +61,9 @@ public final class Interpreter {
         py_finalize()
     }
     
-    func execute(_ code: String, filename: String = "<string>", mode: py_CompileMode = EXEC_MODE, module: PyAPI.Reference? = nil) {
+    func execute(_ code: String, filename: String = "<string>", mode: py_CompileMode = EXEC_MODE) {
         catchAndPrint {
             let isCompiled = py_compile(code, filename, mode, false)
-
             guard isCompiled else { return false }
             
             let code = py_getreg(0)
@@ -165,8 +164,8 @@ public extension Interpreter {
     ///
     /// - Parameter expression: Expression to evaluate.
     /// - Returns: The result of the expression.
-    static func evaluate(_ expression: String, module: PyAPI.Reference? = nil) -> PyAPI.Reference? {
-        shared.execute(expression, mode: EVAL_MODE, module: module)
+    static func evaluate(_ expression: String) -> PyAPI.Reference? {
+        shared.execute(expression, mode: EVAL_MODE)
 
         let r0 = py_getreg(0)
         py_assign(r0, PyAPI.returnValue)
