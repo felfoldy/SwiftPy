@@ -76,7 +76,7 @@ public final class Interpreter {
                 PerformanceMonitor.begin()
             }
             
-            let isExecuted =  py_call(function, 1, code)
+            let isExecuted = py_call(function, 1, code)
 
             if #available(macOS 12.0, iOS 15.0, *) {
                 PerformanceMonitor.end()
