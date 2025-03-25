@@ -71,7 +71,7 @@ class PythonIntent: PythonBindable {
     }
 }
 
-public protocol PythonIntentParameter<T> {
+protocol PythonIntentParameter<T> {
     associatedtype T: PythonConvertible
     var type: T.Type { get }
     
@@ -91,18 +91,25 @@ extension IntentParameter: PythonIntentParameter where Value: PythonConvertible 
     }
 }
 
+// MARK: - Interpreter + intent
+
 @available(macOS 13.0, iOS 16.0, *)
-@MainActor
-public extension AppIntent {
-    static func register() {
+public extension Interpreter {
+    static func register<Intent: AppIntent>(_ intent: Intent.Type) {
         let intents = Interpreter.intents
-        
+                
         if intents["Intent"] == nil {
             intents.insertTypes(PythonIntent.pyType)
         }
         
-        log.notice("Register intent: \(Self.self)")
-        PythonIntent(intent: Self.init)?
-            .toPython(intents.emplace(persistentIdentifier))
+        guard let intent = PythonIntent(intent: Intent.init) else {
+            log.critical("Failed to register intent: \(Intent.self). Make sure all parameters are python bindable.")
+            return
+        }
+
+        let identifier = intents.emplace(Intent.persistentIdentifier)
+        intent.toPython(identifier)
+        
+        log.notice("Regiser intent: \(Intent.self)")
     }
 }

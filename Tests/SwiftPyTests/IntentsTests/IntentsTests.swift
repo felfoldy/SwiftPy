@@ -9,8 +9,6 @@ import Testing
 import SwiftPy
 import AppIntents
 
-nonisolated(unsafe) private var lastText: String? = nil
-
 struct TestIntent: AppIntent {
     static let title = LocalizedStringResource("title")
     
@@ -27,7 +25,7 @@ struct TestIntent: AppIntent {
 @MainActor
 struct IntentsTests {
     @Test func register() async throws {
-        TestIntent.register()
+        Interpreter.register(TestIntent.self)
 
         await withUnsafeContinuation { continuation in
             Interpreter.main.bind(#def("intent_result() -> None") {
@@ -43,3 +41,5 @@ struct IntentsTests {
         #expect(lastText == "call")
     }
 }
+
+nonisolated(unsafe) private var lastText: String? = nil

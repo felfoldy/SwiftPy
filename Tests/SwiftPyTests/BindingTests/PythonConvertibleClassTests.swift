@@ -34,10 +34,6 @@ extension TestClass: CustomStringConvertible {
     }
 }
 
-extension TestClass {
-    static var hasDictionary: Bool { true }
-}
-
 extension TestClass: PythonBindable {
     static let pyType: PyType = .make("TestClass") { userdata in
         deinitFromPython(userdata)
