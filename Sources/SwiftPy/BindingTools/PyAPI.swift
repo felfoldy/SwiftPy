@@ -108,6 +108,10 @@ public extension Interpreter {
 
     /// `builtins` module
     static let builtins = Interpreter.shared.module("builtins")!
+    
+    /// `intents` module
+    @available(macOS 13.0, iOS 16.0, *)
+    static let intents = Interpreter.shared.module("intents")!
 
     static let eval = builtins["eval"]!
     static let exec = builtins["exec"]!

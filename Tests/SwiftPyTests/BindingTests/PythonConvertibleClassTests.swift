@@ -34,12 +34,16 @@ extension TestClass: CustomStringConvertible {
     }
 }
 
+extension TestClass {
+    static var hasDictionary: Bool { true }
+}
+
 extension TestClass: PythonBindable {
     static let pyType: PyType = .make("TestClass") { userdata in
         deinitFromPython(userdata)
     } bind: { type in
         type.magic("__new__") { _, _ in
-            newPythonObject(PyAPI.returnValue)
+            newPythonObject(PyAPI.returnValue, hasDictionary: true)
             return true
         }
         type.magic("__init__") { _, argv in
@@ -78,7 +82,7 @@ struct PythonConvertibleClassTests {
     let main = Interpreter.main
     let type = TestClass.pyType
     
-    @Test func returnCachedFromToPython() throws {
+    @Test func returnCachedFromToPython() throws {        
         Interpreter.run("import gc")
 
         let obj = TestClass(number: 12)
