@@ -22,6 +22,8 @@ public extension PyAPI {
         py_retval()
     }
 
+    @inlinable static var r0: Reference { py_getreg(0) }
+
     @inlinable static func `return`(_ value: PythonConvertible?) -> Bool {
         py_retval().set(value)
         return true
