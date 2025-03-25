@@ -66,16 +66,15 @@ public final class Interpreter {
             let isCompiled = py_compile(code, filename, mode, false)
             guard isCompiled else { return false }
             
-            let code = py_getreg(0)
-            py_assign(code, py_retval())
-            
-            let function = mode == EVAL_MODE ? Interpreter.eval : Interpreter.exec
+            PyAPI.r0?.assign(py_retval())
+
+            let function: PyAPI.Reference? = mode == EVAL_MODE ? .functions.eval : .functions.exec
             
             if #available(macOS 12.0, iOS 15.0, *) {
                 PerformanceMonitor.begin()
             }
             
-            let isExecuted = py_call(function, 1, code)
+            let isExecuted = py_call(function, 1, PyAPI.r0)
 
             if #available(macOS 12.0, iOS 15.0, *) {
                 PerformanceMonitor.end()
@@ -167,9 +166,8 @@ public extension Interpreter {
     static func evaluate(_ expression: String) -> PyAPI.Reference? {
         shared.execute(expression, mode: EVAL_MODE)
 
-        let r0 = py_getreg(0)
-        py_assign(r0, PyAPI.returnValue)
-        return r0
+        PyAPI.r0?.assign(PyAPI.returnValue)
+        return PyAPI.r0
     }
 
     /// Completes the text.
@@ -178,9 +176,8 @@ public extension Interpreter {
     /// - Returns: Array of possible results.
     static func complete(_ text: String) -> [String] {
         let module = Interpreter.shared.module("interpreter")
-        let r0 = py_getreg(0)
-        text.toPython(r0)
-        return [String](Interpreter.call(module?["completions"], r0)) ?? []
+        text.toPython(PyAPI.r0)
+        return [String](Interpreter.call(module?["completions"], PyAPI.r0)) ?? []
     }
     
     /// Calls a function with no arguments.

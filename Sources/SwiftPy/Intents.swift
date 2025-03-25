@@ -37,7 +37,7 @@ class PythonIntent: PythonBindable {
         signature = "(\(args.joined(separator: ", "))) -> AsyncTask"
     }
     
-    static let pyType: PyType = .make("Intent", module: Interpreter.intents) { userdata in
+    static let pyType: PyType = .make("Intent", module: .modules.intents) { userdata in
         deinitFromPython(userdata)
     } bind: { type in
         type.magic("__call__") { argc, argv in
@@ -96,7 +96,7 @@ extension IntentParameter: PythonIntentParameter where Value: PythonConvertible 
 @available(macOS 13.0, iOS 16.0, *)
 public extension Interpreter {
     static func register<Intent: AppIntent>(_ intent: Intent.Type) {
-        let intents = Interpreter.intents
+        let intents = PyAPI.Reference.modules.intents
                 
         if intents["Intent"] == nil {
             intents.insertTypes(PythonIntent.pyType)

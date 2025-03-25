@@ -35,11 +35,7 @@ public extension PythonBindable {
     
     @inlinable
     func storeInPython(_ reference: PyAPI.Reference?, userdata: UnsafeMutableRawPointer? = nil) {
-        var userdata = userdata
-        
-        if userdata == nil {
-            userdata = py_touserdata(reference)
-        }
+        let userdata = userdata ?? reference?.userdata
         
         // Store retained self pointer in python userdata.
         let retainedSelfPointer = Unmanaged.passRetained(self)
@@ -50,7 +46,7 @@ public extension PythonBindable {
         // Store cache of python object.
         let pointer = UnsafeMutableRawPointer.allocate(byteCount: 16, alignment: 8)
         let opaquePointer = OpaquePointer(pointer)
-        py_assign(opaquePointer, reference)
+        opaquePointer.assign(reference)
         _pythonCache.reference = opaquePointer
     }
     
@@ -70,7 +66,7 @@ public extension PythonBindable {
     @inlinable
     func toPython(_ reference: PyAPI.Reference) {
         if let cached = _pythonCache.reference {
-            py_assign(reference, cached)
+            reference.assign(cached)
             return
         }
         
@@ -80,7 +76,7 @@ public extension PythonBindable {
     
     @inlinable
     static func fromPython(_ reference: PyAPI.Reference) -> Self {
-        let pointer = py_touserdata(reference)
+        let pointer = reference.userdata
             .load(as: UnsafeRawPointer.self)
         return Unmanaged<Self>.fromOpaque(pointer)
             .takeUnretainedValue()

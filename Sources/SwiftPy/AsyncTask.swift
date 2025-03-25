@@ -38,7 +38,7 @@ public class AsyncTask: PythonBindable {
 
     public func toPython(_ reference: PyAPI.Reference) {
         if let cached = _pythonCache.reference {
-            py_assign(reference, cached)
+            reference.assign(cached)
             return
         }
         let ud = Self.newPythonObject(reference, hasDictionary: true)

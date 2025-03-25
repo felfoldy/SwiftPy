@@ -98,10 +98,9 @@ extension Array: PythonConvertible where Element: PythonConvertible {
     
     public func toPython(_ reference: PyAPI.Reference) {
         py_newlist(reference)
-        let r0 = py_getreg(0)!
         for value in self {
-            value.toPython(r0)
-            py_list_append(reference, r0)
+            value.toPython(PyAPI.r0)
+            py_list_append(reference, PyAPI.r0)
         }
     }
 

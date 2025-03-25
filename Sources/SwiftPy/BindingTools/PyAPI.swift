@@ -22,7 +22,7 @@ public extension PyAPI {
         py_retval()
     }
 
-    @inlinable static var r0: Reference { py_getreg(0) }
+    static let r0 = py_getreg(0)
 
     @inlinable static func `return`(_ value: PythonConvertible?) -> Bool {
         py_retval().set(value)
@@ -106,23 +106,47 @@ public extension Interpreter {
     }
     
     /// `__main__` module.
-    static let main = Interpreter.shared.module("__main__")!
+    static let main = PyAPI.Reference.modules.main
+}
 
-    /// `builtins` module
-    static let builtins = Interpreter.shared.module("builtins")!
+// MARK: - Modules
+
+public extension PyAPI.Reference {
+    @MainActor
+    struct Modules {
+        /// `__main__` module.
+        let main = Interpreter.shared.module("__main__")!
+
+        /// `builtins` module
+        let builtins = Interpreter.shared.module("builtins")!
+
+        /// `intents` module
+        let intents = Interpreter.shared.module("intents")!
+    }
+
+    @MainActor static let modules = Modules()
+}
+
+// MARK: - Functions
+
+public extension PyAPI.Reference {
+    @MainActor
+    struct Functions {
+        let eval = PyAPI.Reference.modules.builtins["eval"]!
+        let exec = PyAPI.Reference.modules.builtins["exec"]!
+    }
     
-    /// `intents` module
-    @available(macOS 13.0, iOS 16.0, *)
-    static let intents = Interpreter.shared.module("intents")!
-
-    static let eval = builtins["eval"]!
-    static let exec = builtins["exec"]!
+    @MainActor static let functions = Functions()
 }
 
 // MARK: - Reference extensions
 
 @MainActor
 public extension PyAPI.Reference {
+    @inlinable var userdata: UnsafeMutableRawPointer {
+        py_touserdata(self)
+    }
+    
     @inlinable func isNone() -> Bool {
         py_istype(self, PyType.None)
     }
@@ -134,7 +158,11 @@ public extension PyAPI.Reference {
             py_newnone(self)
         }
     }
-    
+
+    @inlinable func assign(_ newValue: PyAPI.Reference?) {
+        py_assign(self, newValue)
+    }
+
     @inlinable func setAttribute(_ name: String, _ value: PyAPI.Reference?) {
         py_setattr(self, py_name(name), value)
     }
