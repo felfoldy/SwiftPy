@@ -37,9 +37,7 @@ class PythonIntent: PythonBindable {
         signature = "(\(args.joined(separator: ", "))) -> AsyncTask"
     }
     
-    static let pyType: PyType = .make("Intent", module: .modules.intents) { userdata in
-        deinitFromPython(userdata)
-    } bind: { type in
+    static let pyType: PyType = .make("Intent", module: .modules.intents) { type in
         type.magic("__call__") { argc, argv in
             guard let obj = PythonIntent(argv) else {
                 return throwTypeError(argv, 0)

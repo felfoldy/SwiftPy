@@ -32,9 +32,7 @@ public class AsyncTask: PythonBindable {
     
     public var _pythonCache = PythonBindingCache()
     
-    public static var pyType: PyType = .make("AsyncTask") { ud in
-        deinitFromPython(ud)
-    } bind: { type in }
+    public static var pyType: PyType = .make("AsyncTask") { _ in }
 
     public func toPython(_ reference: PyAPI.Reference) {
         if let cached = _pythonCache.reference {

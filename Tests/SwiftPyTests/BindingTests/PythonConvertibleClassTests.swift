@@ -35,13 +35,7 @@ extension TestClass: CustomStringConvertible {
 }
 
 extension TestClass: PythonBindable {
-    static let pyType: PyType = .make("TestClass") { userdata in
-        deinitFromPython(userdata)
-    } bind: { type in
-        type.magic("__new__") { _, _ in
-            newPythonObject(PyAPI.returnValue, hasDictionary: true)
-            return true
-        }
+    static let pyType: PyType = .make("TestClass") { type in
         type.magic("__init__") { _, argv in
             ensureArgument(argv?[1], Int.self) { number in
                 TestClass(number: number).storeInPython(argv)

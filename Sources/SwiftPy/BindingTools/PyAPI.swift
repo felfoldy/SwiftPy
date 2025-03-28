@@ -76,12 +76,45 @@ public extension PyType {
         py_tpobject(self)
     }
 
+    @available(*, deprecated, message: "Use `make(_:base:module:bind:)` instead.")
     @inlinable static func make(_ name: String,
                                 base: PyType = .object,
                                 module: PyAPI.Reference = Interpreter.main,
                                 dtor: py_Dtor,
                                 bind: (PyType) -> Void) -> PyType {
-        let type = py_newtype(name, base, module, dtor)
+        make(name, base: base, module: module, bind: bind)
+    }
+    
+    @inlinable static func make(_ name: String,
+                                base: PyType = .object,
+                                module: PyAPI.Reference = Interpreter.main,
+                                bind: (PyType) -> Void) -> PyType {
+        let type = py_newtype(name, base, module) { userdata in
+            // Dtor callback.
+            guard let pointer = userdata?.load(as: UnsafeRawPointer?.self) else {
+                return
+            }
+
+            // Tale retained value.
+            let unmanaged = Unmanaged<AnyObject>.fromOpaque(pointer)
+            let obj = unmanaged.takeRetainedValue()
+
+            // Clear cache.
+            if let bindable = (obj as? PythonBindable) {
+                UnsafeRawPointer(bindable._pythonCache.reference)?.deallocate()
+                bindable._pythonCache.reference = nil
+            }
+        }
+
+        type.magic("__new__") { _, argv in
+            let type = py_totype(argv)
+            // For simplicity it always creates a dictionary.
+            let ud = py_newobject(PyAPI.returnValue, type, -1, PyAPI.pointerSize)
+            // Clear ud so if init fails it won't try to deinit a random address.
+            ud?.storeBytes(of: nil, as: UnsafeRawPointer?.self)
+            return true
+        }
+
         bind(type)
         return type
     }

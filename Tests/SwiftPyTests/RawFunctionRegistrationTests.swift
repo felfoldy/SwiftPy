@@ -29,8 +29,7 @@ struct RawFunctionRegistrationTests {
             },
             cFunction: { _, _ in
                 FunctionStore.voidFunctions["id"]?(.none)
-                PyAPI.return(.none)
-                return true
+                return PyAPI.return(.none)
             }
         )
 
@@ -120,8 +119,7 @@ struct RawFunctionRegistrationTests {
             cFunction: { argc, argv in
                 let arguments = FunctionArguments(argc: argc, argv: argv)
                 FunctionStore.voidFunctions["id"]?(arguments)
-                PyAPI.return(.none)
-                return true
+                return PyAPI.return(.none)
             }
         )
         

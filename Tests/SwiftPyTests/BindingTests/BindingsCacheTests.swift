@@ -14,9 +14,7 @@ struct BindingsCacheTests {
         var value: Int
 
         class Binding: PythonValueBindable<BindableStruct> {
-            static let pyType = PyType.make("BindableStruct") { userdata in
-                deinitFromPython(userdata)
-            } bind: { type in
+            static let pyType = PyType.make("BindableStruct") { type in
                 type.property("value") { _, argv in
                     PyAPI.return(Binding(argv)?.get()?.value)
                 } setter: { _, argv in
@@ -33,9 +31,7 @@ struct BindingsCacheTests {
         
         var _pythonCache = PythonBindingCache()
         
-        static let pyType = PyType.make("BindingsCacheTests_TestClass") { userdata in
-            deinitFromPython(userdata)
-        } bind: { type in
+        static let pyType = PyType.make("BindingsCacheTests_TestClass") { type in
             type.property("base") { _, argv in
                 cachedBinding(argv, key: "base") { root in
                     BindableStruct.Binding(root, \.base)
