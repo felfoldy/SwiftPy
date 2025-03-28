@@ -97,7 +97,14 @@ struct PythonConvertibleClassTests {
     }
     
     @Test func createFromPython() throws {
-        let obj = try #require(Interpreter.evaluate("TestClass(12)"))
+        Interpreter.run("import gc")
+        Interpreter.run("test5 = TestClass(12)")
+        
+        let obj = try #require(main["test5"])
+        
+        Interpreter.run("del test5")
+        Interpreter.input("gc.collect()")
+
         #expect(TestClass(obj)?.number == 12)
     }
     

@@ -28,7 +28,10 @@ public extension PythonConvertible {
     }
     
     @inlinable static func fromPython(_ reference: PyAPI.Reference?) -> Self? {
-        guard let reference, py_istype(reference, pyType) else { return nil }
+        guard let reference else { return nil }
+        guard py_istype(reference, pyType) || py_isinstance(reference, pyType) else {
+            return nil
+        }
         return fromPython(reference)
     }
 }

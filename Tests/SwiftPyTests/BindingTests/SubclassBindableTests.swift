@@ -1,0 +1,65 @@
+//
+//  SubclassBindableTests.swift
+//  SwiftPy
+//
+//  Created by Tibor Felföldy on 2025-03-28.
+//
+
+import Testing
+import SwiftPy
+import pocketpy
+
+@MainActor
+struct SubclassBindableTests {
+    class Base: PythonBindable {
+        var _pythonCache = PythonBindingCache()
+        var startCalled = false
+        
+        static var pyType: PyType = .make("Base") { type in
+            type.magic("__init__") { _, argv in
+                Base().storeInPython(argv)
+                return PyAPI.return(.none)
+            }
+            type.function("start(self) -> None") { _, argv in
+                Base(argv)?.startCalled = true
+                return PyAPI.return(.none)
+            }
+        }
+    }
+    
+    let main = Interpreter.main
+    let type = Base.pyType
+    
+    init() {
+        Interpreter.run("""
+        class Subclass(Base):
+            def __init__(self):
+                super().__init__()
+                self.val = 'val'
+
+        test = Subclass()
+        """)
+    }
+    
+    @Test func startCalled() {
+        let base = Base(main["test"])
+        Interpreter.run("test.start()")
+        
+        #expect(base?.startCalled == true)
+    }
+    
+    @Test func removeCache() {
+        let base = Base(main["test"])
+        Interpreter.run("""
+        import gc
+        
+        del test
+        gc.collect()
+        """)
+        
+        #expect(main["test"] == nil)
+        withKnownIssue("Its like initing from python disables dtor callback?") {
+            #expect(base?._pythonCache.reference == nil)
+        }
+    }
+}
