@@ -19,6 +19,7 @@ public struct PythonBindingCache {
 }
 
 public extension PythonBindable {
+    @available(*, deprecated, message: "Use `make(_:base:module:bind:)` and it wont be needed.")
     @inlinable static func deinitFromPython(_ userdata: UnsafeMutableRawPointer?) {
         guard let pointer = userdata?.load(as: UnsafeRawPointer?.self) else {
             return

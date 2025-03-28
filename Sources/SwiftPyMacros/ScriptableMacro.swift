@@ -48,9 +48,7 @@ extension ScriptableMacro: ExtensionMacro {
         return try [
             ExtensionDeclSyntax("extension \(raw: className): PythonBindable") {
             """
-            static let pyType: PyType = .make("\(raw: className)") { userdata in
-                deinitFromPython(userdata)
-            } bind: { type in
+            static let pyType: PyType = .make("\(raw: className)") { type in
             \(raw: bindings)
             }
             """

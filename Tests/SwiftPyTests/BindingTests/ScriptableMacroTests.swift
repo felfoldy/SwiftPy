@@ -32,9 +32,7 @@ class ScriptableMacroTests: XCTestCase {
         }
 
         extension TestClass: PythonBindable {
-            static let pyType: PyType = .make("TestClass") { userdata in
-                deinitFromPython(userdata)
-            } bind: { type in
+            static let pyType: PyType = .make("TestClass") { type in
                 type.property(
                     "int_property",
                     getter: { _, argv in
@@ -68,9 +66,7 @@ class ScriptableMacroTests: XCTestCase {
             }
 
             extension TestClass: PythonBindable {
-                static let pyType: PyType = .make("TestClass") { userdata in
-                    deinitFromPython(userdata)
-                } bind: { type in
+                static let pyType: PyType = .make("TestClass") { type in
                     type.property(
                         "int_property",
                         getter: { _, argv in
@@ -100,9 +96,7 @@ class ScriptableMacroTests: XCTestCase {
             }
 
             extension TestClass: PythonBindable {
-                static let pyType: PyType = .make("TestClass") { userdata in
-                    deinitFromPython(userdata)
-                } bind: { type in
+                static let pyType: PyType = .make("TestClass") { type in
                     type.function("test_function(self) -> None") { _, argv in
                         TestClass(argv)?.testFunction()
                         return PyAPI.return(.none)
@@ -128,9 +122,7 @@ class ScriptableMacroTests: XCTestCase {
         }
         
         extension TestClass: PythonBindable {
-            static let pyType: PyType = .make("TestClass") { userdata in
-                deinitFromPython(userdata)
-            } bind: { type in
+            static let pyType: PyType = .make("TestClass") { type in
                 type.function("test_function(self) -> int") { _, argv in
                     let result = TestClass(argv)?.testFunction()
                     return PyAPI.return(result)
@@ -155,9 +147,7 @@ class ScriptableMacroTests: XCTestCase {
         }
         
         extension TestClass: PythonBindable {
-            static let pyType: PyType = .make("TestClass") { userdata in
-                deinitFromPython(userdata)
-            } bind: { type in
+            static let pyType: PyType = .make("TestClass") { type in
                 type.function("test_function(self, value: str) -> int") { _, argv in
                     ensureArguments(argv, String.self) { obj, value in
                         obj.testFunction(value: value)
