@@ -36,6 +36,8 @@ public final class Interpreter {
 
     @usableFromInline
     static var lastFailure: String?
+    
+    let profiler = SignpostProfiler("Python")
 
     init() {
         py_initialize()
@@ -85,20 +87,15 @@ public final class Interpreter {
             PyAPI.r0?.assign(py_retval())
 
             let function: PyAPI.Reference? = mode == EVAL_MODE ? .functions.eval : .functions.exec
-            
-            if #available(macOS 12.0, iOS 15.0, *) {
-                PerformanceMonitor.begin()
-            }
-            
-            let isExecuted = py_call(function, 1, PyAPI.r0)
 
-            if #available(macOS 12.0, iOS 15.0, *) {
-                PerformanceMonitor.end()
-                Interpreter.output.executionTime(
-                    PerformanceMonitor.executionTime
-                )
-            }
-            
+            profiler.begin()
+            let isExecuted = py_call(function, 1, PyAPI.r0)
+            profiler.end()
+
+            Interpreter.output.executionTime(
+                profiler.executionTime
+            )
+
             return isExecuted
         }
     }
