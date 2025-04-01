@@ -8,6 +8,17 @@
 import pocketpy
 import Foundation
 
+public enum InterpreterError: LocalizedError {
+    case runtimeError(String)
+    
+    public var errorDescription: String? {
+        switch self {
+        case let .runtimeError(description):
+            return description
+        }
+    }
+}
+
 @MainActor
 public final class Interpreter {
     public static let shared = Interpreter()
@@ -20,7 +31,11 @@ public final class Interpreter {
 
     public var replLines = [String]()
     
+    @usableFromInline
     static var isFailed = false
+
+    @usableFromInline
+    static var lastFailure: String?
 
     init() {
         py_initialize()
@@ -34,6 +49,7 @@ public final class Interpreter {
             if Interpreter.isFailed {
                 Interpreter.output.stderr(str)
                 Interpreter.isFailed = false
+                Interpreter.lastFailure = str
             } else {
                 Interpreter.output.stdout(str)
             }
@@ -61,8 +77,8 @@ public final class Interpreter {
         py_finalize()
     }
     
-    func execute(_ code: String, filename: String = "<string>", mode: py_CompileMode = EXEC_MODE) {
-        catchAndPrint {
+    func execute(_ code: String, filename: String = "<string>", mode: py_CompileMode = EXEC_MODE) throws {
+        try Interpreter.printErrors {
             let isCompiled = py_compile(code, filename, mode, false)
             guard isCompiled else { return false }
             
@@ -107,7 +123,7 @@ public final class Interpreter {
         for line in input.components(separatedBy: .newlines) {
             if line.isEmpty, !replLines.isEmpty {
                 let joinedBuffer = replLines.joined(separator: "\n")
-                execute(joinedBuffer, filename: "<stdin>", mode: SINGLE_MODE)
+                try? execute(joinedBuffer, filename: "<stdin>", mode: SINGLE_MODE)
                 replLines.removeAll()
             }
 
@@ -120,16 +136,20 @@ public final class Interpreter {
                 continue
             }
 
-            execute(line, filename: "<stdin>", mode: SINGLE_MODE)
+            try? execute(line, filename: "<stdin>", mode: SINGLE_MODE)
         }
     }
-
-    func catchAndPrint(_ call: () -> Bool) {
+    
+    @inlinable
+    static func printErrors(_ call: () -> Bool) throws {
         let p0 = py_peek(0)
         if call() { return }
         Interpreter.isFailed = true
         py_printexc()
         py_clearexc(p0)
+        if let lastFailure {
+            throw InterpreterError.runtimeError(lastFailure)
+        }
     }
 }
 
@@ -139,7 +159,7 @@ public extension Interpreter {
     /// Does not output the input to the console.
     /// - Parameter code: Code to execute.
     static func execute(_ code: String) {
-        shared.execute(code)
+        try? shared.execute(code)
     }
 
     /// Runs a code in execution mode.
@@ -148,7 +168,7 @@ public extension Interpreter {
     /// - Parameter code: Code to execute.
     static func run(_ code: String) {
         output.input(code)
-        shared.execute(code, filename: "<string>", mode: EXEC_MODE)
+        try? shared.execute(code, filename: "<string>", mode: EXEC_MODE)
     }
 
     /// Interactive interpreter input.
@@ -164,7 +184,7 @@ public extension Interpreter {
     /// - Parameter expression: Expression to evaluate.
     /// - Returns: The result of the expression.
     static func evaluate(_ expression: String) -> PyAPI.Reference? {
-        shared.execute(expression, mode: EVAL_MODE)
+        try? shared.execute(expression, mode: EVAL_MODE)
 
         PyAPI.r0?.assign(PyAPI.returnValue)
         return PyAPI.r0
@@ -172,20 +192,28 @@ public extension Interpreter {
 
     /// Completes the text.
     ///
+    /// - Note: Writes to R0 register.
+    ///
     /// - Parameter text: Text to complete.
     /// - Returns: Array of possible results.
     static func complete(_ text: String) -> [String] {
         let module = Interpreter.shared.module("interpreter")
-        text.toPython(PyAPI.r0)
-        return [String](Interpreter.call(module?["completions"], PyAPI.r0)) ?? []
+        let completions = module?["completions"]
+        
+        let result = try? PyAPI.call(
+            completions,
+            text.toRegister(0)
+        )
+        return [String](result) ?? []
     }
-    
-    /// Calls a function with no arguments.
-    /// - Parameters:
-    ///   - function: Function to call
-    /// - Returns: Return value from the function.
+}
+
+// MARK: - Depricated.
+
+public extension Interpreter {
+    @available(*, deprecated, message: "Use PyAPI.call(_:) instead")
     static func call(_ function: PyAPI.Reference?) -> PyAPI.Reference? {
-        shared.catchAndPrint {
+        try? printErrors {
             guard let function, py_istype(function, .function) else {
                 return PyAPI.throw(.TypeError, "Invalid function")
             }
@@ -193,18 +221,14 @@ public extension Interpreter {
         }
         return PyAPI.returnValue
     }
-    
-    /// Calls a function with the given arguments.
-    /// - Parameters:
-    ///   - function: Function to call
-    ///   - arguments: Arguments to pass.
-    /// - Returns: Return value from the function.
-    static func call(_ function: PyAPI.Reference?, _ arguments: PyAPI.Reference?...) -> PyAPI.Reference? {
-        shared.catchAndPrint {
+
+    @available(*, deprecated, message: "Use PyAPI.call(_:) instead")
+    static func call(_ function: PyAPI.Reference?, _ arguments: PyAPI.Reference?) -> PyAPI.Reference? {
+        try? printErrors {
             guard let function, py_istype(function, .function) else {
                 return PyAPI.throw(.TypeError, "Invalid function")
             }
-            return py_call(function, Int32(arguments.count), arguments[0])
+            return py_call(function, 1, arguments)
         }
         return PyAPI.returnValue
     }

@@ -108,6 +108,6 @@ public extension Interpreter {
         let identifier = intents.emplace(Intent.persistentIdentifier)
         intent.toPython(identifier)
         
-        log.notice("Regiser intent: \(Intent.self)")
+        log.notice("Regiser intent: \(Intent.persistentIdentifier)")
     }
 }

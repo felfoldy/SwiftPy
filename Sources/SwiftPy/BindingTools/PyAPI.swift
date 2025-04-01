@@ -32,6 +32,31 @@ public extension PyAPI {
     @inlinable static func `throw`(_ error: PyType, _ message: String?) -> Bool {
         py_throw(error, message)
     }
+    
+    /// Calls a function with no arguments.
+    /// - Parameters:
+    ///   - function: Function to call
+    /// - Returns: Return value from the function.
+    @inlinable @discardableResult
+    static func call(_ function: PyAPI.Reference?) throws -> PyAPI.Reference? {
+        try Interpreter.printErrors {
+            py_call(function, 0, nil)
+        }
+        return PyAPI.returnValue
+    }
+    
+    /// Calls a function with a given argument.
+    /// - Parameters:
+    ///   - function: Function to call
+    ///   - argument: Argument to pass.
+    /// - Returns: Return value from the function.
+    @inlinable @discardableResult
+    static func call(_ function: PyAPI.Reference?, _ argument: PyAPI.Reference?) throws -> PyAPI.Reference? {
+        try Interpreter.printErrors {
+            py_call(function, 1, argument)
+        }
+        return PyAPI.returnValue
+    }
 
     static let pointerSize = Int32(MemoryLayout<UnsafeRawPointer>.size)
 }
@@ -150,10 +175,10 @@ public extension PyAPI.Reference {
         /// `__main__` module.
         let main = Interpreter.shared.module("__main__")!
 
-        /// `builtins` module
+        /// `builtins` module.
         let builtins = Interpreter.shared.module("builtins")!
 
-        /// `intents` module
+        /// `intents` module.
         let intents = Interpreter.shared.module("intents")!
     }
 
@@ -197,11 +222,15 @@ public extension PyAPI.Reference {
     }
 
     @inlinable func setAttribute(_ name: String, _ value: PyAPI.Reference?) {
-        py_setattr(self, py_name(name), value)
+        try? Interpreter.printErrors {
+            py_setattr(self, py_name(name), value)
+        }
     }
     
     @inlinable func deleteAttribute(_ name: String) {
-        py_delattr(self, py_name(name))
+        try? Interpreter.printErrors {
+            py_delattr(self, py_name(name))
+        }
     }
     
     /// Adds the types to the module.

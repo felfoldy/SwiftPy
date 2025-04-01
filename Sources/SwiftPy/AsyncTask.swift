@@ -13,7 +13,7 @@ public class AsyncTask: PythonBindable {
             await continuation()
 
             if let resume = _pythonCache.reference?["resume"] {
-                _ = Interpreter.call(resume)
+                try PyAPI.call(resume)
             }
         }
     }
@@ -23,9 +23,7 @@ public class AsyncTask: PythonBindable {
             let result = await continuation()
 
             if let resume = _pythonCache.reference?["resume"] {
-                let val = py_None()
-                result?.toPython(val)
-                _ = Interpreter.call(resume, val)
+                try PyAPI.call(resume, result?.toRegister(0))
             }
         }
     }

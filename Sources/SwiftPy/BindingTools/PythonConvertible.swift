@@ -9,7 +9,7 @@ import pocketpy
 
 @MainActor
 public protocol PythonConvertible {
-    @inlinable mutating func toPython(_ reference: PyAPI.Reference)
+    @inlinable func toPython(_ reference: PyAPI.Reference)
     @inlinable static func fromPython(_ reference: PyAPI.Reference) -> Self
 
     static var pyType: PyType { get }
@@ -23,8 +23,16 @@ public extension PythonConvertible {
     
     @inlinable func toPython(_ reference: PyAPI.Reference?) {
         guard let reference else { return }
-        var copy = self
-        copy.toPython(reference)
+        toPython(reference)
+    }
+    
+    /// Writes a `PythonObject` to a register at the specific index.
+    /// - Parameter index: index
+    /// - Returns: Reference to the register.
+    @inlinable func toRegister(_ index: Int32) -> PyAPI.Reference? {
+        let register = py_getreg(index)
+        toPython(register)
+        return register
     }
     
     @inlinable static func fromPython(_ reference: PyAPI.Reference?) -> Self? {
@@ -102,8 +110,7 @@ extension Array: PythonConvertible where Element: PythonConvertible {
     public func toPython(_ reference: PyAPI.Reference) {
         py_newlist(reference)
         for value in self {
-            value.toPython(PyAPI.r0)
-            py_list_append(reference, PyAPI.r0)
+            py_list_append(reference, value.toRegister(0))
         }
     }
 

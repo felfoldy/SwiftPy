@@ -58,7 +58,7 @@ struct SubclassBindableTests {
         """)
         
         #expect(main["test"] == nil)
-        withKnownIssue("Its like initing from python disables dtor callback?") {
+        withKnownIssue("Its like dtor callback not working?") {
             #expect(base?._pythonCache.reference == nil)
         }
     }
