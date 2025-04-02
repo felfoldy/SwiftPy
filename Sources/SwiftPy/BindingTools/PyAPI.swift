@@ -92,6 +92,11 @@ public extension PyType {
     func function(_ signature: String, block: PyAPI.CFunction) {
         py_bind(py_tpobject(self), signature, block)
     }
+    
+    @inlinable
+    func classFunction(_ name: String, _ block: PyAPI.CFunction) {
+        py_bindstaticmethod(self, name, block)
+    }
 
     @inlinable var name: String {
         String(cString: py_tpname(self))
@@ -220,6 +225,19 @@ public extension PyAPI.Reference {
     @inlinable func assign(_ newValue: PyAPI.Reference?) {
         py_assign(self, newValue)
     }
+    
+    /// Gets the attribute by the name and copies it to the register.
+    ///
+    /// - Parameters:
+    ///   - name: Name of the attribute.
+    ///   - index: Register index.
+    /// - Returns: attribute.
+    @inlinable func attribute(_ name: String, register index: Int32 = 0) throws -> PyAPI.Reference? {
+        try Interpreter.printErrors {
+            py_getattr(self, py_name(name))
+        }
+        return PyAPI.returnValue.toRegister(index)
+    }
 
     @inlinable func setAttribute(_ name: String, _ value: PyAPI.Reference?) {
         try? Interpreter.printErrors {
@@ -231,6 +249,15 @@ public extension PyAPI.Reference {
         try? Interpreter.printErrors {
             py_delattr(self, py_name(name))
         }
+    }
+    
+    /// Moves the reference to a register at the specific index.
+    /// - Parameter index: index
+    /// - Returns: Reference to the register.
+    @inlinable func toRegister(_ index: Int32) -> PyAPI.Reference? {
+        let register = py_getreg(index)
+        register?.assign(self)
+        return register
     }
     
     /// Adds the types to the module.
@@ -260,6 +287,10 @@ public extension PyAPI.Reference {
 
     @inlinable func isType<T: PythonConvertible>(_ type: T.Type) -> Bool {
         py_istype(self, T.pyType)
+    }
+    
+    @inlinable func isInstance(of type: PyType) -> Bool {
+        py_isinstance(self, type)
     }
 }
 
