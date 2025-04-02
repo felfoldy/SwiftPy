@@ -55,7 +55,7 @@ public class SignpostProfiler: Profiler {
     @usableFromInline
     var startTime: DispatchTime = .now()
     
-    init(_ name: StaticString) {
+    public init(_ name: StaticString) {
         if #available(macOS 12.0, iOS 15.0, *) {
             signposter = Signposter(name: name)
         } else {
