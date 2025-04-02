@@ -9,7 +9,7 @@ SwiftPy is a fast and lightweight Python interpreter built on [pocketpy](https:/
 
 ```swift
 dependencies: [
-    .package(url: "https://github.com/felfoldy/SwiftPy.git", from: "0.5.0")
+    .package(url: "https://github.com/felfoldy/SwiftPy.git", from: "0.7.0")
 ]
 ```
 
