@@ -49,15 +49,19 @@ struct SubclassBindableTests {
     }
     
     @Test func removeCache() {
-        let base = Base(main["test"])
+        Interpreter.run("""
+        test2 = Base()
+        """)
+        
+        let base = Base(main["test2"])
         Interpreter.run("""
         import gc
         
-        del test
+        del test2
         gc.collect()
         """)
         
-        #expect(main["test"] == nil)
+        #expect(main["test2"] == nil)
         withKnownIssue("Its like dtor callback not working?") {
             #expect(base?._pythonCache.reference == nil)
         }

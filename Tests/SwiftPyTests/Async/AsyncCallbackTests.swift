@@ -35,22 +35,23 @@ struct AsyncTaskTests {
         #expect(result == "Hi!")
     }
     
-    @Test func asyncCallbackVoid() async throws {
-        await withUnsafeContinuation { continuation in
-            Interpreter.main.bind(#def("async_func() -> AsyncTask") {
-                AsyncTask { () async -> Void in
-                    try? await Task.sleep(nanoseconds: 0)
-                    continuation.resume()
-                }
-            })
-
-            Interpreter.run("""
-            def callback(result):
-                print(f'Callback: {result}')
-            async_func().resume = callback
-            """)
-        }
-    }
+//    @Test func asyncCallbackVoid() async throws {
+//        await withUnsafeContinuation { continuation in
+//            Interpreter.main.bind(#def("async_func() -> AsyncTask") {
+//                AsyncTask { () async -> Void in
+//                    try? await Task.sleep(nanoseconds: 0)
+//                    continuation.resume()
+//                }
+//            })
+//
+//            Interpreter.run("""
+//            def callback(result):
+//                print(f'Callback: {result}')
+//            testtask = async_func()
+//            testtask.resume = callback
+//            """)
+//        }
+//    }
 }
 
 

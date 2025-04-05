@@ -104,9 +104,7 @@ public final class Interpreter {
         for bundle in bundles {
             if let path = bundle.path(forResource: name, ofType: nil) {
                 do {
-                    let content = try String(contentsOfFile: path, encoding: .utf8)
-                    log.trace("Imported \(name) from \(bundle.bundleURL.lastPathComponent)")
-                    return content
+                    return try String(contentsOfFile: path, encoding: .utf8)
                 } catch {
                     log.error(error.localizedDescription)
                 }
@@ -166,6 +164,11 @@ public extension Interpreter {
     static func run(_ code: String) {
         output.input(code)
         try? shared.execute(code, filename: "<string>", mode: EXEC_MODE)
+    }
+    
+    static func asyncRun(_ code: String) {
+        output.input(code)
+        shared.asyncExecute(code)
     }
 
     /// Interactive interpreter input.

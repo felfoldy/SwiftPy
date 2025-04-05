@@ -7,11 +7,35 @@
 
 import pocketpy
 
+extension Interpreter {
+    func asyncExecute(_ code: String, filename: String = "<string>") {
+        let decoder = AsyncDecoder(code)
+        
+        do {
+            try Interpreter.shared.execute(decoder.code, filename: filename, mode: EXEC_MODE)
+            let obj = Interpreter.main["task"]?.emplace("continuation_code")
+            
+            decoder.continuationCode?.toPython(obj)
+        } catch {
+            return
+        }
+    }
+}
+
 public class AsyncTask: PythonBindable {
     public init(_ continuation: @escaping () async -> Void) {
         Task {
             await continuation()
 
+            guard let reference = _pythonCache.reference else {
+                return
+            }
+            
+            if let continuation = reference["continuation_code"],
+               let code = String(continuation) {
+                Interpreter.shared.asyncExecute(code, filename: "<async_continuation>")
+            }
+            
             if let resume = _pythonCache.reference?["resume"] {
                 try PyAPI.call(resume)
             }
