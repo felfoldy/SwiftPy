@@ -10,6 +10,8 @@ import Testing
 
 @MainActor
 struct AsyncParserTests {
+    let main = Interpreter.main
+    
     @Test func codeToRun() {
         let decoder = AsyncDecoder("""
         await async_func()
@@ -20,8 +22,19 @@ struct AsyncParserTests {
         #expect(decoder.continuationCode == "print('finished')")
     }
     
+    @Test func result() {
+        let decoder = AsyncDecoder("""
+        result = await async_func()
+        print(result)
+        """)
+
+        #expect(decoder.code == "task = async_func()")
+        #expect(decoder.continuationCode == "print(result)")
+        #expect(decoder.resultName == "result")
+    }
+    
     @Test func asyncRun() {
-        Interpreter.main.bind(
+        main.bind(
             #def("async_func() -> AsyncTask") {
                 AsyncTask {}
             }
@@ -32,6 +45,6 @@ struct AsyncParserTests {
         print('finished')
         """)
         
-        #expect(Interpreter.main["task"]?["continuation_code"] == "print('finished')")
+        #expect(main["task"]?["continuation_code"] == "print('finished')")
     }
 }

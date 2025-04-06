@@ -14,10 +14,16 @@ struct TestIntent: AppIntent {
     
     @Parameter(title: "Text")
     var text: String
+    
+    @MainActor static var callback: (() -> Void)?
 
     func perform() async throws -> some IntentResult {
         lastText = text
         print("TestIntent - text: \(text)")
+
+        // Just to continue the execution.
+        await MainActor.run { Self.callback?() }
+
         return .result()
     }
 }
@@ -26,15 +32,18 @@ struct TestIntent: AppIntent {
 struct IntentsTests {
     @Test func register() async throws {
         Interpreter.register(TestIntent.self)
-
+        
         await withUnsafeContinuation { continuation in
-            Interpreter.main.bind(#def("intent_result() -> None") {
+            TestIntent.callback = {
                 continuation.resume()
-            })
+            }
             
-            Interpreter.run("""
+            Interpreter.asyncRun("""
             from intents import TestIntent
-            TestIntent('call').resume = intent_result
+            
+            await TestIntent('call')
+            
+            print("finished")
             """)
         }
 

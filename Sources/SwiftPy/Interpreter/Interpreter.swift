@@ -57,7 +57,7 @@ public final class Interpreter {
             }
         }
         
-        log.info("PocketPython [\(PK_VERSION)] initialized")
+        log.info("pocketpy [\(PK_VERSION)] initialized")
         
         py_callbacks().pointee.importfile = { cFilename in
             guard let cFilename else { return nil }
@@ -118,7 +118,7 @@ public final class Interpreter {
         for line in input.components(separatedBy: .newlines) {
             if line.isEmpty, !replLines.isEmpty {
                 let joinedBuffer = replLines.joined(separator: "\n")
-                try? execute(joinedBuffer, filename: "<stdin>", mode: SINGLE_MODE)
+                asyncExecute(joinedBuffer, filename: "<stdin>", mode: SINGLE_MODE)
                 replLines.removeAll()
             }
 
@@ -130,8 +130,8 @@ public final class Interpreter {
                 replLines.append(line)
                 continue
             }
-
-            try? execute(line, filename: "<stdin>", mode: SINGLE_MODE)
+            
+            asyncExecute(line, filename: "<stdin>", mode: SINGLE_MODE)
         }
     }
     
