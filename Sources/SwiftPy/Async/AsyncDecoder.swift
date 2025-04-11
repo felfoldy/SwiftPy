@@ -17,14 +17,8 @@ struct AsyncDecoder {
         let lines = code.components(separatedBy: .newlines)
         
         var codeToExecute = [String]()
-        
-        // Regex pattern:
-        // ^ -> start of line (no leading whitespace)
-        // (?:(?<resultName>\w+)\s*=\s*)? -> optional assignment capturing the result name
-        // await\s+ -> literal "await" followed by at least one space
-        // (?<call>\w+\([^)]*\)) -> capture the function call (function name + arguments)
-        // $ -> end of line
-        let pattern = #"^(?:(?<resultName>\w+)\s*=\s*)?await\s+(?<call>\w+\([^)]*\))$"#
+
+        let pattern = #"^(?:(?<resultName>\w+)\s*=\s*)?await\s+(?<call>[A-Za-z_]\w*(?:\.[A-Za-z_]\w*)*\([^)]*\))$"#
         
         // Precompile the regex.
         let regex = try! NSRegularExpression(pattern: pattern, options: [])

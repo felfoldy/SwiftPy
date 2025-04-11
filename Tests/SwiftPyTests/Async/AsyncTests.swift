@@ -14,11 +14,11 @@ struct AsyncTests {
     
     @Test func codeToRun() {
         let decoder = AsyncDecoder("""
-        await async_func()
+        await URL.download()
         print('finished')
         """)
         
-        #expect(decoder.code == "task = async_func()")
+        #expect(decoder.code == "task = URL.download()")
         #expect(decoder.continuationCode == "print('finished')")
     }
     
