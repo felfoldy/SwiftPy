@@ -23,7 +23,7 @@ open class PythonValueReference<Value> {
         self.set = set
     }
     
-    public init(_ value: Value?) {
+    public required init(_ value: Value?) {
         self.storedValue = value
         self.get = { [unowned self] in storedValue }
         self.set = { [unowned self] in storedValue = $0 }
