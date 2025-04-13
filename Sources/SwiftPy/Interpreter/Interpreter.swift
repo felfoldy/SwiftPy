@@ -118,7 +118,7 @@ public final class Interpreter {
         for line in input.components(separatedBy: .newlines) {
             if line.isEmpty, !replLines.isEmpty {
                 let joinedBuffer = replLines.joined(separator: "\n")
-                asyncExecute(joinedBuffer, filename: "<stdin>", mode: SINGLE_MODE)
+                try? execute(joinedBuffer, filename: "<stdin>", mode: SINGLE_MODE)
                 replLines.removeAll()
             }
 
@@ -131,7 +131,7 @@ public final class Interpreter {
                 continue
             }
             
-            asyncExecute(line, filename: "<stdin>", mode: SINGLE_MODE)
+            try? execute(line, filename: "<stdin>", mode: SINGLE_MODE)
         }
     }
     
@@ -166,9 +166,9 @@ public extension Interpreter {
         try? shared.execute(code, filename: "<string>", mode: EXEC_MODE)
     }
     
-    static func asyncRun(_ code: String) {
+    static func asyncRun(_ code: String) async {
         output.input(code)
-        shared.asyncExecute(code)
+        await shared.asyncExecute(code)
     }
 
     /// Interactive interpreter input.

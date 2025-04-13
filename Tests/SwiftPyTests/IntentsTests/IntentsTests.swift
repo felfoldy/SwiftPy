@@ -33,19 +33,13 @@ struct IntentsTests {
     @Test func register() async throws {
         Interpreter.register(TestIntent.self)
         
-        await withUnsafeContinuation { continuation in
-            TestIntent.callback = {
-                continuation.resume()
-            }
-            
-            Interpreter.asyncRun("""
-            from intents import TestIntent
-            
-            await TestIntent('call')
-            
-            print("finished")
-            """)
-        }
+        await Interpreter.asyncRun("""
+        from intents import TestIntent
+        
+        await TestIntent('call')
+        
+        print("finished")
+        """)
 
         #expect(lastText == "call")
     }

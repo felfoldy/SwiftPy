@@ -57,7 +57,7 @@ struct BindingsCacheTests {
         #expect(Interpreter.evaluate("obj.base.value") == 100)
     }
     
-    @Test func setStruct() throws {
+    @Test func setStruct() async throws {
         let obj = TestClass()
         obj.toPython(main.emplace("obj"))
         
@@ -65,16 +65,16 @@ struct BindingsCacheTests {
             .toPython(main.emplace("newbase"))
         #expect(Interpreter.evaluate("obj.base.value") == 1)
         
-        Interpreter.input("obj.base = newbase")
+        await Interpreter.input("obj.base = newbase")
         // Should return cached binding.
         #expect(Interpreter.evaluate("obj.base.value") == 2)
     }
     
-    @Test func valueBindingSetter() {
+    @Test func valueBindingSetter() async {
         let obj = TestClass()
         obj.toPython(main.emplace("obj"))
         
-        Interpreter.run("obj.base.value = 2")
+        await Interpreter.run("obj.base.value = 2")
         #expect(obj.base.value == 2)
     }
 }

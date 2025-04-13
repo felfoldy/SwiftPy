@@ -33,12 +33,12 @@ struct AsyncTests {
         #expect(decoder.resultName == "result")
     }
     
-    @Test func asyncRun() {
+    @Test func asyncRun() async {
         main.bind(#def("async_func() -> AsyncTask") {
             AsyncTask {}
         })
         
-        Interpreter.asyncRun("""
+        await Interpreter.asyncRun("""
         await async_func()
         print('finished')
         """)
@@ -46,12 +46,12 @@ struct AsyncTests {
         #expect(main["task"]?["continuation_code"] == "print('finished')")
     }
     
-    @Test func asyncRunWithResult() {
+    @Test func asyncRunWithResult() async {
         main.bind(#def("async_func() -> AsyncTask") {
             AsyncTask { 42 }
         })
         
-        Interpreter.asyncRun("""
+        await Interpreter.asyncRun("""
         result = await async_func()
         print(result)
         """)
