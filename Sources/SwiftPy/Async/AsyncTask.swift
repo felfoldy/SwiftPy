@@ -12,9 +12,16 @@ extension Interpreter {
         await withUnsafeContinuation { continuation in
             let main = Interpreter.main
             
+            // Clear the previous task before running.
+            if main["task"] != nil {
+                try? Interpreter.printErrors {
+                    py_delattr(main, py_name("task"))
+                }
+            }
+
             let decoder = AsyncDecoder(code)
             
-            if decoder.continuationCode != nil {
+            if decoder.didMatch {
                 AsyncTask.completion = {
                     continuation.resume()
                 }
@@ -45,12 +52,13 @@ public class AsyncTask: PythonBindable {
     static var completion: (() -> Void)?
     
     public init(_ task: @escaping () async -> Void) {
+        let completion = AsyncTask.completion
+        
         Task {
             await task()
-            AsyncTask.completion?()
 
             guard let reference = _pythonCache.reference else {
-                
+                completion?()
                 return
             }
 
@@ -58,15 +66,18 @@ public class AsyncTask: PythonBindable {
                let code = String(continuation) {
                 await Interpreter.shared.asyncExecute(code, filename: "<async_continuation>")
             }
+            completion?()
         }
     }
     
     public init<T: PythonConvertible>(_ task: @escaping () async -> T?) where T: Sendable {
+        let completion = AsyncTask.completion
+        
         Task {
             let result = await task()
-            AsyncTask.completion?()
 
             guard let reference = _pythonCache.reference else {
+                completion?()
                 return
             }
 
@@ -80,6 +91,7 @@ public class AsyncTask: PythonBindable {
                let code = String(continuation) {
                 await Interpreter.shared.asyncExecute(code, filename: "<async_continuation>")
             }
+            completion?()
         }
     }
     

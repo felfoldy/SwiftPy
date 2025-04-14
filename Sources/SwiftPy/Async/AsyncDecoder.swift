@@ -12,6 +12,7 @@ struct AsyncDecoder {
     let code: String
     let continuationCode: String?
     let resultName: String?
+    let didMatch: Bool
     
     init(_ code: String) {
         let lines = code.components(separatedBy: .newlines)
@@ -47,6 +48,7 @@ struct AsyncDecoder {
                 self.code = codeToExecute.joined(separator: "\n")
                 self.continuationCode = Self.joinRest(lines, from: i + 1)
                 self.resultName = capturedResultName
+                didMatch = true
                 return
             }
             
@@ -56,6 +58,7 @@ struct AsyncDecoder {
         self.code = code
         continuationCode = nil
         resultName = nil
+        didMatch = false
     }
     
     static func joinRest(_ lines: [String], from i: Int) -> String? {

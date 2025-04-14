@@ -40,10 +40,10 @@ struct AsyncTests {
         
         await Interpreter.asyncRun("""
         await async_func()
-        print('finished')
+        finished = True
         """)
         
-        #expect(main["task"]?["continuation_code"] == "print('finished')")
+        #expect(main["finished"] == true)
     }
     
     @Test func asyncRunWithResult() async {
@@ -53,9 +53,24 @@ struct AsyncTests {
         
         await Interpreter.asyncRun("""
         result = await async_func()
-        print(result)
         """)
         
-        #expect(main["task"]?["result"] == "result")
+        #expect(main["result"] == 42)
+    }
+    
+    @Test func chainingAsyncRun() async {
+        main.bind(#def("async_func() -> AsyncTask") {
+            AsyncTask { 42 }
+        })
+        
+        await Interpreter.asyncRun("""
+        result = await async_func()
+        """)
+        
+        await Interpreter.asyncRun("""
+        new_result = result + 3
+        """)
+        
+        #expect(main["new_result"] == 45)
     }
 }
