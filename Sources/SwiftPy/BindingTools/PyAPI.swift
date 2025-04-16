@@ -82,7 +82,7 @@ public extension PyType {
     func magic(_ name: String, function: PyAPI.CFunction) {
         py_newnativefunc(py_tpgetmagic(self, py_name(name)), function)
     }
-    
+
     @inlinable
     func property(_ name: String, getter: PyAPI.CFunction, setter: PyAPI.CFunction? = nil) {
         py_bindproperty(self, name, getter, setter)
@@ -104,15 +104,6 @@ public extension PyType {
     
     @inlinable var object: PyAPI.Reference? {
         py_tpobject(self)
-    }
-
-    @available(*, deprecated, message: "Use `make(_:base:module:bind:)` instead.")
-    @inlinable static func make(_ name: String,
-                                base: PyType = .object,
-                                module: PyAPI.Reference = Interpreter.main,
-                                dtor: py_Dtor,
-                                bind: (PyType) -> Void) -> PyType {
-        make(name, base: base, module: module, bind: bind)
     }
     
     @inlinable static func make(_ name: String,
@@ -138,7 +129,6 @@ public extension PyType {
 
         type.magic("__new__") { _, argv in
             let type = py_totype(argv)
-            // For simplicity it always creates a dictionary.
             let ud = py_newobject(PyAPI.returnValue, type, -1, PyAPI.pointerSize)
             // Clear ud so if init fails it won't try to deinit a random address.
             ud?.storeBytes(of: nil, as: UnsafeRawPointer?.self)
@@ -208,6 +198,10 @@ public extension PyAPI.Reference {
 public extension PyAPI.Reference {
     @inlinable var userdata: UnsafeMutableRawPointer {
         py_touserdata(self)
+    }
+    
+    @inlinable var isNil: Bool {
+        py_istype(self, 0)
     }
     
     @inlinable func isNone() -> Bool {

@@ -98,13 +98,4 @@ public class AsyncTask: PythonBindable {
     public var _pythonCache = PythonBindingCache()
     
     public static var pyType: PyType = .make("AsyncTask") { _ in }
-
-    public func toPython(_ reference: PyAPI.Reference) {
-        if let cached = _pythonCache.reference {
-            reference.assign(cached)
-            return
-        }
-        let ud = Self.newPythonObject(reference, hasDictionary: true)
-        storeInPython(reference, userdata: ud)
-    }
 }

@@ -19,19 +19,9 @@ public struct PythonBindingCache {
 }
 
 public extension PythonBindable {
-    @available(*, deprecated, message: "Use `make(_:base:module:bind:)` and it wont be needed.")
-    @inlinable static func deinitFromPython(_ userdata: UnsafeMutableRawPointer?) {
-        guard let pointer = userdata?.load(as: UnsafeRawPointer?.self) else {
-            return
-        }
-
-        // Tale retained value.
-        let unmanaged = Unmanaged<Self>.fromOpaque(pointer)
-        let obj = unmanaged.takeRetainedValue()
-
-        // Clear cache.
-        UnsafeRawPointer(obj._pythonCache.reference)?.deallocate()
-        obj._pythonCache.reference = nil
+    @inlinable static var slotCount: Int32 {
+        let slots = (self as? (any HasSlots.Type))?.slotCount
+        return Int32(slots ?? -1)
     }
     
     @inlinable
@@ -58,8 +48,8 @@ public extension PythonBindable {
     /// - Returns: Reference to the userdata.
     @discardableResult
     @inlinable
-    static func newPythonObject(_ reference: PyAPI.Reference, hasDictionary: Bool = false) -> UnsafeMutableRawPointer {
-        let ud = py_newobject(reference, pyType, hasDictionary ? -1 : 0, PyAPI.pointerSize)
+    static func newPythonObject(_ reference: PyAPI.Reference) -> UnsafeMutableRawPointer {
+        let ud = py_newobject(reference, pyType, slotCount, PyAPI.pointerSize)
         ud?.storeBytes(of: nil, as: UnsafeRawPointer?.self)
         return ud!
     }
@@ -98,8 +88,110 @@ public extension PythonConvertible {
     }
 }
 
+// MARK: Binding helpers.
+
 public extension PythonBindable {
-    @inlinable static func cachedBinding(_ argv: PyAPI.Reference?, key: String, makeBinding: (Self) -> PythonBindable?) -> Bool {
+    @inlinable
+    static func __new__(_ argv: PyAPI.Reference?) -> Bool {
+        let type = py_totype(argv)
+        let ud = py_newobject(PyAPI.returnValue, type, slotCount, PyAPI.pointerSize)
+        // Clear ud so if init fails it won't try to deinit a random address.
+        ud?.storeBytes(of: nil, as: UnsafeRawPointer?.self)
+        return true
+    }
+    
+    @inlinable
+    static func __init__(_ argc: Int32, _ argv: PyAPI.Reference?, _ initializer: () -> Self) -> Bool {
+        guard argc == 1 else { return false }
+        initializer().storeInPython(argv)
+        return PyAPI.return(.none)
+    }
+    
+    @inlinable
+    static func __init__<Arg1: PythonConvertible>(_ argc: Int32, _ argv: PyAPI.Reference?, _ initializer: (Arg1) -> Self) -> Bool {
+        guard argc == 2, let arg1 = Arg1(argv?[1]) else {
+            return false
+        }
+        initializer(arg1).storeInPython(argv)
+        return PyAPI.return(.none)
+    }
+    
+    @inlinable
+    static func __repr__(_ argv: PyAPI.Reference?) -> Bool {
+        if let obj = Self(argv) {
+            return PyAPI.return(String(describing: obj))
+        }
+        return PyAPI.return(.none)
+    }
+    
+    @inlinable
+    static func ensureArgument<T: PythonConvertible>(_ argv: PyAPI.Reference?, _ type: T.Type, block: (T) -> Void) -> Bool {
+        if let value = T(argv) {
+            block(value)
+            return PyAPI.return(.none)
+        }
+        return T.throwTypeError(argv?[1], 1)
+    }
+    
+    /// `(self, Arg1) -> Void`
+    @inlinable static func ensureArguments<Arg1: PythonConvertible>(_ argv: PyAPI.Reference?, _ arg1: Arg1.Type, block: (inout Self, Arg1) -> Void) -> Bool {
+        guard var obj = Self(argv) else {
+            return .throwTypeError(argv, 0)
+        }
+        
+        guard let value1 = Arg1(argv?[1]) else {
+            return Arg1.throwTypeError(argv?[1], 1)
+        }
+        
+        block(&obj, value1)
+        return PyAPI.return(.none)
+    }
+    
+    @inlinable
+    static func _bind_getter<Value: PythonConvertible>(_ keypath: WritableKeyPath<Self, Value>, _ argv: PyAPI.Reference?) -> Bool {
+        PyAPI.return(Self(argv)?[keyPath: keypath])
+    }
+    
+    @inlinable
+    static func _bind_setter<Value: PythonConvertible>(_ keypath: WritableKeyPath<Self, Value>, _ argv: PyAPI.Reference?) -> Bool {
+        ensureArguments(argv, Value.self) { base, value in
+            base[keyPath: keypath] = value
+        }
+    }
+    
+    /// `() -> Void`
+    @inlinable
+    static func _bind_function(_ fn: (Self) -> () -> Void, _ argv: PyAPI.Reference?) -> Bool {
+        guard let obj = Self(argv) else {
+            return PyAPI.throw(.TypeError, "Invalid arguments")
+        }
+        fn(obj)()
+        return PyAPI.return(.none)
+    }
+    
+    /// `(Arg1) -> Void`
+    @inlinable
+    static func _bind_function<Arg1: PythonConvertible>(_ fn: (Self) -> (Arg1) -> Void, _ argv: PyAPI.Reference?) -> Bool {
+        guard let obj = Self(argv),
+              let arg1 = Arg1(argv?[1]) else {
+            return PyAPI.throw(.TypeError, "Invalid arguments")
+        }
+        fn(obj)(arg1)
+        return PyAPI.return(.none)
+    }
+    
+    /// `() -> Result?`
+    @inlinable
+    static func _bind_function(_ fn: (Self) -> () -> (any PythonConvertible)?, _ argv: PyAPI.Reference?) -> Bool {
+        guard let obj = Self(argv) else {
+            return PyAPI.throw(.TypeError, "Invalid arguments")
+        }
+        return PyAPI.return(fn(obj)())
+    }
+    
+    @inlinable
+    // @available(*, deprecated, message: "Use Slots instead.")
+    static func cachedBinding(_ argv: PyAPI.Reference?, key: String, makeBinding: (Self) -> PythonBindable?) -> Bool {
         guard let obj = Self(argv) else {
             return .throwTypeError(argv, 0)
         }
@@ -112,37 +204,10 @@ public extension PythonBindable {
         return PyAPI.return(binding)
     }
     
-    @inlinable static func reprDescription(_ argv: PyAPI.Reference?) -> Bool {
-        if let obj = Self(argv) {
-            return PyAPI.return(String(describing: obj))
-        }
-        return PyAPI.return(.none)
-    }
-    
-    @inlinable static func ensureArgument<T: PythonConvertible>(_ argv: PyAPI.Reference?, _ type: T.Type, block: (T) -> Void) -> Bool {
-        if let value = T(argv) {
-            block(value)
-            return PyAPI.return(.none)
-        }
-        return T.throwTypeError(argv?[1], 1)
-    }
-    
-    /// `(self, Arg1) -> Void`
-    @inlinable static func ensureArguments<Arg1: PythonConvertible>(_ argv: PyAPI.Reference?, _ arg1: Arg1.Type, block: (Self, Arg1) -> Void) -> Bool {
-        guard let obj = Self(argv) else {
-            return .throwTypeError(argv, 0)
-        }
-        
-        guard let value1 = Arg1(argv?[1]) else {
-            return Arg1.throwTypeError(argv?[1], 1)
-        }
-
-        block(obj, value1)
-        return PyAPI.return(.none)
-    }
-    
     /// `(self, Arg1) -> Result?`
-    @inlinable static func ensureArguments<Arg1: PythonConvertible, Result: PythonConvertible>(_ argv: PyAPI.Reference?, _ arg1: Arg1.Type, block: (Self, Arg1) -> Result?) -> Bool {
+    @inlinable
+    @available(*, deprecated, message: "Use `_bind_function` instead")
+    static func ensureArguments<Arg1: PythonConvertible, Result: PythonConvertible>(_ argv: PyAPI.Reference?, _ arg1: Arg1.Type, block: (Self, Arg1) -> Result?) -> Bool {
         guard let obj = Self(argv) else {
             return .throwTypeError(argv, 0)
         }

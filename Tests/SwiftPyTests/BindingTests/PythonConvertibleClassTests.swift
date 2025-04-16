@@ -13,6 +13,8 @@ import CoreFoundation
 final class TestClass {
     var number: Int
     
+    init() { number = 0 }
+    
     init(number: Int) {
         self.number = number
     }
@@ -36,33 +38,23 @@ extension TestClass: CustomStringConvertible {
 
 extension TestClass: PythonBindable {
     static let pyType: PyType = .make("TestClass") { type in
-        type.magic("__init__") { _, argv in
-            ensureArgument(argv?[1], Int.self) { number in
-                TestClass(number: number).storeInPython(argv)
-            }
+        type.magic("__new__") { __new__($1) }
+        type.magic("__init__") { argc, argv in
+            __init__(argc, argv, TestClass.init) ||
+            __init__(argc, argv, TestClass.init(number:)) ||
+            PyAPI.throw(.TypeError, "Invalid arguments")
         }
-        type.magic("__repr__") { _, argv in
-            reprDescription(argv)
+        type.magic("__repr__") { __repr__($1) }
+        type.property("number") {
+            _bind_getter(\.number, $1)
+        } setter: {
+            _bind_setter(\.number, $1)
         }
-        type.property(
-            "number",
-            getter: { argc, argv in
-                PyAPI.return(TestClass(argv)?.number)
-            },
-            setter: { argc, argv in
-                ensureArguments(argv, Int.self) { base, value in
-                    base.number = value
-                }
-            }
-        )
-        type.function("set_number(self, value: int) -> None") { _, argv in
-            ensureArguments(argv, Int.self) { obj, value in
-                obj.setNumber(value: value)
-            }
+        type.function("set_number(self, value: int) -> None") {
+            _bind_function(setNumber, $1)
         }
-        type.function("get_number(self) -> int") { _, argv in
-            let result = TestClass(argv)?.getNumber()
-            return PyAPI.return(result)
+        type.function("get_number(self) -> int") {
+            _bind_function(getNumber, $1)
         }
     }
 }
