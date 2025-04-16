@@ -133,22 +133,8 @@ public extension PythonBindable {
         return T.throwTypeError(argv?[1], 1)
     }
     
-    /// `(self, Arg1) -> Void`
-    @inlinable static func ensureArguments<Arg1: PythonConvertible>(_ argv: PyAPI.Reference?, _ arg1: Arg1.Type, block: (inout Self, Arg1) -> Void) -> Bool {
-        guard var obj = Self(argv) else {
-            return .throwTypeError(argv, 0)
-        }
-        
-        guard let value1 = Arg1(argv?[1]) else {
-            return Arg1.throwTypeError(argv?[1], 1)
-        }
-        
-        block(&obj, value1)
-        return PyAPI.return(.none)
-    }
-    
     @inlinable
-    static func _bind_getter<Value: PythonConvertible>(_ keypath: WritableKeyPath<Self, Value>, _ argv: PyAPI.Reference?) -> Bool {
+    static func _bind_getter<Value: PythonConvertible>(_ keypath: KeyPath<Self, Value>, _ argv: PyAPI.Reference?) -> Bool {
         PyAPI.return(Self(argv)?[keyPath: keypath])
     }
     
@@ -188,9 +174,9 @@ public extension PythonBindable {
         }
         return PyAPI.return(fn(obj)())
     }
-    
+        
     @inlinable
-    // @available(*, deprecated, message: "Use Slots instead.")
+    @available(*, deprecated, message: "Use Slots instead.")
     static func cachedBinding(_ argv: PyAPI.Reference?, key: String, makeBinding: (Self) -> PythonBindable?) -> Bool {
         guard let obj = Self(argv) else {
             return .throwTypeError(argv, 0)
@@ -217,5 +203,21 @@ public extension PythonBindable {
         }
         
         return PyAPI.return(block(obj, value1))
+    }
+    
+    /// `(self, Arg1) -> Void`
+    @inlinable
+    // @available(*, deprecated, message: "Use `_bind_function` instead")
+    static func ensureArguments<Arg1: PythonConvertible>(_ argv: PyAPI.Reference?, _ arg1: Arg1.Type, block: (inout Self, Arg1) -> Void) -> Bool {
+        guard var obj = Self(argv) else {
+            return .throwTypeError(argv, 0)
+        }
+        
+        guard let value1 = Arg1(argv?[1]) else {
+            return Arg1.throwTypeError(argv?[1], 1)
+        }
+        
+        block(&obj, value1)
+        return PyAPI.return(.none)
     }
 }

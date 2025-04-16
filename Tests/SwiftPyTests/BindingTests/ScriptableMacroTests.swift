@@ -24,7 +24,7 @@ class ScriptableMacroTests: XCTestCase {
         }
         """,
         expandedSource:
-        """
+        #"""
         class TestClass {
             var intProperty: Int = 10
 
@@ -35,18 +35,16 @@ class ScriptableMacroTests: XCTestCase {
             static let pyType: PyType = .make("TestClass") { type in
                 type.property(
                     "int_property",
-                    getter: { _, argv in
-                        return PyAPI.return(TestClass(argv)?.intProperty)
+                    getter: {
+                        _bind_getter(\.intProperty, $1)
                     },
-                    setter: { _, argv in
-                    ensureArguments(argv, Int.self) { obj, value in
-                        obj.intProperty = value
-                    }
+                    setter: {
+                        _bind_setter(\.intProperty, $1)
                     }
                 )
             }
         }
-        """,
+        """#,
         macros: testMacros)
     }
     
@@ -58,7 +56,7 @@ class ScriptableMacroTests: XCTestCase {
                 var intProperty: Int { 10 }
             }
             """,
-            expandedSource:"""
+            expandedSource: #"""
             class TestClass {
                 var intProperty: Int { 10 }
 
@@ -69,14 +67,14 @@ class ScriptableMacroTests: XCTestCase {
                 static let pyType: PyType = .make("TestClass") { type in
                     type.property(
                         "int_property",
-                        getter: { _, argv in
-                            return PyAPI.return(TestClass(argv)?.intProperty)
+                        getter: {
+                            _bind_getter(\.intProperty, $1)
                         },
                         setter: nil
                     )
                 }
             }
-            """,
+            """#,
             macros: testMacros)
     }
     
@@ -97,9 +95,8 @@ class ScriptableMacroTests: XCTestCase {
 
             extension TestClass: PythonBindable {
                 static let pyType: PyType = .make("TestClass") { type in
-                    type.function("test_function(self) -> None") { _, argv in
-                        TestClass(argv)?.testFunction()
-                        return PyAPI.return(.none)
+                    type.function("test_function(self) -> None") {
+                        _bind_function(testFunction, $1)
                     }
                 }
             }
@@ -123,9 +120,8 @@ class ScriptableMacroTests: XCTestCase {
         
         extension TestClass: PythonBindable {
             static let pyType: PyType = .make("TestClass") { type in
-                type.function("test_function(self) -> int") { _, argv in
-                    let result = TestClass(argv)?.testFunction()
-                    return PyAPI.return(result)
+                type.function("test_function(self) -> int") {
+                    _bind_function(testFunction, $1)
                 }
             }
         }
@@ -137,21 +133,19 @@ class ScriptableMacroTests: XCTestCase {
         assertMacroExpansion("""
         @Scriptable
         class TestClass {
-            func testFunction(_ value: String) -> Int { 10 }
+            func testFunction(_ value: String, val2: Int) -> Int { 10 }
         }
         """, expandedSource: """
         class TestClass {
-            func testFunction(_ value: String) -> Int { 10 }
+            func testFunction(_ value: String, val2: Int) -> Int { 10 }
         
             var _pythonCache = PythonBindingCache()
         }
         
         extension TestClass: PythonBindable {
             static let pyType: PyType = .make("TestClass") { type in
-                type.function("test_function(self, value: str) -> int") { _, argv in
-                    ensureArguments(argv, String.self) { obj, value in
-                        obj.testFunction(value: value)
-                    }
+                type.function("test_function(self, value: str, val2: int) -> int") {
+                    _bind_function(testFunction, $1)
                 }
             }
         }

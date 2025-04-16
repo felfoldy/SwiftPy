@@ -26,14 +26,18 @@ struct BindingsCacheTests {
         }
     }
 
-    class TestClass: PythonBindable {
+    class TestClass: PythonBindable, HasSlots {
+        enum Slot: Int32, CaseIterable {
+            case base
+        }
+        
         var base: BindableStruct = .init(value: 1)
         
         var _pythonCache = PythonBindingCache()
         
         static let pyType = PyType.make("BindingsCacheTests_TestClass") { type in
             type.property("base") { _, argv in
-                cachedBinding(argv, key: "base") { root in
+                _bind_slot(.base, argv) { root in
                     BindableStruct.Binding(root, \.base)
                 }
             } setter: { _, argv in

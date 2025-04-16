@@ -207,29 +207,3 @@ public extension Interpreter {
         return [String](result) ?? []
     }
 }
-
-// MARK: - Depricated.
-
-public extension Interpreter {
-    @available(*, deprecated, message: "Use PyAPI.call(_:) instead")
-    static func call(_ function: PyAPI.Reference?) -> PyAPI.Reference? {
-        try? printErrors {
-            guard let function, py_istype(function, .function) else {
-                return PyAPI.throw(.TypeError, "Invalid function")
-            }
-            return py_call(function, 0, nil)
-        }
-        return PyAPI.returnValue
-    }
-
-    @available(*, deprecated, message: "Use PyAPI.call(_:) instead")
-    static func call(_ function: PyAPI.Reference?, _ arguments: PyAPI.Reference?) -> PyAPI.Reference? {
-        try? printErrors {
-            guard let function, py_istype(function, .function) else {
-                return PyAPI.throw(.TypeError, "Invalid function")
-            }
-            return py_call(function, 1, arguments)
-        }
-        return PyAPI.returnValue
-    }
-}

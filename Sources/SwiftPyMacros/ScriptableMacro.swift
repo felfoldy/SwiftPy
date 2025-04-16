@@ -73,14 +73,6 @@ extension VariableDeclSyntax {
         
         let identifier = pattern.identifier.text
         
-        guard let typeAnnotation = binding.typeAnnotation,
-              let type = typeAnnotation.type.as(IdentifierTypeSyntax.self) else {
-            context.warning(self, "Use type annotation")
-            return nil
-        }
-        
-        let annotation = type.name.text
-        
         let setter: String = {
             if specifier != "var" {
                 return "nil"
@@ -93,21 +85,13 @@ extension VariableDeclSyntax {
                 }
             }
             
-            return """
-            { _, argv in
-                ensureArguments(argv, \(annotation).self) { obj, value in
-                    obj.\(identifier) = value
-                }
-            }
-            """
+            return "{ _bind_setter(\\.\(identifier), $1) }"
         }()
         
         return """
         type.property(
             "\(identifier.snakeCased)",
-            getter: { _, argv in
-                return PyAPI.return(\(className)(argv)?.\(identifier))
-            },
+            getter: { _bind_getter(\\.\(identifier), $1) },
             setter: \(setter)
         )
         """
@@ -122,13 +106,7 @@ extension FunctionDeclSyntax {
         guard let parameters = extractParameters(context: context) else {
             return nil
         }
-        
-        // TODO: Make it work.
-        if parameters.count > 1 {
-            context.warning(self, "Multiple parameters not yet supported")
-            return nil
-        }
-        
+
         let returnType: String = {
             if let returnType = signature.returnClause?.type {
                 if let identifier = returnType.as(IdentifierTypeSyntax.self)?.name.text {
@@ -146,30 +124,10 @@ extension FunctionDeclSyntax {
         .joined(separator: ", ")
 
         pySignature.append("(\(paramsString)) -> \(returnType)")
-
-        if !parameters.isEmpty {
-            return """
-            type.function("\(pySignature)") { _, argv in
-                ensureArguments(argv, \(parameters[0].type).self) { obj, value in
-                    obj.\(identifier)(\(parameters[0].name): value)
-                }
-            }
-            """
-        }
-
-        if returnType == "None" {
-            return """
-            type.function("\(pySignature)") { _, argv in
-                \(className)(argv)?.\(identifier)()
-                return PyAPI.return(.none) 
-            }
-            """
-        }
         
         return """
-        type.function("\(pySignature)") { _, argv in
-            let result = \(className)(argv)?.\(identifier)()
-            return PyAPI.return(result) 
+        type.function("\(pySignature)") {
+            _bind_function(\(identifier), $1)
         }
         """
     }
