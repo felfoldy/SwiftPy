@@ -104,6 +104,23 @@ extension Float: PythonConvertible {
     }
 }
 
+extension Optional: PythonConvertible where Wrapped: PythonConvertible {
+
+    public static var pyType: PyType { .object }
+    
+    public func toPython(_ reference: PyAPI.Reference) {
+        if let wrappedValue = self {
+            wrappedValue.toPython(reference)
+        } else {
+            py_newnone(reference)
+        }
+    }
+
+    public static func fromPython(_ reference: PyAPI.Reference) -> Optional<Wrapped> {
+        Wrapped(reference)
+    }
+}
+
 extension Array: PythonConvertible where Element: PythonConvertible {
     public static var pyType: PyType { .list }
     
