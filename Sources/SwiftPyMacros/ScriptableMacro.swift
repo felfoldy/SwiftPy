@@ -24,6 +24,26 @@ extension ScriptableMacro: ExtensionMacro {
             throw MacroExpansionErrorMessage("'@Scriptable' can only be applied to a 'class'")
         }
         
+        let confirmance: String = {
+            let hasConfirmance = classDecl.inheritanceClause?.inheritedTypes
+                .compactMap { $0.as(InheritedTypeSyntax.self) }
+                .compactMap { $0.type.as(IdentifierTypeSyntax.self) }
+                .map(\.name.text)
+                .contains("PythonBindable") ?? false
+            
+            if hasConfirmance {
+                return ""
+            }
+            
+            return ": PythonBindable"
+        }()
+        
+        let hasConfirmance = classDecl.inheritanceClause?.inheritedTypes
+            .compactMap { $0.as(InheritedTypeSyntax.self) }
+            .compactMap { $0.type.as(IdentifierTypeSyntax.self) }
+            .map(\.name.text)
+            .contains("PythonBindable") ?? false
+        
         let className = classDecl.name.text
         let members = declaration.memberBlock.members
         
@@ -62,9 +82,9 @@ extension ScriptableMacro: ExtensionMacro {
         }()
         
         return try [
-            ExtensionDeclSyntax("extension \(raw: className): PythonBindable") {
+            ExtensionDeclSyntax("extension \(raw: className)\(raw: confirmance)") {
             """
-            static let pyType: PyType = .make(\(raw: makeArgs)) { type in
+            @MainActor static let pyType: PyType = .make(\(raw: makeArgs)) { type in
             \(raw: bindings)
             type.magic("__new__") { __new__($1) }
             type.magic("__repr__") { __repr__($1) }

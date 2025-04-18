@@ -101,14 +101,14 @@ public extension PythonBindable {
     }
     
     @inlinable
-    static func __init__(_ argc: Int32, _ argv: PyAPI.Reference?, _ initializer: () -> Self) -> Bool {
+    static func __init__(_ argc: Int32, _ argv: PyAPI.Reference?, _ initializer: @MainActor () -> Self) -> Bool {
         guard argc == 1 else { return false }
         initializer().storeInPython(argv)
         return PyAPI.return(.none)
     }
     
     @inlinable
-    static func __init__<Arg1: PythonConvertible>(_ argc: Int32, _ argv: PyAPI.Reference?, _ initializer: (Arg1) -> Self) -> Bool {
+    static func __init__<Arg1: PythonConvertible>(_ argc: Int32, _ argv: PyAPI.Reference?, _ initializer: @MainActor (Arg1) -> Self) -> Bool {
         guard argc == 2, let arg1 = Arg1(argv?[1]) else {
             return false
         }

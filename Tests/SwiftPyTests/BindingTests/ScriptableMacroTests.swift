@@ -265,4 +265,29 @@ class ScriptableMacroTests: XCTestCase {
         """,
         macros: testMacros)
     }
+    
+    func testRedundantPythonBindable() {
+        assertMacroExpansion("""
+        @Scriptable
+        class TestClass: PythonBindable {}
+        """, expandedSource: """
+        class TestClass: PythonBindable {
+        
+            var _pythonCache = PythonBindingCache()
+        }
+        
+        extension TestClass {
+            static let pyType: PyType = .make("TestClass") { type in
+        
+                type.magic("__new__") {
+                    __new__($1)
+                }
+                type.magic("__repr__") {
+                    __repr__($1)
+                }
+            }
+        }
+        """,
+        macros: testMacros)
+    }
 }
