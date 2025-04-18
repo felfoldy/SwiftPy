@@ -28,4 +28,4 @@ public macro def<Out>(
 
 @attached(member, names: named(_pythonCache))
 @attached(extension, conformances: PythonBindable, names: named(pyType))
-public macro Scriptable() = #externalMacro(module: "SwiftPyMacros", type: "ScriptableMacro")
+public macro Scriptable(_ name: String? = nil, base: py_Type? = nil, module: py_Ref? = nil) = #externalMacro(module: "SwiftPyMacros", type: "ScriptableMacro")

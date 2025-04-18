@@ -32,23 +32,35 @@ extension ScriptableMacro: ExtensionMacro {
             .compactMap { $0.decl.as(VariableDeclSyntax.self) }
             // Bindings.
             .compactMap { property in
-            property.propertyBinding(className: className, context: context)
+            property.propertyBinding(context: context)
             }.joined(separator: "\n")
         
         let functionBindings = members
             .compactMap { $0.decl.as(FunctionDeclSyntax.self) }
             .compactMap { function in
-                function.binding(className: className, context: context)
+                function.binding(context: context)
             }.joined(separator: "\n")
         
         let bindings = [propertyBindings, functionBindings]
             .filter { !$0.isEmpty }
             .joined(separator: "\n")
+        
+        let makeArgs = {
+            guard let args = node.arguments?.description else {
+                return "\"\(className)\""
+            }
+            
+            if args.starts(with: "\"") {
+                return args
+            }
 
+            return "\"\(className)\", \(args)"
+        }()
+        
         return try [
             ExtensionDeclSyntax("extension \(raw: className): PythonBindable") {
             """
-            static let pyType: PyType = .make("\(raw: className)") { type in
+            static let pyType: PyType = .make(\(raw: makeArgs)) { type in
             \(raw: bindings)
             }
             """
@@ -58,7 +70,7 @@ extension ScriptableMacro: ExtensionMacro {
 }
 
 extension VariableDeclSyntax {
-    func propertyBinding(className: String, context: some MacroExpansionContext) -> String? {
+    func propertyBinding(context: some MacroExpansionContext) -> String? {
         let specifier = bindingSpecifier.text
         guard let binding = bindings.first else {
             context.warning(self, "Unable to read binding")
@@ -99,7 +111,7 @@ extension VariableDeclSyntax {
 }
 
 extension FunctionDeclSyntax {
-    func binding(className: String, context: some MacroExpansionContext) -> String? {
+    func binding(context: some MacroExpansionContext) -> String? {
         let identifier = name.text
         var pySignature = identifier.snakeCased
         

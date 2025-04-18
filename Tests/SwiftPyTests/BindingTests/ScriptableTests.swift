@@ -8,9 +8,9 @@
 import Testing
 import SwiftPy
 
-@Scriptable
+@Scriptable("TestClass2", module: Interpreter.main)
 class TestClassWithProperties {
-    let intProperty: Int = 12
+    let intProperty: Int? = 12
     var floatProperty: Float = 3.14
     var content: String = "content"
     

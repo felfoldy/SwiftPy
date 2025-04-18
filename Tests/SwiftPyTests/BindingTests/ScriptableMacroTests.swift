@@ -15,7 +15,7 @@ let testMacros: [String: Macro.Type] = [
 ]
 
 class ScriptableMacroTests: XCTestCase {
-    func testRegisterFunctionMacro() {
+    func testPropertyBinding() {
         assertMacroExpansion(
         """
         @Scriptable
@@ -149,7 +149,45 @@ class ScriptableMacroTests: XCTestCase {
                 }
             }
         }
-        """, macros: testMacros
-        )
+        """, macros: testMacros)
+    }
+    
+    func testScriptableAttributes() {
+        // Without overriden type name.
+        assertMacroExpansion("""
+        @Scriptable("TestClass2", base: .object, module: .module)
+        class TestClass {}
+        """, expandedSource: """
+        class TestClass {
+        
+            var _pythonCache = PythonBindingCache()
+        }
+        
+        extension TestClass: PythonBindable {
+            static let pyType: PyType = .make("TestClass2", base: .object, module: .module) { type in
+        
+            }
+        }
+        """,
+        macros: testMacros)
+        
+        // Without overriden type name.
+        assertMacroExpansion("""
+        @Scriptable(base: .object, module: .module)
+        class TestClass {}
+        """, expandedSource: """
+        class TestClass {
+        
+            var _pythonCache = PythonBindingCache()
+        }
+        
+        extension TestClass: PythonBindable {
+            static let pyType: PyType = .make("TestClass", base: .object, module: .module) { type in
+        
+            }
+        }
+        """,
+        macros: testMacros)
+
     }
 }
