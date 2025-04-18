@@ -35,17 +35,6 @@ public extension PythonConvertible {
         return register
     }
     
-    @inlinable
-    func withTemp(block: (PyAPI.Reference) -> PyAPI.Reference?) -> PyAPI.Reference? {
-        let value = py_getreg(0)
-        defer { py_setreg(0, value) }
-
-        if let temp = toRegister(0) {
-            return block(temp)
-        }
-        return nil
-    }
-    
     // TODO: Because it returns nil if the type is not matching when Self is optional it can override the value.
     // Consider throwing an error instead of optional?
     @inlinable static func fromPython(_ reference: PyAPI.Reference?) -> Self? {

@@ -23,9 +23,7 @@ public extension PythonBindable where Self: HasSlots {
     @inlinable
     subscript(slot: Slot) -> PyAPI.Reference? {
         get {
-            withTemp { obj in
-                obj[slot: slot.rawValue]
-            }
+            toRegister(0)?[slot: slot.rawValue]
         }
         set {
             toRegister(0)?[slot: slot.rawValue] = newValue
