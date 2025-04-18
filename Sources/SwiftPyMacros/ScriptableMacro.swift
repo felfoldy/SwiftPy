@@ -26,6 +26,10 @@ extension ScriptableMacro: ExtensionMacro {
         
         let className = classDecl.name.text
         let members = declaration.memberBlock.members
+        
+        let initializerBindings = members
+            .compactMap { $0.decl.as(InitializerDeclSyntax.self) }
+            .binding(className: className)
     
         let propertyBindings = members
             // Properties
@@ -41,7 +45,7 @@ extension ScriptableMacro: ExtensionMacro {
                 function.binding(context: context)
             }.joined(separator: "\n")
         
-        let bindings = [propertyBindings, functionBindings]
+        let bindings = [initializerBindings, propertyBindings, functionBindings]
             .filter { !$0.isEmpty }
             .joined(separator: "\n")
         
@@ -62,12 +66,48 @@ extension ScriptableMacro: ExtensionMacro {
             """
             static let pyType: PyType = .make(\(raw: makeArgs)) { type in
             \(raw: bindings)
+            type.magic("__new__") { __new__($1) }
+            type.magic("__repr__") { __repr__($1) }
             }
             """
             }
         ]
     }
 }
+
+// MARK: - init extraction
+
+extension [InitializerDeclSyntax] {
+    func binding(className: String) -> String {
+        if isEmpty { return "" }
+        
+        let bindings = map(\.signature)
+            .map { signature in
+                let parameters = signature.parameterClause.parameters
+                    .map { "\($0.firstName.text):" }
+                    .joined()
+                
+                if parameters.isEmpty {
+                    return "\(className).init"
+                }
+                
+                return "\(className).init(\(parameters))"
+            }
+            .map {
+                "__init__(argc, argv, \($0)) ||"
+            }
+            .joined(separator: "\n")
+        
+        return """
+        type.magic("__init__") { argc, argv in
+        \(bindings)
+        PyAPI.throw(.TypeError, "Invalid arguments")
+        }
+        """
+    }
+}
+
+// MARK: - Property
 
 extension VariableDeclSyntax {
     func propertyBinding(context: some MacroExpansionContext) -> String? {
@@ -109,6 +149,8 @@ extension VariableDeclSyntax {
         """
     }
 }
+
+// MARK: - Function
 
 extension FunctionDeclSyntax {
     func binding(context: some MacroExpansionContext) -> String? {

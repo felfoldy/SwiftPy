@@ -14,6 +14,8 @@ class TestClassWithProperties {
     var floatProperty: Float = 3.14
     var content: String = "content"
     
+    init() {}
+    
     func changeContent(value: String) { content = value }
     func getContent() -> String { content }
 }
