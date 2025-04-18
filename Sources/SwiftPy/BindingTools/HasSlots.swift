@@ -17,47 +17,44 @@ public extension HasSlots {
 }
 
 public extension PythonBindable where Self: HasSlots {
+    /// Returns the stored python object for the given slot.
+    ///
+    /// - Note: Uses register 0.
     @inlinable
     subscript(slot: Slot) -> PyAPI.Reference? {
         get {
-            guard let result = py_getslot(toRegister(0), slot.rawValue),
-                  !result.isNil else {
-                return nil
+            withTemp { obj in
+                obj[slot: slot.rawValue]
             }
-            return result
         }
         set {
-            py_setslot(toRegister(0), slot.rawValue, newValue)
+            toRegister(0)?[slot: slot.rawValue] = newValue
         }
     }
     
     @inlinable
     subscript<T: PythonConvertible>(slot: Slot) -> T? {
         get {
-            guard let result = py_getslot(toRegister(0), slot.rawValue),
-                  !result.isNil else {
-                return nil
-            }
-            return T(result)
+            T(self[slot])
         }
         set {
-            py_setslot(toRegister(0), slot.rawValue, newValue?.toRegister(1))
+            self[slot] = newValue?.toRegister(1)
         }
     }
     
     @inlinable
     static func _bind_slot<T: PythonConvertible>(_ slot: Slot, _ argv: PyAPI.Reference?, makeBinding: (Self) -> T?) -> Bool {
-        guard let obj = Self(argv) else {
-            return .throwTypeError(argv, 0)
-        }
-        
-        if let cached = obj[slot] {
-            PyAPI.returnValue.assign(cached)
+        if let result = argv?[slot: slot.rawValue] {
+            PyAPI.returnValue.assign(result)
             return true
         }
-        
-        let binding = makeBinding(obj)
-        obj[slot] = binding
-        return PyAPI.return(binding)
+
+        guard let binding = Self(argv) else {
+            return .throwTypeError(argv, 0)
+        }
+
+        makeBinding(binding)?.toPython(PyAPI.returnValue)
+        argv?[slot: slot.rawValue] = PyAPI.returnValue
+        return true
     }
 }

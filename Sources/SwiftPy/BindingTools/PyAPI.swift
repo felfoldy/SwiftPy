@@ -204,7 +204,7 @@ public extension PyAPI.Reference {
         py_istype(self, 0)
     }
     
-    @inlinable func isNone() -> Bool {
+    @inlinable var isNone: Bool {
         py_istype(self, PyType.None)
     }
 
@@ -270,9 +270,24 @@ public extension PyAPI.Reference {
         py_getdict(self, py_name(name))
     }
     
-    @inlinable subscript(index: Int) -> PyAPI.Reference? {
+    @inlinable
+    subscript(index: Int) -> PyAPI.Reference? {
         let argument = Int(bitPattern: self) + (index << 4)
         return PyAPI.Reference(bitPattern: argument)
+    }
+    
+    @inlinable
+    subscript(slot i: Int32) -> PyAPI.Reference? {
+        get {
+            guard let result = py_getslot(self, i),
+                  !result.isNil else {
+                return nil
+            }
+            return result
+        }
+        nonmutating set {
+            py_setslot(self, i, newValue)
+        }
     }
     
     @inlinable func bind(_ function: FunctionRegistration) {

@@ -16,7 +16,7 @@ struct PyAPITests {
         #expect(Interpreter.main["x"] == 10)
 
         Interpreter.main["x"]?.set(Int?.none)
-        #expect(Interpreter.main["x"]?.isNone() == true)
+        #expect(Interpreter.main["x"]?.isNone == true)
         
         Interpreter.main["x"]?.set("10")
         #expect(Interpreter.main["x"] == "10")
