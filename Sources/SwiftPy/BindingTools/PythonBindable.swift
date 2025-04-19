@@ -117,6 +117,37 @@ public extension PythonBindable {
     }
     
     @inlinable
+    static func __init__<
+        Arg1: PythonConvertible,
+        Arg2: PythonConvertible
+    >(_ argc: Int32, _ argv: PyAPI.Reference?,
+      _ initializer: @MainActor (Arg1, Arg2) -> Self) -> Bool {
+        guard argc == 3, let arg1 = Arg1(argv?[1]),
+              let arg2 = Arg2(argv?[2]) else {
+            return false
+        }
+        initializer(arg1, arg2).storeInPython(argv)
+        return PyAPI.return(.none)
+    }
+    
+    @inlinable
+    static func __init__<
+        Arg1: PythonConvertible,
+        Arg2: PythonConvertible,
+        Arg3: PythonConvertible
+    >(_ argc: Int32, _ argv: PyAPI.Reference?,
+      _ initializer: @MainActor (Arg1, Arg2, Arg3) -> Self) -> Bool {
+        guard argc == 3,
+              let arg1 = Arg1(argv?[1]),
+              let arg2 = Arg2(argv?[2]),
+              let arg3 = Arg3(argv?[3]) else {
+            return false
+        }
+        initializer(arg1, arg2, arg3).storeInPython(argv)
+        return PyAPI.return(.none)
+    }
+    
+    @inlinable
     static func __repr__(_ argv: PyAPI.Reference?) -> Bool {
         if let obj = Self(argv) {
             return PyAPI.return(String(describing: obj))

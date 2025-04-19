@@ -14,6 +14,8 @@ final class TestClass {
     var number: Int? = nil
     
     init() {}
+    init(a: Int, b: Int) {}
+    init(a: Int, b: Int, c: Int) {}
     
     init(number: Int) {
         self.number = number
@@ -42,6 +44,8 @@ extension TestClass: PythonBindable {
         type.magic("__init__") { argc, argv in
             __init__(argc, argv, TestClass.init) ||
             __init__(argc, argv, TestClass.init(number:)) ||
+            __init__(argc, argv, TestClass.init(a:b:)) ||
+            __init__(argc, argv, TestClass.init(a:b:c:)) ||
             PyAPI.throw(.TypeError, "Invalid arguments")
         }
         type.magic("__repr__") { __repr__($1) }

@@ -32,7 +32,7 @@ class ScriptableMacroTests: XCTestCase {
         }
 
         extension TestClass: PythonBindable {
-            static let pyType: PyType = .make("TestClass") { type in
+            @MainActor static let pyType: PyType = .make("TestClass") { type in
                 type.property(
                     "int_property",
                     getter: {
@@ -70,7 +70,7 @@ class ScriptableMacroTests: XCTestCase {
             }
 
             extension TestClass: PythonBindable {
-                static let pyType: PyType = .make("TestClass") { type in
+                @MainActor static let pyType: PyType = .make("TestClass") { type in
                     type.property(
                         "int_property",
                         getter: {
@@ -106,7 +106,7 @@ class ScriptableMacroTests: XCTestCase {
             }
 
             extension TestClass: PythonBindable {
-                static let pyType: PyType = .make("TestClass") { type in
+                @MainActor static let pyType: PyType = .make("TestClass") { type in
                     type.function("test_function(self) -> None") {
                         _bind_function(testFunction, $1)
                     }
@@ -137,7 +137,7 @@ class ScriptableMacroTests: XCTestCase {
         }
         
         extension TestClass: PythonBindable {
-            static let pyType: PyType = .make("TestClass") { type in
+            @MainActor static let pyType: PyType = .make("TestClass") { type in
                 type.function("test_function(self) -> int") {
                     _bind_function(testFunction, $1)
                 }
@@ -167,7 +167,7 @@ class ScriptableMacroTests: XCTestCase {
         }
         
         extension TestClass: PythonBindable {
-            static let pyType: PyType = .make("TestClass") { type in
+            @MainActor static let pyType: PyType = .make("TestClass") { type in
                 type.function("test_function(self, value: str, val2: int) -> int") {
                     _bind_function(testFunction, $1)
                 }
@@ -194,7 +194,7 @@ class ScriptableMacroTests: XCTestCase {
         }
         
         extension TestClass: PythonBindable {
-            static let pyType: PyType = .make("TestClass2", base: .object, module: .module) { type in
+            @MainActor static let pyType: PyType = .make("TestClass2", base: .object, module: .module) { type in
         
                 type.magic("__new__") {
                     __new__($1)
@@ -218,7 +218,7 @@ class ScriptableMacroTests: XCTestCase {
         }
         
         extension TestClass: PythonBindable {
-            static let pyType: PyType = .make("TestClass", base: .object, module: .module) { type in
+            @MainActor static let pyType: PyType = .make("TestClass", base: .object, module: .module) { type in
         
                 type.magic("__new__") {
                     __new__($1)
@@ -248,7 +248,7 @@ class ScriptableMacroTests: XCTestCase {
         }
         
         extension TestClass: PythonBindable {
-            static let pyType: PyType = .make("TestClass") { type in
+            @MainActor static let pyType: PyType = .make("TestClass") { type in
                 type.magic("__init__") { argc, argv in
                     __init__(argc, argv, TestClass.init) ||
                     __init__(argc, argv, TestClass.init(number:)) ||
@@ -277,7 +277,7 @@ class ScriptableMacroTests: XCTestCase {
         }
         
         extension TestClass {
-            static let pyType: PyType = .make("TestClass") { type in
+            @MainActor static let pyType: PyType = .make("TestClass") { type in
         
                 type.magic("__new__") {
                     __new__($1)
