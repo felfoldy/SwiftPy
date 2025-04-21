@@ -101,14 +101,20 @@ public extension PythonBindable {
     }
     
     @inlinable
-    static func __init__(_ argc: Int32, _ argv: PyAPI.Reference?, _ initializer: @MainActor () -> Self) -> Bool {
+    static func __init__(
+        _ argc: Int32, _ argv: PyAPI.Reference?,
+        _ initializer: @MainActor () -> Self
+    ) -> Bool {
         guard argc == 1 else { return false }
         initializer().storeInPython(argv)
         return PyAPI.return(.none)
     }
     
     @inlinable
-    static func __init__<Arg1: PythonConvertible>(_ argc: Int32, _ argv: PyAPI.Reference?, _ initializer: @MainActor (Arg1) -> Self) -> Bool {
+    static func __init__<Arg1: PythonConvertible>(
+        _ argc: Int32, _ argv: PyAPI.Reference?,
+        _ initializer: @MainActor (Arg1) -> Self
+    ) -> Bool {
         guard argc == 2, let arg1 = Arg1(argv?[1]) else {
             return false
         }
@@ -149,19 +155,184 @@ public extension PythonBindable {
     
     @inlinable
     static func __repr__(_ argv: PyAPI.Reference?) -> Bool {
-        if let obj = Self(argv) {
-            return PyAPI.return(String(describing: obj))
+        _castSelf(argv) { obj in
+            PyAPI.return(String(describing: obj))
         }
-        return PyAPI.return(.none)
+    }
+    
+    // MARK: _cast
+    
+    @inlinable
+    static func _castArgs<Arg0: PythonConvertible>(
+        _ argv: PyAPI.Reference?,
+        arguments: (Arg0) -> Bool
+    ) -> Bool {
+        guard let arg0 = Arg0(argv) else {
+            return Arg0.throwTypeError(argv, 0)
+        }
+        return arguments(arg0)
     }
     
     @inlinable
-    static func ensureArgument<T: PythonConvertible>(_ argv: PyAPI.Reference?, _ type: T.Type, block: (T) -> Void) -> Bool {
-        if let value = T(argv) {
-            block(value)
-            return PyAPI.return(.none)
+    static func _castSelf(
+        _ argv: PyAPI.Reference?,
+        arguments: (Self) -> Bool
+    ) -> Bool {
+        _castArgs(argv, arguments: arguments)
+    }
+    
+    @inlinable
+    static func _castArgs<Arg0: PythonConvertible, Arg1: PythonConvertible>(
+        _ argv: PyAPI.Reference?,
+        arguments: (Arg0, Arg1) -> Bool
+    ) -> Bool {
+        guard let arg0 = Arg0(argv) else {
+            return Arg0.throwTypeError(argv, 0)
         }
-        return T.throwTypeError(argv?[1], 1)
+        guard let arg1 = Arg1(argv?[1]) else {
+            return Arg1.throwTypeError(argv, 1)
+        }
+        return arguments(arg0, arg1)
+    }
+    
+    @inlinable
+    static func _castSelfArgs<Arg1: PythonConvertible>(
+        _ argv: PyAPI.Reference?,
+        arguments: (Self, Arg1) -> Bool
+    ) -> Bool {
+        _castArgs(argv, arguments: arguments)
+    }
+    
+    @inlinable
+    static func _castArgs<Arg0: PythonConvertible,
+                          Arg1: PythonConvertible,
+                          Arg2: PythonConvertible>(
+        _ argv: PyAPI.Reference?,
+        arguments: (Arg0, Arg1, Arg2) -> Bool
+    ) -> Bool {
+        guard let arg0 = Arg0(argv) else {
+            return Arg0.throwTypeError(argv, 0)
+        }
+        guard let arg1 = Arg1(argv?[1]) else {
+            return Arg1.throwTypeError(argv, 1)
+        }
+        guard let arg2 = Arg2(argv?[2]) else {
+            return Arg2.throwTypeError(argv, 2)
+        }
+        return arguments(arg0, arg1, arg2)
+    }
+    
+    @inlinable
+    static func _castSelfArgs<Arg1: PythonConvertible, Arg2: PythonConvertible>(
+        _ argv: PyAPI.Reference?,
+        arguments: (Self, Arg1, Arg2) -> Bool
+    ) -> Bool {
+        _castArgs(argv, arguments: arguments)
+    }
+    
+    @inlinable
+    static func _checkArgs<Arg0: PythonConvertible>(
+        _ argc: Int32, _ argv: PyAPI.Reference?,
+        arguments: (Arg0) -> Bool,
+    ) -> Bool {
+        guard argc == 1 else {
+            return PyAPI.throw(.TypeError, "Expected 1 argument, got \(argc)")
+        }
+        return _castArgs(argv, arguments: arguments)
+    }
+    
+    @inlinable
+    static func _checkArgs<Arg0: PythonConvertible, Arg1: PythonConvertible>(
+        _ argc: Int32, _ argv: PyAPI.Reference?,
+        arguments: (Arg0, Arg1) -> Bool,
+    ) -> Bool {
+        guard argc == 2 else {
+            return PyAPI.throw(.TypeError, "Expected 2 arguments, got \(argc)")
+        }
+        return _castArgs(argv, arguments: arguments)
+    }
+    
+    @inlinable
+    static func _checkArgs<
+        Arg0: PythonConvertible,
+        Arg1: PythonConvertible,
+        Arg2: PythonConvertible
+    >(
+        _ argc: Int32, _ argv: PyAPI.Reference?,
+        arguments: (Arg0, Arg1, Arg2) -> Bool,
+    ) -> Bool {
+        guard argc == 3 else {
+            return PyAPI.throw(.TypeError, "Expected 3 arguments, got \(argc)")
+        }
+        return _castArgs(argv, arguments: arguments)
+    }
+        
+    
+    // MARK: _bind_staticFunction
+    
+    /// `(Arg0) -> Result`
+    @inlinable
+    static func _bind_staticFunction<Arg0: PythonConvertible>(
+        argc: Int32, argv: PyAPI.Reference?,
+        _ fn: (Arg0) -> (any PythonConvertible)
+    ) -> Bool {
+        _checkArgs(argc, argv) { arg0 in
+            PyAPI.return(fn(arg0))
+        }
+    }
+    
+    /// `(Arg0) -> Void`
+    @inlinable
+    static func _bind_staticFunction<Arg0: PythonConvertible>(
+        argc: Int32, argv: PyAPI.Reference?,
+        _ fn: (Arg0) -> Void
+    ) -> Bool {
+        _checkArgs(argc, argv) { arg0 in
+            PyAPI.returnNone { fn(arg0) }
+        }
+    }
+    
+    /// `(Arg0, Arg1) -> Result`
+    @inlinable
+    static func _bind_staticFunction<
+        Arg0: PythonConvertible,
+        Arg1: PythonConvertible
+    >(
+        argc: Int32, argv: PyAPI.Reference?,
+        _ fn: (Arg0, Arg1) -> (any PythonConvertible)
+    ) -> Bool {
+        _checkArgs(argc, argv) { arg0, arg1 in
+            PyAPI.return(fn(arg0, arg1))
+        }
+    }
+    
+    /// `(Arg0, Arg1) -> Void`
+    @inlinable
+    static func _bind_staticFunction<
+        Arg0: PythonConvertible,
+        Arg1: PythonConvertible
+    >(
+        argc: Int32, argv: PyAPI.Reference?,
+        _ fn: (Arg0, Arg1) -> Void
+    ) -> Bool {
+        _checkArgs(argc, argv) { arg0, arg1 in
+            PyAPI.returnNone { fn(arg0, arg1) }
+        }
+    }
+    
+    /// `(Arg0, Arg1, Arg2) -> Void`
+    @inlinable
+    static func _bind_staticFunction<
+        Arg0: PythonConvertible,
+        Arg1: PythonConvertible,
+        Arg2: PythonConvertible
+    >(
+        argc: Int32, argv: PyAPI.Reference?,
+        _ fn: (Arg0, Arg1, Arg2) -> Void
+    ) -> Bool {
+        _checkArgs(argc, argv) { arg0, arg1, arg2 in
+            PyAPI.returnNone { fn(arg0, arg1, arg2) }
+        }
     }
     
     @inlinable
@@ -170,42 +341,86 @@ public extension PythonBindable {
     }
     
     @inlinable
-    static func _bind_setter<Value: PythonConvertible>(_ keypath: WritableKeyPath<Self, Value>, _ argv: PyAPI.Reference?) -> Bool {
-        ensureArguments(argv, Value.self) { base, value in
-            base[keyPath: keypath] = value
+    static func _bind_setter<Value: PythonConvertible>(_ keypath: ReferenceWritableKeyPath<Self, Value>, _ argv: PyAPI.Reference?) -> Bool {
+        _castSelfArgs(argv) { (base, value) in
+            PyAPI.returnNone {
+                base[keyPath: keypath] = value
+            }
         }
     }
+    
+    // MARK: _bind_function
     
     /// `() -> Void`
     @inlinable
-    static func _bind_function(_ fn: (Self) -> () -> Void, _ argv: PyAPI.Reference?) -> Bool {
-        guard let obj = Self(argv) else {
-            return PyAPI.throw(.TypeError, "Invalid arguments")
+    static func _bind_function(
+        _ argv: PyAPI.Reference?,
+        _ fn: (Self) -> () -> Void
+    ) -> Bool {
+        _castArgs(argv) { obj in
+            PyAPI.returnNone(fn(obj))
         }
-        fn(obj)()
-        return PyAPI.return(.none)
-    }
-    
-    /// `(Arg1) -> Void`
-    @inlinable
-    static func _bind_function<Arg1: PythonConvertible>(_ fn: (Self) -> (Arg1) -> Void, _ argv: PyAPI.Reference?) -> Bool {
-        guard let obj = Self(argv),
-              let arg1 = Arg1(argv?[1]) else {
-            return PyAPI.throw(.TypeError, "Invalid arguments")
-        }
-        fn(obj)(arg1)
-        return PyAPI.return(.none)
     }
     
     /// `() -> Result?`
     @inlinable
-    static func _bind_function(_ fn: (Self) -> () -> (any PythonConvertible)?, _ argv: PyAPI.Reference?) -> Bool {
-        guard let obj = Self(argv) else {
-            return PyAPI.throw(.TypeError, "Invalid arguments")
-        }
-        return PyAPI.return(fn(obj)())
+    static func _bind_function(
+        _ argv: PyAPI.Reference?,
+        _ fn: (Self) -> () -> (any PythonConvertible)?
+    ) -> Bool {
+        _castSelf(argv) { PyAPI.return(fn($0)()) }
     }
-        
+    
+    /// `(Arg1) -> Result?`
+    @inlinable
+    static func _bind_function<Arg1: PythonConvertible>(
+        _ argv: PyAPI.Reference?,
+        _ fn: (Self) -> (Arg1) -> (any PythonConvertible)?
+    ) -> Bool {
+        _castArgs(argv) { (obj, arg1) in
+            PyAPI.return(fn(obj)(arg1))
+        }
+    }
+    
+    /// `(Arg1) -> Void`
+    @inlinable
+    static func _bind_function<Arg1: PythonConvertible>(
+        _ argv: PyAPI.Reference?,
+        _ fn: (Self) -> (Arg1) -> Void
+    ) -> Bool {
+        _castArgs(argv) { (obj, arg1) in
+            PyAPI.returnNone { fn(obj)(arg1) }
+        }
+    }
+    
+    /// `(Arg1, Arg2) -> Result?`
+    @inlinable
+    static func _bind_function<
+        Arg1: PythonConvertible,
+        Arg2: PythonConvertible
+    >(
+        _ argv: PyAPI.Reference?,
+        _ fn: (Self) -> (Arg1, Arg2) -> (any PythonConvertible)?
+    ) -> Bool {
+        _castArgs(argv) { (obj, arg1, arg2) in
+            PyAPI.return(fn(obj)(arg1, arg2))
+        }
+    }
+    
+    /// `(Arg1, Arg2) -> Void`
+    @inlinable
+    static func _bind_function<
+        Arg1: PythonConvertible,
+        Arg2: PythonConvertible
+    >(
+        _ argv: PyAPI.Reference?,
+        _ fn: (Self) -> (Arg1, Arg2) -> Void
+    ) -> Bool {
+        _castArgs(argv) { (obj, arg1, arg2) in
+            PyAPI.returnNone { fn(obj)(arg1, arg2) }
+        }
+    }
+
     @inlinable
     @available(*, deprecated, message: "Use Slots instead.")
     static func cachedBinding(_ argv: PyAPI.Reference?, key: String, makeBinding: (Self) -> PythonBindable?) -> Bool {
@@ -238,9 +453,9 @@ public extension PythonBindable {
     
     /// `(self, Arg1) -> Void`
     @inlinable
-    // @available(*, deprecated, message: "Use `_bind_function` instead")
-    static func ensureArguments<Arg1: PythonConvertible>(_ argv: PyAPI.Reference?, _ arg1: Arg1.Type, block: (inout Self, Arg1) -> Void) -> Bool {
-        guard var obj = Self(argv) else {
+    @available(*, deprecated, message: "Use `_castArgs` or `_checkArgs` instead")
+    static func ensureArguments<Arg1: PythonConvertible>(_ argv: PyAPI.Reference?, _ arg1: Arg1.Type, block: (Self, Arg1) -> Void) -> Bool {
+        guard let obj = Self(argv) else {
             return .throwTypeError(argv, 0)
         }
         
@@ -248,7 +463,32 @@ public extension PythonBindable {
             return Arg1.throwTypeError(argv?[1], 1)
         }
         
-        block(&obj, value1)
+        block(obj, value1)
         return PyAPI.return(.none)
+    }
+    
+    /// `() -> Void`
+    @available(*, deprecated, message: "_bind_function(_ argv:_ fn:")
+    @inlinable
+    static func _bind_function(_ fn: (Self) -> () -> Void, _ argv: PyAPI.Reference?) -> Bool {
+        _castArgs(argv) { obj in
+            PyAPI.returnNone(fn(obj))
+        }
+    }
+    
+    /// `() -> Result?`
+    @inlinable
+    @available(*, deprecated, message: "_bind_function(_ argv:_ fn:")
+    static func _bind_function(_ fn: (Self) -> () -> (any PythonConvertible)?, _ argv: PyAPI.Reference?) -> Bool {
+        _castSelf(argv) { PyAPI.return(fn($0)()) }
+    }
+    
+    /// `(Arg1) -> Void`
+    @available(*, deprecated, message: "_bind_function(_ argv:_ fn:")
+    @inlinable
+    static func _bind_function<Arg1: PythonConvertible>(_ fn: (Self) -> (Arg1) -> Void, _ argv: PyAPI.Reference?) -> Bool {
+        _castArgs(argv) { (obj, arg1) in
+            PyAPI.returnNone { fn(obj)(arg1) }
+        }
     }
 }

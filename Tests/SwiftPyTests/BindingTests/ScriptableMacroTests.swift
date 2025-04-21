@@ -108,7 +108,7 @@ class ScriptableMacroTests: XCTestCase {
             extension TestClass: PythonBindable {
                 @MainActor static let pyType: PyType = .make("TestClass") { type in
                     type.function("test_function(self) -> None") {
-                        _bind_function(testFunction, $1)
+                        _bind_function($1, testFunction)
                     }
                     type.magic("__new__") {
                         __new__($1)
@@ -139,7 +139,7 @@ class ScriptableMacroTests: XCTestCase {
         extension TestClass: PythonBindable {
             @MainActor static let pyType: PyType = .make("TestClass") { type in
                 type.function("test_function(self) -> int") {
-                    _bind_function(testFunction, $1)
+                    _bind_function($1, testFunction)
                 }
                 type.magic("__new__") {
                     __new__($1)
@@ -169,7 +169,7 @@ class ScriptableMacroTests: XCTestCase {
         extension TestClass: PythonBindable {
             @MainActor static let pyType: PyType = .make("TestClass") { type in
                 type.function("test_function(self, value: str, val2: int) -> int") {
-                    _bind_function(testFunction, $1)
+                    _bind_function($1, testFunction)
                 }
                 type.magic("__new__") {
                     __new__($1)

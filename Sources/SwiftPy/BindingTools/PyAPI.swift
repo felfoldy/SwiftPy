@@ -18,18 +18,27 @@ public extension PyAPI {
     /// Just a type alias of an `OpaquePointer`.
     typealias Reference = py_Ref
 
-    @inlinable static var returnValue: Reference {
+    @inlinable
+    static var returnValue: Reference {
         py_retval()
     }
 
     static let r0 = py_getreg(0)
 
-    @inlinable static func `return`(_ value: PythonConvertible?) -> Bool {
+    @inlinable
+    static func `return`(_ value: PythonConvertible?) -> Bool {
         py_retval().set(value)
         return true
     }
     
-    @inlinable static func `throw`(_ error: PyType, _ message: String?) -> Bool {
+    @inlinable
+    static func returnNone(_ block: () -> Void) -> Bool {
+        block()
+        return PyAPI.return(.none)
+    }
+    
+    @inlinable
+    static func `throw`(_ error: PyType, _ message: String?) -> Bool {
         py_throw(error, message)
     }
     
@@ -93,23 +102,32 @@ public extension PyType {
         py_bind(py_tpobject(self), signature, block)
     }
     
+    @available(*, deprecated, renamed: "staticFunction")
     @inlinable
     func classFunction(_ name: String, _ block: PyAPI.CFunction) {
         py_bindstaticmethod(self, name, block)
     }
+    
+    @inlinable
+    func staticFunction(_ name: String, _ block: PyAPI.CFunction) {
+        py_bindstaticmethod(self, name, block)
+    }
 
-    @inlinable var name: String {
+    @inlinable
+    var name: String {
         String(cString: py_tpname(self))
     }
     
-    @inlinable var object: PyAPI.Reference? {
+    @inlinable
+    var object: PyAPI.Reference? {
         py_tpobject(self)
     }
     
-    @inlinable static func make(_ name: String,
-                                base: PyType = .object,
-                                module: PyAPI.Reference = Interpreter.main,
-                                bind: (PyType) -> Void) -> PyType {
+    @inlinable
+    static func make(_ name: String,
+                     base: PyType = .object,
+                     module: PyAPI.Reference = Interpreter.main,
+                     bind: (PyType) -> Void) -> PyType {
         let type = py_newtype(name, base, module) { userdata in
             // Dtor callback.
             guard let pointer = userdata?.load(as: UnsafeRawPointer?.self) else {
@@ -125,14 +143,6 @@ public extension PyType {
                 UnsafeRawPointer(bindable._pythonCache.reference)?.deallocate()
                 bindable._pythonCache.reference = nil
             }
-        }
-
-        type.magic("__new__") { _, argv in
-            let type = py_totype(argv)
-            let ud = py_newobject(PyAPI.returnValue, type, -1, PyAPI.pointerSize)
-            // Clear ud so if init fails it won't try to deinit a random address.
-            ud?.storeBytes(of: nil, as: UnsafeRawPointer?.self)
-            return true
         }
 
         bind(type)

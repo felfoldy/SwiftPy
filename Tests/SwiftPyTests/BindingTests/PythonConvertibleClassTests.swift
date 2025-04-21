@@ -29,6 +29,10 @@ final class TestClass {
         number ?? -1
     }
     
+    static func staticFunc(value: Int) -> TestClass {
+        TestClass()
+    }
+    
     var _pythonCache = PythonBindingCache()
 }
 
@@ -55,11 +59,27 @@ extension TestClass: PythonBindable {
             _bind_setter(\.number, $1)
         }
         type.function("set_number(self, value: int) -> None") {
-            _bind_function(setNumber, $1)
+            _bind_function($1, setNumber)
         }
         type.function("get_number(self) -> int") {
-            _bind_function(getNumber, $1)
+            _bind_function($1, getNumber)
         }
+        type.staticFunction("static_func") { argc, argv in
+            _bind_staticFunction(argc, argv, staticFunc(value:))
+        }
+    }
+}
+
+extension PythonBindable {
+    @inlinable
+    static func _bind_staticFunction<Arg1: PythonConvertible>(_ argc: Int32 , _ argv: PyAPI.Reference?, _ fn: @MainActor (Arg1) -> (any PythonConvertible)?) -> Bool {
+        guard argc == 1 else {
+            return PyAPI.throw(.TypeError, "Expected 1 argument, got \(argc)")
+        }
+        guard let arg1 = Arg1(argv) else {
+            return Arg1.throwTypeError(argv, 0)
+        }
+        return PyAPI.return(fn(arg1))
     }
 }
 

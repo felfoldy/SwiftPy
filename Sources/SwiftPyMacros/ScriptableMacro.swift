@@ -26,7 +26,6 @@ extension ScriptableMacro: ExtensionMacro {
         
         let confirmance: String = {
             let hasConfirmance = classDecl.inheritanceClause?.inheritedTypes
-                .compactMap { $0.as(InheritedTypeSyntax.self) }
                 .compactMap { $0.type.as(IdentifierTypeSyntax.self) }
                 .map(\.name.text)
                 .contains("PythonBindable") ?? false
@@ -37,12 +36,6 @@ extension ScriptableMacro: ExtensionMacro {
             
             return ": PythonBindable"
         }()
-        
-        let hasConfirmance = classDecl.inheritanceClause?.inheritedTypes
-            .compactMap { $0.as(InheritedTypeSyntax.self) }
-            .compactMap { $0.type.as(IdentifierTypeSyntax.self) }
-            .map(\.name.text)
-            .contains("PythonBindable") ?? false
         
         let className = classDecl.name.text
         let members = declaration.memberBlock.members
@@ -201,7 +194,7 @@ extension FunctionDeclSyntax {
         
         return """
         type.function("\(pySignature)") {
-            _bind_function(\(identifier), $1)
+            _bind_function($1, \(identifier))
         }
         """
     }

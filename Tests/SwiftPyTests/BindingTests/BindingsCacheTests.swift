@@ -11,17 +11,22 @@ import SwiftPy
 @MainActor
 struct BindingsCacheTests {
     struct BindableStruct {
-        var value: Int
+        var number: Int
 
         class Binding: PythonValueBindable<BindableStruct> {
-            static let pyType = PyType.make("BindableStruct") { type in
-                type.property("value") { _, argv in
-                    PyAPI.return(Binding(argv)?.get()?.value)
-                } setter: { _, argv in
-                    ensureArguments(argv, Int.self) { binding, newValue in
-                        binding.value?.value = newValue
+            var number: Int? {
+                get { value?.number }
+                set {
+                    if let newValue {
+                        value?.number = newValue
                     }
                 }
+            }
+
+            static let pyType = PyType.make("BindableStruct") { type in
+                type.property("value") {
+                    _bind_getter(\.number, $1)
+                } setter: { _bind_setter(\.number, $1) }
             }
         }
     }
@@ -31,7 +36,7 @@ struct BindingsCacheTests {
             case base
         }
         
-        var base: BindableStruct = .init(value: 1)
+        var base: BindableStruct = .init(number: 1)
         
         var _pythonCache = PythonBindingCache()
         
@@ -41,9 +46,11 @@ struct BindingsCacheTests {
                     BindableStruct.Binding(root, \.base)
                 }
             } setter: { _, argv in
-                ensureArguments(argv, BindableStruct.Binding.self) { root, binding in
-                    if let value = binding.get() {
-                        root.base = value
+                _castSelfArgs(argv) { (root, binding: BindableStruct.Binding) in
+                    PyAPI.returnNone {
+                        if let value = binding.get() {
+                            root.base = value
+                        }
                     }
                 }
             }
@@ -56,7 +63,7 @@ struct BindingsCacheTests {
     @Test func accessStruct() throws {
         let obj = TestClass()
         obj.toPython(main.emplace("obj"))
-        obj.base = BindableStruct(value: 100)
+        obj.base = BindableStruct(number: 100)
         
         #expect(Interpreter.evaluate("obj.base.value") == 100)
     }
@@ -65,7 +72,7 @@ struct BindingsCacheTests {
         let obj = TestClass()
         obj.toPython(main.emplace("obj"))
         
-        BindableStruct.Binding(.init(value: 2))
+        BindableStruct.Binding(.init(number: 2))
             .toPython(main.emplace("newbase"))
         #expect(Interpreter.evaluate("obj.base.value") == 1)
         
@@ -79,6 +86,6 @@ struct BindingsCacheTests {
         obj.toPython(main.emplace("obj"))
         
         Interpreter.run("obj.base.value = 2")
-        #expect(obj.base.value == 2)
+        #expect(obj.base.number == 2)
     }
 }

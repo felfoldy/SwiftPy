@@ -9,24 +9,19 @@ import Testing
 import SwiftPy
 import pocketpy
 
+@Scriptable
+private class Base: PythonBindable {
+    var startCalled = false
+    
+    init() {}
+    
+    func start() {
+        startCalled = true
+    }
+}
+
 @MainActor
 struct SubclassBindableTests {
-    class Base: PythonBindable {
-        var _pythonCache = PythonBindingCache()
-        var startCalled = false
-        
-        static var pyType: PyType = .make("Base") { type in
-            type.magic("__init__") { _, argv in
-                Base().storeInPython(argv)
-                return PyAPI.return(.none)
-            }
-            type.function("start(self) -> None") { _, argv in
-                Base(argv)?.startCalled = true
-                return PyAPI.return(.none)
-            }
-        }
-    }
-    
     let main = Interpreter.main
     let type = Base.pyType
     
