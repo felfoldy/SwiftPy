@@ -274,7 +274,7 @@ public extension PythonBindable {
     @inlinable
     static func _bind_staticFunction<Arg0: PythonConvertible>(
         argc: Int32, argv: PyAPI.Reference?,
-        _ fn: (Arg0) -> (any PythonConvertible)
+        _ fn: @MainActor (Arg0) -> (any PythonConvertible)?
     ) -> Bool {
         _checkArgs(argc, argv) { arg0 in
             PyAPI.return(fn(arg0))
@@ -285,7 +285,7 @@ public extension PythonBindable {
     @inlinable
     static func _bind_staticFunction<Arg0: PythonConvertible>(
         argc: Int32, argv: PyAPI.Reference?,
-        _ fn: (Arg0) -> Void
+        _ fn: @MainActor (Arg0) -> Void
     ) -> Bool {
         _checkArgs(argc, argv) { arg0 in
             PyAPI.returnNone { fn(arg0) }
@@ -299,7 +299,7 @@ public extension PythonBindable {
         Arg1: PythonConvertible
     >(
         argc: Int32, argv: PyAPI.Reference?,
-        _ fn: (Arg0, Arg1) -> (any PythonConvertible)
+        _ fn: @MainActor (Arg0, Arg1) -> (any PythonConvertible)?
     ) -> Bool {
         _checkArgs(argc, argv) { arg0, arg1 in
             PyAPI.return(fn(arg0, arg1))
@@ -313,7 +313,7 @@ public extension PythonBindable {
         Arg1: PythonConvertible
     >(
         argc: Int32, argv: PyAPI.Reference?,
-        _ fn: (Arg0, Arg1) -> Void
+        _ fn: @MainActor (Arg0, Arg1) -> Void
     ) -> Bool {
         _checkArgs(argc, argv) { arg0, arg1 in
             PyAPI.returnNone { fn(arg0, arg1) }
@@ -328,7 +328,22 @@ public extension PythonBindable {
         Arg2: PythonConvertible
     >(
         argc: Int32, argv: PyAPI.Reference?,
-        _ fn: (Arg0, Arg1, Arg2) -> Void
+        _ fn: @MainActor (Arg0, Arg1, Arg2) -> (any PythonConvertible)?
+    ) -> Bool {
+        _checkArgs(argc, argv) { arg0, arg1, arg2 in
+            PyAPI.return(fn(arg0, arg1, arg2))
+        }
+    }
+    
+    /// `(Arg0, Arg1, Arg2) -> Void`
+    @inlinable
+    static func _bind_staticFunction<
+        Arg0: PythonConvertible,
+        Arg1: PythonConvertible,
+        Arg2: PythonConvertible
+    >(
+        argc: Int32, argv: PyAPI.Reference?,
+        _ fn: @MainActor (Arg0, Arg1, Arg2) -> Void
     ) -> Bool {
         _checkArgs(argc, argv) { arg0, arg1, arg2 in
             PyAPI.returnNone { fn(arg0, arg1, arg2) }

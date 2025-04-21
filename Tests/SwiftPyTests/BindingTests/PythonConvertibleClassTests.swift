@@ -10,7 +10,7 @@ import Testing
 import pocketpy
 import CoreFoundation
 
-final class TestClass {
+final class TestClass: PythonBindable {
     var number: Int? = nil
     
     init() {}
@@ -30,19 +30,19 @@ final class TestClass {
     }
     
     static func staticFunc(value: Int) -> TestClass {
-        TestClass()
+        TestClass(number: 10)
     }
     
     var _pythonCache = PythonBindingCache()
 }
 
-extension TestClass: CustomStringConvertible {
+extension TestClass: @preconcurrency CustomStringConvertible {
     var description: String {
         "TestClass(number: \(String(describing: number)))"
     }
 }
 
-extension TestClass: PythonBindable {
+extension TestClass {
     static let pyType: PyType = .make("TestClass") { type in
         type.magic("__new__") { __new__($1) }
         type.magic("__init__") { argc, argv in
@@ -65,21 +65,8 @@ extension TestClass: PythonBindable {
             _bind_function($1, getNumber)
         }
         type.staticFunction("static_func") { argc, argv in
-            _bind_staticFunction(argc, argv, staticFunc(value:))
+            _bind_staticFunction(argc: argc, argv: argv, staticFunc(value:))
         }
-    }
-}
-
-extension PythonBindable {
-    @inlinable
-    static func _bind_staticFunction<Arg1: PythonConvertible>(_ argc: Int32 , _ argv: PyAPI.Reference?, _ fn: @MainActor (Arg1) -> (any PythonConvertible)?) -> Bool {
-        guard argc == 1 else {
-            return PyAPI.throw(.TypeError, "Expected 1 argument, got \(argc)")
-        }
-        guard let arg1 = Arg1(argv) else {
-            return Arg1.throwTypeError(argv, 0)
-        }
-        return PyAPI.return(fn(arg1))
     }
 }
 
@@ -158,5 +145,10 @@ struct PythonConvertibleClassTests {
         let obj = TestClass(number: 32)
         obj.toPython(main.emplace("test7"))
         #expect(Interpreter.evaluate("test7.__repr__()") == obj.description)
+    }
+    
+    @Test func staticFunc() async throws {
+        let obj = Interpreter.evaluate("TestClass.static_func(10)")
+        #expect(TestClass(obj)?.number == 10)
     }
 }
