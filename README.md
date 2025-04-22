@@ -1,6 +1,6 @@
 # SwiftPy
 
-![Swift Version](https://img.shields.io/badge/Swift-6.0-orange.svg)
+![Swift Version](https://img.shields.io/badge/Swift-6.1-orange.svg)
 ![Platform](https://img.shields.io/badge/platform-iOS%20%7C%20macOS%20%7C%20visionOS-blue.svg)
 
 SwiftPy is a fast and lightweight Python interpreter built on [pocketpy](https://github.com/pocketpy/pocketpy) with Swift macro binding tools.
@@ -9,7 +9,7 @@ SwiftPy is a fast and lightweight Python interpreter built on [pocketpy](https:/
 
 ```swift
 dependencies: [
-    .package(url: "https://github.com/felfoldy/SwiftPy.git", from: "0.8.0")
+    .package(url: "https://github.com/felfoldy/SwiftPy.git", from: "0.9.0")
 ]
 ```
 
@@ -21,7 +21,8 @@ Annotate your Swift classes with the `@Scriptable` macro to automatically genera
 
 ```swift
 @Scriptable
-@Observable class LoginViewModel {
+@Observable
+class LoginViewModel {
     var username: String = ""
     var password: String = ""
     
