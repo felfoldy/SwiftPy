@@ -151,9 +151,16 @@ extension AttributeSyntax {
 
 extension [InitializerDeclSyntax] {
     func binding(className: String, interface: inout [String]) -> String {
-        if isEmpty { return "" }
+        let filtered = filter { syntax in
+            if syntax.modifiers.map(\.name.text).contains(where: \.isInternal) {
+                return false
+            }
+            return true
+        }
         
-        let bindings = map(\.signature)
+        if filtered.isEmpty { return "" }
+                
+        let bindings = filtered.map(\.signature)
             .map { signature in
                 let parameters = signature.parameterClause.parameters
                     .map { "\($0.firstName.text):" }
@@ -186,6 +193,10 @@ extension [InitializerDeclSyntax] {
 
 extension VariableDeclSyntax {
     func propertyBinding(context: some MacroExpansionContext, interface: inout [String]) -> String? {
+        if modifiers.map(\.name.text).contains(where: \.isInternal) {
+            return nil
+        }
+        
         let specifier = bindingSpecifier.text
         guard let binding = bindings.first else {
             context.warning(self, "Unable to read binding")
@@ -236,6 +247,10 @@ extension VariableDeclSyntax {
 
 extension FunctionDeclSyntax {
     func binding(context: some MacroExpansionContext, interface: inout [String]) -> String? {
+        if modifiers.map(\.name.text).contains(where: \.isInternal) {
+            return nil
+        }
+        
         let identifier = name.text
         var pySignature = identifier.snakeCased
         
@@ -338,6 +353,14 @@ extension String {
         case "String": "str"
         case "Bool": "bool"
         default: self
+        }
+    }
+    
+    var isInternal: Bool {
+        switch self {
+        case "internal": return true
+        case "private": return true
+        default: return false
         }
     }
 }

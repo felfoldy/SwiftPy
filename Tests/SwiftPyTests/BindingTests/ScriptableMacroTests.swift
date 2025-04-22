@@ -311,6 +311,41 @@ class ScriptableMacroTests: XCTestCase {
         """,
         macros: testMacros)
     }
+    
+    func testIgnoreInternalAndPrivate() {
+        assertMacroExpansion("""
+        @Scriptable
+        class TestClass {
+            private var number: Int = 10
+        
+            internal init() {}
+        
+            private func doSomething() {}
+        }
+        """, expandedSource: """
+        class TestClass {
+            private var number: Int = 10
+        
+            internal init() {}
+        
+            private func doSomething() {}
+
+            var _pythonCache = PythonBindingCache()
+        }
+        
+        extension TestClass: PythonBindable {
+            @MainActor static let pyType: PyType = .make("TestClass", base: .object, module: Interpreter.main) { type in
+        
+                \(newAndRepr)
+                \(interfaceBegin)
+                    class TestClass:
+                        ...
+                \(interfaceEnd)
+            }
+        }
+        """,
+        macros: testMacros)
+    }
 }
 
 private var newAndRepr: String {
