@@ -10,10 +10,13 @@ import Testing
 import pocketpy
 import CoreFoundation
 
-final class TestClass: PythonBindable {
+final class TestClass {
+    /// Just a number.
     var number: Int? = nil
     
     init() {}
+    
+    /// Init with multiple parameters.
     init(a: Int, b: Int) {}
     init(a: Int, b: Int, c: Int) {}
     
@@ -36,13 +39,13 @@ final class TestClass: PythonBindable {
     var _pythonCache = PythonBindingCache()
 }
 
-extension TestClass: @preconcurrency CustomStringConvertible {
+extension TestClass: CustomStringConvertible {
     var description: String {
         "TestClass(number: \(String(describing: number)))"
     }
 }
 
-extension TestClass {
+extension TestClass: PythonBindable {
     static let pyType: PyType = .make("TestClass") { type in
         type.magic("__new__") { __new__($1) }
         type.magic("__init__") { argc, argv in
@@ -65,8 +68,32 @@ extension TestClass {
             _bind_function($1, getNumber)
         }
         type.staticFunction("static_func") { argc, argv in
-            _bind_staticFunction(argc: argc, argv: argv, staticFunc(value:))
+            _bind_staticFunction(argc, argv, staticFunc)
         }
+        
+        type.object?.setAttribute("_interface",
+            #"""
+            class TestClass(builtins.object):
+                number: int
+                """Just a number."""
+            
+                @overload
+                def __init__(self): ...
+                @overload
+                def __init__(self, number: int): ...
+                @overload
+                def __init__(self, a: int, b: int):
+                    """Init with multiple parameters."""
+                @overload
+                def __init__(self, a: int, b: int, c: int): ...
+            
+                def set_number(self, value: int) -> None: ...
+                def get_number(self) -> int: ...
+                @staticmethod
+                def static_func(value: int) -> TestClass: ...
+            """#
+            .toRegister(0)
+        )
     }
 }
 

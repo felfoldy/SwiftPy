@@ -270,10 +270,28 @@ public extension PythonBindable {
     
     // MARK: _bind_staticFunction
     
+    /// `() -> Result`
+    @inlinable
+    static func _bind_staticFunction(
+        _ argc: Int32, _ argv: PyAPI.Reference?,
+        _ fn: @MainActor () -> (any PythonConvertible)?
+    ) -> Bool {
+        PyAPI.return(fn())
+    }
+    
+    /// `() -> Void`
+    @inlinable
+    static func _bind_staticFunction(
+        _ argc: Int32, _ argv: PyAPI.Reference?,
+        _ fn: @MainActor () -> Void
+    ) -> Bool {
+        PyAPI.returnNone(fn)
+    }
+    
     /// `(Arg0) -> Result`
     @inlinable
     static func _bind_staticFunction<Arg0: PythonConvertible>(
-        argc: Int32, argv: PyAPI.Reference?,
+        _ argc: Int32, _ argv: PyAPI.Reference?,
         _ fn: @MainActor (Arg0) -> (any PythonConvertible)?
     ) -> Bool {
         _checkArgs(argc, argv) { arg0 in
@@ -284,7 +302,7 @@ public extension PythonBindable {
     /// `(Arg0) -> Void`
     @inlinable
     static func _bind_staticFunction<Arg0: PythonConvertible>(
-        argc: Int32, argv: PyAPI.Reference?,
+        _ argc: Int32, _ argv: PyAPI.Reference?,
         _ fn: @MainActor (Arg0) -> Void
     ) -> Bool {
         _checkArgs(argc, argv) { arg0 in
@@ -298,7 +316,7 @@ public extension PythonBindable {
         Arg0: PythonConvertible,
         Arg1: PythonConvertible
     >(
-        argc: Int32, argv: PyAPI.Reference?,
+        _ argc: Int32, _ argv: PyAPI.Reference?,
         _ fn: @MainActor (Arg0, Arg1) -> (any PythonConvertible)?
     ) -> Bool {
         _checkArgs(argc, argv) { arg0, arg1 in
@@ -312,7 +330,7 @@ public extension PythonBindable {
         Arg0: PythonConvertible,
         Arg1: PythonConvertible
     >(
-        argc: Int32, argv: PyAPI.Reference?,
+        _ argc: Int32, _ argv: PyAPI.Reference?,
         _ fn: @MainActor (Arg0, Arg1) -> Void
     ) -> Bool {
         _checkArgs(argc, argv) { arg0, arg1 in
@@ -327,7 +345,7 @@ public extension PythonBindable {
         Arg1: PythonConvertible,
         Arg2: PythonConvertible
     >(
-        argc: Int32, argv: PyAPI.Reference?,
+        _ argc: Int32, _ argv: PyAPI.Reference?,
         _ fn: @MainActor (Arg0, Arg1, Arg2) -> (any PythonConvertible)?
     ) -> Bool {
         _checkArgs(argc, argv) { arg0, arg1, arg2 in
@@ -342,7 +360,7 @@ public extension PythonBindable {
         Arg1: PythonConvertible,
         Arg2: PythonConvertible
     >(
-        argc: Int32, argv: PyAPI.Reference?,
+        _ argc: Int32, _ argv: PyAPI.Reference?,
         _ fn: @MainActor (Arg0, Arg1, Arg2) -> Void
     ) -> Bool {
         _checkArgs(argc, argv) { arg0, arg1, arg2 in

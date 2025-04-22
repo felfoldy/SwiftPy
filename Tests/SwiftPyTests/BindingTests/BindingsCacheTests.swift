@@ -54,6 +54,13 @@ struct BindingsCacheTests {
                     }
                 }
             }
+            type.object?.setAttribute("_interface",
+                #"""
+                class BindingsCacheTests_TestClass(builtins.object):
+                    base: BindableStruct
+                """#
+                .toRegister(0)
+            )
         }
     }
     
@@ -87,5 +94,14 @@ struct BindingsCacheTests {
         
         Interpreter.run("obj.base.value = 2")
         #expect(obj.base.number == 2)
+    }
+    
+    @Test func classAttribute() {
+        let interface = Interpreter.evaluate("BindingsCacheTests_TestClass._interface")
+        
+        #expect(interface == """
+        class BindingsCacheTests_TestClass(builtins.object):
+            base: BindableStruct
+        """)
     }
 }

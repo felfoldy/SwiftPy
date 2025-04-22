@@ -18,6 +18,9 @@ class TestClassWithProperties: PythonBindable {
     
     func changeContent(value: String) { content = value }
     func getContent() -> String { content }
+    static func create() -> TestClassWithProperties {
+        TestClassWithProperties()
+    }
 }
 
 @MainActor
@@ -68,5 +71,10 @@ struct ScriptableTests {
         Interpreter.run("tc4.change_content('changed')")
         
         #expect(Interpreter.evaluate("tc4.get_content()") == "changed")
+    }
+    
+    @Test func createInstance() {
+        Interpreter.run("tc5 = TestClass2.create()")
+        #expect(main["tc5"]?.isType(TestClassWithProperties.self) == true)
     }
 }

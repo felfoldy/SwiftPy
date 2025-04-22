@@ -19,7 +19,13 @@ public struct ScriptableMacro: MemberMacro {
 }
 
 extension ScriptableMacro: ExtensionMacro {
-    public static func expansion(of node: AttributeSyntax, attachedTo declaration: some DeclGroupSyntax, providingExtensionsOf type: some TypeSyntaxProtocol, conformingTo protocols: [TypeSyntax], in context: some MacroExpansionContext) throws -> [ExtensionDeclSyntax] {
+    public static func expansion(
+        of node: AttributeSyntax,
+        attachedTo declaration: some DeclGroupSyntax,
+        providingExtensionsOf type: some TypeSyntaxProtocol,
+        conformingTo protocols: [TypeSyntax],
+        in context: some MacroExpansionContext
+    ) throws -> [ExtensionDeclSyntax] {
         guard let classDecl = declaration.as(ClassDeclSyntax.self) else {
             throw MacroExpansionErrorMessage("'@Scriptable' can only be applied to a 'class'")
         }
@@ -40,47 +46,52 @@ extension ScriptableMacro: ExtensionMacro {
         let className = classDecl.name.text
         let members = declaration.memberBlock.members
         
-        let initializerBindings = members
-            .compactMap { $0.decl.as(InitializerDeclSyntax.self) }
-            .binding(className: className)
-    
+        let classMeta = node.classDefinitions(className: className)
+        var classInterface = [classMeta.interface]
+        
         let propertyBindings = members
             // Properties
             .compactMap { $0.decl.as(VariableDeclSyntax.self) }
             // Bindings.
             .compactMap { property in
-            property.propertyBinding(context: context)
-            }.joined(separator: "\n")
+                property.propertyBinding(context: context, interface: &classInterface)
+            }
+            .joined(separator: "\n")
+        
+        let initializerBindings = members
+            .compactMap { $0.decl.as(InitializerDeclSyntax.self) }
+            .binding(className: className, interface: &classInterface)
         
         let functionBindings = members
             .compactMap { $0.decl.as(FunctionDeclSyntax.self) }
             .compactMap { function in
-                function.binding(context: context)
+                function.binding(context: context, interface: &classInterface)
             }.joined(separator: "\n")
+        
+        if classInterface.count == 1 {
+            classInterface.append("    ...")
+        }
+        
+        classInterface.insert("#\"\"\"", at: 0)
+        classInterface.append("\"\"\"#")
+        
+        let interface = classInterface.joined(separator: "\n")
         
         let bindings = [initializerBindings, propertyBindings, functionBindings]
             .filter { !$0.isEmpty }
             .joined(separator: "\n")
         
-        let makeArgs = {
-            guard let args = node.arguments?.description else {
-                return "\"\(className)\""
-            }
-            
-            if args.starts(with: "\"") {
-                return args
-            }
-
-            return "\"\(className)\", \(args)"
-        }()
-        
         return try [
             ExtensionDeclSyntax("extension \(raw: className)\(raw: confirmance)") {
             """
-            @MainActor static let pyType: PyType = .make(\(raw: makeArgs)) { type in
+            @MainActor static let pyType: PyType = .make(\(raw: classMeta.typeArgs)) { type in
             \(raw: bindings)
             type.magic("__new__") { __new__($1) }
             type.magic("__repr__") { __repr__($1) }
+            type.object?.setAttribute("_interface",
+            \(raw: interface)
+            .toRegister(0)
+            )
             }
             """
             }
@@ -88,10 +99,58 @@ extension ScriptableMacro: ExtensionMacro {
     }
 }
 
+extension AttributeSyntax {
+    struct ClassMeta {
+        let className: String
+        let base: String
+        let module: String
+        
+        var interface: String {
+            if base == ".object" {
+                return "class \(className):"
+            }
+            if base.starts(with: ".") {
+                return "class \(className)(\(base.dropFirst())):"
+            }
+            return "class \(className)(\(base)):"
+        }
+        
+        var typeArgs: String {
+            "\"\(className)\", base: \(base), module: \(module)"
+        }
+    }
+    
+    func classDefinitions(className: String) -> ClassMeta {
+        guard let arguments = arguments?.as(LabeledExprListSyntax.self) else {
+            return ClassMeta(className: className, base: ".object", module: "Interpreter.main")
+        }
+        
+        var name = className
+        var base = ".object"
+        var module = "Interpreter.main"
+        
+        for argument in arguments {
+            if let clsName = argument.expression.as(StringLiteralExprSyntax.self)?.segments.description {
+                name = clsName
+            }
+            
+            if argument.label?.text == "base" {
+                base = argument.expression.description
+            }
+            
+            if argument.label?.text == "module" {
+                module = argument.expression.description
+            }
+        }
+        
+        return ClassMeta(className: name, base: base, module: module)
+    }
+}
+
 // MARK: - init extraction
 
 extension [InitializerDeclSyntax] {
-    func binding(className: String) -> String {
+    func binding(className: String, interface: inout [String]) -> String {
         if isEmpty { return "" }
         
         let bindings = map(\.signature)
@@ -111,6 +170,9 @@ extension [InitializerDeclSyntax] {
             }
             .joined(separator: "\n")
         
+        // TODO: Generate individual overload stubs.
+        interface.append("    def __init__(self, *args, **kwargs) -> None: ...")
+
         return """
         type.magic("__init__") { argc, argv in
         \(bindings)
@@ -123,7 +185,7 @@ extension [InitializerDeclSyntax] {
 // MARK: - Property
 
 extension VariableDeclSyntax {
-    func propertyBinding(context: some MacroExpansionContext) -> String? {
+    func propertyBinding(context: some MacroExpansionContext, interface: inout [String]) -> String? {
         let specifier = bindingSpecifier.text
         guard let binding = bindings.first else {
             context.warning(self, "Unable to read binding")
@@ -153,6 +215,13 @@ extension VariableDeclSyntax {
             return "{ _bind_setter(\\.\(identifier), $1) }"
         }()
         
+        let annotation = binding.typeAnnotation?.type
+            .as(IdentifierTypeSyntax.self)?.name.text
+        
+        if let annotation {
+            interface.append("    \(identifier.snakeCased): \(annotation.pyType)")
+        }
+        
         return """
         type.property(
             "\(identifier.snakeCased)",
@@ -166,9 +235,11 @@ extension VariableDeclSyntax {
 // MARK: - Function
 
 extension FunctionDeclSyntax {
-    func binding(context: some MacroExpansionContext) -> String? {
+    func binding(context: some MacroExpansionContext, interface: inout [String]) -> String? {
         let identifier = name.text
         var pySignature = identifier.snakeCased
+        
+        let isStatic = modifiers.map(\.name.text).contains("static")
         
         guard let parameters = extractParameters(context: context) else {
             return nil
@@ -184,13 +255,30 @@ extension FunctionDeclSyntax {
             return "None"
         }()
         
-        // Parameters.
-        let paramsString = (["self"] + parameters.map { param in
+        var params: [String] = isStatic ? [] : ["self"]
+        
+        params += parameters.map { param in
             "\(param.name): \(param.type.pyType)"
-        })
-        .joined(separator: ", ")
+        }
+        
+        // Parameters.
+        let paramsString = params
+            .joined(separator: ", ")
 
         pySignature.append("(\(paramsString)) -> \(returnType)")
+        
+        if isStatic {
+            interface.append("    @staticmethod")
+        }
+        interface.append("    def \(pySignature): ...")
+        
+        if isStatic {
+            return """
+            type.staticFunction("\(identifier.snakeCased)") { argc, argv in
+                _bind_staticFunction(argc, argv, \(identifier))
+            }
+            """
+        }
         
         return """
         type.function("\(pySignature)") {
@@ -246,7 +334,7 @@ extension String {
     var pyType: String {
         switch self {
         case "Int": "int"
-        case "Double": "float"
+        case "Double", "Float": "float"
         case "String": "str"
         case "Bool": "bool"
         default: self
