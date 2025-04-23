@@ -144,3 +144,17 @@ extension Array: PythonConvertible where Element: PythonConvertible {
         return items
     }
 }
+
+extension PyAPI.Reference: PythonConvertible {
+    public static let pyType = PyType.object
+    
+    @inlinable
+    public func toPython(_ reference: PyAPI.Reference) {
+        reference.assign(self)
+    }
+
+    @inlinable
+    public static func fromPython(_ reference: PyAPI.Reference) -> PyAPI.Reference {
+        reference
+    }
+}
