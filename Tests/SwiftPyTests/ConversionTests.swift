@@ -11,6 +11,8 @@ import pocketpy
 
 @MainActor
 struct ConversionTests {
+    let main = Interpreter.main
+    
     @Test func strArrayToPython() {
         let array: [String] = ["Hello", "World"]
         
@@ -18,5 +20,52 @@ struct ConversionTests {
         array.toPython(Interpreter.main["x"])
         
         #expect(Interpreter.main["x"] == ["Hello", "World"])
+    }
+    
+    @Test func dictionaryToPython() {
+        let dictionary: [String: Any] = ["Hello": 1, "World": 2]
+        
+        dictionary.toPython(.main.emplace("dictionary"))
+
+        #expect(Interpreter.evaluate(#"dictionary["Hello"]"#) == 1)
+        #expect(Interpreter.evaluate(#"dictionary["World"]"#) == 2)
+    }
+
+    @Test func dictionaryFromPython() throws {
+        Interpreter.run(#"dictionary = {"topic": "dict", "task": "iterate"}"#)
+        
+        let result = try #require([String: String](main["dictionary"]))
+        
+        #expect(result["topic"] == "dict")
+        #expect(result["task"] == "iterate")
+    }
+    
+    @Test func jsonDictionaryFromPython() throws {
+        Interpreter.run("""
+        dictionary = {
+            "string": "hello",
+            "integer": 42,
+            "double": 3.14,
+            "booleanTrue": True,
+            "booleanFalse": False,
+            "nullValue": None,
+            "array": [1, "two", False, None],
+            "object": {"nestedKey": "nestedValue"}
+        }
+        """)
+        let dictionary = try #require([String: Any](main["dictionary"]))
+        
+        #expect(dictionary["string"] as? String == "hello")
+        #expect(dictionary["integer"] as? Int == 42)
+        #expect(dictionary["double"] as? Double == 3.14)
+        #expect(dictionary["booleanTrue"] as? Bool == true)
+        let array = try #require(dictionary["array"] as? [Any?])
+        try #require(array.count == 4)
+        #expect(array[0] as? Int == 1)
+        #expect(array[1] as? String == "two")
+        #expect(array[2] as? Bool == false)
+        #expect(array[3] == nil)
+        let obj = try #require(dictionary["object"] as? [String: Any])
+        #expect(obj["nestedKey"] as? String == "nestedValue")
     }
 }

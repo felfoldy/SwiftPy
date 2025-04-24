@@ -54,6 +54,20 @@ public extension PyAPI {
         return PyAPI.returnValue
     }
     
+    @inlinable
+    @discardableResult
+    static func call(_ object: PyAPI.Reference, _ name: String) throws -> PyAPI.Reference? {
+        let functionStack = try object.attribute(name)?.toStack
+        if !py_callable(functionStack?.reference) {
+            throw InterpreterError
+                .notCallable(py_typeof(object).name)
+        }
+        try Interpreter.printErrors {
+            py_call(functionStack?.reference, 0, nil)
+        }
+        return returnValue
+    }
+    
     /// Calls a function with a given argument.
     /// - Parameters:
     ///   - function: Function to call
@@ -174,7 +188,10 @@ public extension Interpreter {
 
 // MARK: - Modules
 
+@MainActor
 public extension PyAPI.Reference {
+    static let main = Interpreter.main
+
     @MainActor
     struct Modules {
         /// `__main__` module.
@@ -230,17 +247,38 @@ public extension PyAPI.Reference {
         py_assign(self, newValue)
     }
     
-    /// Gets the attribute by the name and copies it to the register.
-    ///
+    /// Retrieves the attribute with the given name and passes it as a temporary reference.
     /// - Parameters:
-    ///   - name: Name of the attribute.
-    ///   - index: Register index.
-    /// - Returns: attribute.
-    @inlinable func attribute(_ name: String, register index: Int32 = 0) throws -> PyAPI.Reference? {
+    ///   - name: The attribute name.
+    ///   - block: Closure receiving the temporary python object.
+    /// - Throws: Errors from the Python interpreter.
+    @inlinable
+    func attribute(_ name: String, block: (PyAPI.Reference?) throws -> Void) throws {
         try Interpreter.printErrors {
             py_getattr(self, py_name(name))
         }
-        return PyAPI.returnValue.toRegister(index)
+        try PyAPI.returnValue.temp { tmp in
+            try block(tmp)
+        }
+    }
+    
+    @inlinable
+    func attribute(_ name: String) throws -> PyAPI.Reference? {
+        try Interpreter.printErrors {
+            py_getattr(self, py_name(name))
+        }
+        return PyAPI.returnValue
+    }
+    
+    /// Pushes `self` onto the Python stack and passes it as a temporary reference.
+    /// - Parameter block: Closure receiving the temporary `PyAPI.Reference?`.
+    /// - Throws: Errors thrown within the closure.
+    @inlinable
+    func temp(_ block: (PyAPI.Reference?) throws -> Void) throws {
+        let tmp = py_pushtmp()
+        defer { py_pop() }
+        py_assign(tmp, self)
+        try block(tmp)
     }
 
     @inlinable func setAttribute(_ name: String, _ value: PyAPI.Reference?) {
@@ -310,6 +348,15 @@ public extension PyAPI.Reference {
     
     @inlinable func isInstance(of type: PyType) -> Bool {
         py_isinstance(self, type)
+    }
+
+    @available(*, deprecated, renamed: "attribute(_:block:)")
+    @inlinable
+    func attribute(_ name: String, register index: Int32 = 0) throws -> PyAPI.Reference? {
+        try Interpreter.printErrors {
+            py_getattr(self, py_name(name))
+        }
+        return PyAPI.returnValue.toRegister(index)
     }
 }
 

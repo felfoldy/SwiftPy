@@ -6,6 +6,7 @@
 //
 
 import pocketpy
+import Foundation
 
 @MainActor
 public protocol PythonConvertible {
@@ -123,25 +124,113 @@ extension Optional: PythonConvertible where Wrapped: PythonConvertible {
     }
 }
 
-extension Array: PythonConvertible where Element: PythonConvertible {
+// MARK: - Array conversion
+
+extension Array: PythonConvertible {
     public static var pyType: PyType { .list }
     
     public func toPython(_ reference: PyAPI.Reference) {
         py_newlist(reference)
         for value in self {
-            py_list_append(reference, value.toRegister(0))
+            guard let value = value as? PythonConvertible else {
+                log.error("\(value) is not convertible to Python")
+                continue
+            }
+            py_list_append(reference, value.toStack.reference)
         }
     }
 
     public static func fromPython(_ reference: PyAPI.Reference) -> [Element] {
         var items: [Element] = []
         for i in 0 ..< py_list_len(reference) {
-            if let item = Element.fromPython(py_list_getitem(reference, i)) {
+            if Element.self == Any?.self {
+                let any = py_list_getitem(reference, i).asAny
+                items.append(any as! Element)
+                continue
+            }
+            
+            guard let type = Element.self as? PythonConvertible.Type else {
+                log.error("\(Element.self) is not convertible to Python")
+                continue
+            }
+            let itemRef = py_list_getitem(reference, i)
+            let item = type.fromPython(itemRef)
+            if let item = item as? Element {
                 items.append(item)
             }
         }
 
         return items
+    }
+}
+
+// MARK: - Dictionary conversion
+
+extension Dictionary: PythonConvertible where Key: PythonConvertible {
+    public enum ConversionError: LocalizedError {
+        case key
+        case value
+    }
+    
+    public static var pyType: PyType { .dict }
+
+    public func toPython(_ reference: PyAPI.Reference) {
+        py_newdict(reference)
+        for (key, value) in self {
+            guard let value = value as? PythonConvertible else {
+                log.error("\(value) is not convertible to Python")
+                continue
+            }
+ 
+            let keyStack = key.toStack
+            let valueStack = value.toStack
+
+            py_dict_setitem(reference, keyStack.reference, valueStack.reference)
+        }
+    }
+
+    public static func fromPython(_ reference: PyAPI.Reference) -> [Key: Value] {
+        var dict = [Key: Value]()
+        
+        do {
+            let itemsStack = try PyAPI.call(reference, "items")?.toStack
+
+            py_iter(itemsStack?.reference)
+            
+            let iterable = PyAPI.returnValue.toStack
+
+            var found = false
+            while true {
+                found = try Interpreter.printItemError {
+                    py_next(iterable.reference)
+                }
+                guard found else { break }
+
+                let tupleStack = PyAPI.returnValue.toStack
+                let keyRef = py_tuple_getitem(tupleStack.reference, 0)
+                let valueRef = py_tuple_getitem(tupleStack.reference, 1)
+                
+                guard let key = Key(keyRef) else {
+                    throw ConversionError.key
+                }
+                
+                if let Convertible = Value.self as? PythonConvertible.Type,
+                   let value = Convertible.init(valueRef) {
+                    dict[key] = value as? Value
+                    continue
+                }
+                
+                if Value.self == Any.self {
+                    dict[key] = valueRef?.asAny as? Value
+                    continue
+                }
+                
+                throw ConversionError.value
+            }
+        } catch {
+            log.error(error.localizedDescription)
+        }
+        return dict
     }
 }
 
@@ -156,5 +245,20 @@ extension PyAPI.Reference: PythonConvertible {
     @inlinable
     public static func fromPython(_ reference: PyAPI.Reference) -> PyAPI.Reference {
         reference
+    }
+}
+
+// MARK: - PyAPI.Reference -> Any?
+
+@MainActor
+public extension PyAPI.Reference {
+    var asAny: Any? {
+        if let string = String(self) { return string }
+        if let int = Int(self) { return int }
+        if let float = Double(self) { return float }
+        if let bool = Bool(self) { return bool }
+        if let array = [Any?](self) { return array }
+        if let object = [String: Any](self) { return object }
+        return nil
     }
 }

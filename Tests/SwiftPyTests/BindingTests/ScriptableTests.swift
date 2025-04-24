@@ -9,9 +9,7 @@ import Testing
 import SwiftPy
 
 @Scriptable("TestClass2", module: Interpreter.main)
-class TestClassWithProperties: PythonBindable {
-    typealias PythonObject = PyAPI.Reference
-    
+class TestClassWithProperties: PythonBindable {    
     let intProperty: Int? = 12
     var floatProperty: Float = 3.14
     var content: String = "content"
@@ -22,10 +20,6 @@ class TestClassWithProperties: PythonBindable {
     func getContent() -> String { content }
     static func create() -> TestClassWithProperties {
         TestClassWithProperties()
-    }
-
-    func object(val: PythonObject) {
-        print(String(val))
     }
 }
 
