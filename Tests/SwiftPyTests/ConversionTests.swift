@@ -11,9 +11,11 @@ import pocketpy
 
 @MainActor
 struct ConversionTests {
+    let profiler = profile("ConversionTests")
     let main = Interpreter.main
     
     @Test func strArrayToPython() {
+        profiler.event("ConversionTests.strArrayToPython")
         let array: [String] = ["Hello", "World"]
         
         Interpreter.execute("x = []")
@@ -23,6 +25,8 @@ struct ConversionTests {
     }
     
     @Test func dictionaryToPython() {
+        profiler.event("ConversionTests.dictionaryToPython")
+
         let dictionary: [String: Any] = ["Hello": 1, "World": 2]
         
         dictionary.toPython(.main.emplace("dictionary"))
@@ -32,6 +36,8 @@ struct ConversionTests {
     }
 
     @Test func dictionaryFromPython() throws {
+        profiler.event("ConversionTests.dictionaryFromPython")
+        
         Interpreter.run(#"dictionary = {"topic": "dict", "task": "iterate"}"#)
         
         let result = try #require([String: String](main["dictionary"]))
@@ -41,6 +47,8 @@ struct ConversionTests {
     }
     
     @Test func jsonDictionaryFromPython() throws {
+        profiler.event("ConversionTests.jsonDictionaryFromPython")
+        
         Interpreter.run("""
         dictionary = {
             "string": "hello",

@@ -142,24 +142,25 @@ extension Array: PythonConvertible {
 
     public static func fromPython(_ reference: PyAPI.Reference) -> [Element] {
         var items: [Element] = []
-        for i in 0 ..< py_list_len(reference) {
+        
+        let array = reference.toStack
+        
+        try? array.iterate { item in
             if Element.self == Any?.self {
-                let any = py_list_getitem(reference, i).asAny
-                items.append(any as! Element)
-                continue
+                items.append(item.reference?.asAny as! Element)
+                return
             }
             
             guard let type = Element.self as? PythonConvertible.Type else {
                 log.error("\(Element.self) is not convertible to Python")
-                continue
+                return
             }
-            let itemRef = py_list_getitem(reference, i)
-            let item = type.fromPython(itemRef)
+            
+            let item = type.fromPython(item.reference)
             if let item = item as? Element {
                 items.append(item)
             }
         }
-
         return items
     }
 }
@@ -184,7 +185,6 @@ extension Dictionary: PythonConvertible where Key: PythonConvertible {
  
             let keyStack = key.toStack
             let valueStack = value.toStack
-
             py_dict_setitem(reference, keyStack.reference, valueStack.reference)
         }
     }
@@ -193,36 +193,25 @@ extension Dictionary: PythonConvertible where Key: PythonConvertible {
         var dict = [Key: Value]()
         
         do {
-            let itemsStack = try PyAPI.call(reference, "items")?.toStack
-
-            py_iter(itemsStack?.reference)
+            let items = try PyAPI.call(reference, "items")?.toStack
             
-            let iterable = PyAPI.returnValue.toStack
-
-            var found = false
-            while true {
-                found = try Interpreter.printItemError {
-                    py_next(iterable.reference)
-                }
-                guard found else { break }
-
-                let tupleStack = PyAPI.returnValue.toStack
-                let keyRef = py_tuple_getitem(tupleStack.reference, 0)
-                let valueRef = py_tuple_getitem(tupleStack.reference, 1)
-                
+            try items?.iterate { item in
+                let keyRef = py_tuple_getitem(item.reference, 0)
                 guard let key = Key(keyRef) else {
                     throw ConversionError.key
                 }
                 
+                let valueRef = py_tuple_getitem(item.reference, 1)
+                
                 if let Convertible = Value.self as? PythonConvertible.Type,
                    let value = Convertible.init(valueRef) {
                     dict[key] = value as? Value
-                    continue
+                    return
                 }
                 
                 if Value.self == Any.self {
                     dict[key] = valueRef?.asAny as? Value
-                    continue
+                    return
                 }
                 
                 throw ConversionError.value

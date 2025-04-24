@@ -151,7 +151,7 @@ public final class Interpreter {
     }
     
     @inlinable
-    static func printItemError(_ call: () -> Int32) throws -> Bool {
+    static func printItemError(_ call: @autoclosure () -> Int32) throws -> Bool {
         let p0 = py_peek(0)
         let result = call()
         if result != -1 { return result == 1 }

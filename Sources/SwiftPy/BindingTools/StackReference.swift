@@ -21,6 +21,22 @@ public class StackReference {
         self.reference?.assign(reference)
     }
     
+    public func iterate(next: (StackReference) throws -> Void) throws {
+        try Interpreter.printErrors {
+            py_iter(reference)
+        }
+        
+        let iter = PyAPI.returnValue.toStack
+        
+        while true {
+            let found = try Interpreter.printItemError(py_next(iter.reference))
+            if !found {
+                return
+            }
+            try next(PyAPI.returnValue.toStack)
+        }
+    }
+    
     deinit {
         py_pop()
     }
