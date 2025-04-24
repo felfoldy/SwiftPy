@@ -71,6 +71,18 @@ extension Int: PythonConvertible {
     }
 }
 
+extension Int64: PythonConvertible {
+    public static let pyType = PyType.int
+    
+    @inlinable public func toPython(_ reference: PyAPI.Reference) {
+        py_newint(reference, self)
+    }
+    
+    @inlinable public static func fromPython(_ reference: PyAPI.Reference) -> Int64 {
+        py_toint(reference)
+    }
+}
+
 extension String: PythonConvertible {
     public static let pyType = PyType.str
 

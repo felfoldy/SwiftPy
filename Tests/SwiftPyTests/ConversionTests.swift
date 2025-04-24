@@ -27,7 +27,7 @@ struct ConversionTests {
     @Test func dictionaryToPython() {
         profiler.event("ConversionTests.dictionaryToPython")
 
-        let dictionary: [String: Any] = ["Hello": 1, "World": 2]
+        let dictionary: [String: Any] = ["Hello": 1, "World": Int64(2)]
         
         dictionary.toPython(.main.emplace("dictionary"))
 
