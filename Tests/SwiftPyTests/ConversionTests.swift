@@ -54,8 +54,7 @@ struct ConversionTests {
             "string": "hello",
             "integer": 42,
             "double": 3.14,
-            "booleanTrue": True,
-            "booleanFalse": False,
+            "boolean": True,
             "nullValue": None,
             "array": [1, "two", False, None],
             "object": {"nestedKey": "nestedValue"}
@@ -66,7 +65,7 @@ struct ConversionTests {
         #expect(dictionary["string"] as? String == "hello")
         #expect(dictionary["integer"] as? Int == 42)
         #expect(dictionary["double"] as? Double == 3.14)
-        #expect(dictionary["booleanTrue"] as? Bool == true)
+        #expect(dictionary["boolean"] as? Bool == true)
         let array = try #require(dictionary["array"] as? [Any?])
         try #require(array.count == 4)
         #expect(array[0] as? Int == 1)

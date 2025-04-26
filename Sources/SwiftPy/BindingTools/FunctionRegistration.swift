@@ -51,8 +51,6 @@ public struct FunctionRegistration {
         self.id = id
         self.cFunction = cFunction
         self.signature = signature
-        
-        log.info("Register function: \(signature)")
     }
     
     public static func void(

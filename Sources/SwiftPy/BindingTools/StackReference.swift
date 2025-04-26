@@ -28,11 +28,7 @@ public class StackReference {
         
         let iter = PyAPI.returnValue.toStack
         
-        while true {
-            let found = try Interpreter.printItemError(py_next(iter.reference))
-            if !found {
-                return
-            }
+        while try Interpreter.printItemError(py_next(iter.reference)) {
             try next(PyAPI.returnValue.toStack)
         }
     }
