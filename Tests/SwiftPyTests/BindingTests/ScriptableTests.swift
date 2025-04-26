@@ -9,7 +9,9 @@ import Testing
 import SwiftPy
 
 @Scriptable("TestClass2", module: Interpreter.main)
-class TestClassWithProperties: PythonBindable {    
+class TestClassWithProperties: PythonBindable {
+    typealias TestClass2 = TestClassWithProperties
+    
     let intProperty: Int? = 12
     var floatProperty: Float = 3.14
     var content: String = "content"
@@ -19,10 +21,10 @@ class TestClassWithProperties: PythonBindable {
     func changeContent(value: String) { content = value }
     func getContent() -> String { content }
     func fetch(query: String) -> Int? { Int(query) }
-    static func create() -> TestClassWithProperties {
+    static func create() -> TestClass2 {
         TestClassWithProperties()
     }
-    static func map(content: String) -> TestClassWithProperties {
+    static func map(content: String) -> TestClass2 {
         let tc = TestClassWithProperties()
         tc.content = content
         return tc
