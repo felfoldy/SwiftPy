@@ -134,39 +134,6 @@ public extension PythonBindable {
     }
     
     // MARK: _cast
-//    
-//    @inlinable
-//    static func _castArgs<Arg0: PythonConvertible>(
-//        _ argv: PyAPI.Reference?,
-//        arguments: (Arg0) -> Bool
-//    ) -> Bool {
-//        guard let arg0 = Arg0(argv) else {
-//            return Arg0.throwTypeError(argv, 0)
-//        }
-//        return arguments(arg0)
-//    }
-    
-    @inlinable
-    static func _castArgs<Arg0: PythonConvertible, Arg1: PythonConvertible>(
-        _ argv: PyAPI.Reference?,
-        arguments: (Arg0, Arg1) -> Bool
-    ) -> Bool {
-        guard let arg0 = Arg0(argv) else {
-            return Arg0.throwTypeError(argv, 0)
-        }
-        guard let arg1 = Arg1(argv?[1]) else {
-            return Arg1.throwTypeError(argv, 1)
-        }
-        return arguments(arg0, arg1)
-    }
-    
-    @inlinable
-    static func _castSelfArgs<Arg1: PythonConvertible>(
-        _ argv: PyAPI.Reference?,
-        arguments: (Self, Arg1) -> Bool
-    ) -> Bool {
-        _castArgs(argv, arguments: arguments)
-    }
 
     static func _checkArgs<each Arg: PythonConvertible>(argc: Int32, argv: PyAPI.Reference?, from offset: Int = 0) throws -> (repeat each Arg) {
         var i: Int = offset
@@ -177,7 +144,7 @@ public extension PythonBindable {
             }
             return i
         }
-        return try (repeat (each Arg).cast(argv, i))
+        return try (repeat (each Arg).cast(argv, index()))
     }
     
     static func _castArgs<each Arg: PythonConvertible>(argv: PyAPI.Reference?, from offset: Int = 0) throws -> (repeat each Arg) {
@@ -186,7 +153,7 @@ public extension PythonBindable {
             defer { i += 1 }
             return i
         }
-        return try (repeat (each Arg).cast(argv, i))
+        return try (repeat (each Arg).cast(argv, index()))
     }
     
     // MARK: _bind_staticFunction
@@ -242,10 +209,10 @@ public extension PythonBindable {
     
     @inlinable
     static func _bind_setter<Value: PythonConvertible>(_ keypath: ReferenceWritableKeyPath<Self, Value>, _ argv: PyAPI.Reference?) -> Bool {
-        _castSelfArgs(argv) { (base, value) in
-            PyAPI.returnNone {
-                base[keyPath: keypath] = value
-            }
+        PyAPI.returnOrThrow {
+            let base = try cast(argv)
+            base[keyPath: keypath] = try _castArgs(argv: argv, from: 1)
+            return ()
         }
     }
     

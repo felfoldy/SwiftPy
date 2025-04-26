@@ -18,8 +18,17 @@ class TestClassWithProperties: PythonBindable {
     
     func changeContent(value: String) { content = value }
     func getContent() -> String { content }
+    func fetch(query: String) -> Int? { Int(query) }
     static func create() -> TestClassWithProperties {
         TestClassWithProperties()
+    }
+    static func map(content: String) -> TestClassWithProperties {
+        let tc = TestClassWithProperties()
+        tc.content = content
+        return tc
+    }
+    static func log(message: String) throws {
+        throw PythonError.NotImplementedError(message)
     }
 }
 
@@ -73,8 +82,25 @@ struct ScriptableTests {
         #expect(Interpreter.evaluate("tc4.get_content()") == "changed")
     }
     
-    @Test func createInstance() {
-        Interpreter.run("tc5 = TestClass2.create(2)")
+    @Test func staticFuncTests() {
+        Interpreter.run("TestClass2.log('asd')")
+        
+        Interpreter.run("tc5 = TestClass2.create()")
         #expect(main["tc5"]?.isType(TestClassWithProperties.self) == true)
+
+        Interpreter.run("""
+        tc6 = TestClass2.map('map')
+        content = tc6.content
+        """)
+        #expect(main["content"] == "map")
+    }
+    
+    @Test func returningArgumentedFunction() {
+        Interpreter.run("""
+        tc7 = TestClass2.create()
+        number = tc7.fetch('4')
+        """)
+        
+        #expect(main["number"] == 4)
     }
 }

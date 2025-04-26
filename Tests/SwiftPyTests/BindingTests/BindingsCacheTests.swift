@@ -46,12 +46,12 @@ struct BindingsCacheTests {
                     BindableStruct.Binding(root, \.base)
                 }
             } setter: { _, argv in
-                _castSelfArgs(argv) { (root, binding: BindableStruct.Binding) in
-                    PyAPI.returnNone {
-                        if let value = binding.get() {
-                            root.base = value
-                        }
+                PyAPI.returnOrThrow {
+                    let root = try cast(argv)
+                    if let binding = BindableStruct.Binding(argv?[1])?.get() {
+                        root.base = binding
                     }
+                    return ()
                 }
             }
             type.object?.setAttribute("_interface",

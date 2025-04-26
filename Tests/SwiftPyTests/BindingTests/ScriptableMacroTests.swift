@@ -20,32 +20,32 @@ class ScriptableMacroTests: XCTestCase {
         """
         @Scriptable
         class TestClass {
+            let listProperty: [String] = []
             var intProperty: Int = 10
+            var dictionary: [String: Float] = [:]
         }
         """,
         expandedSource:
         """
         class TestClass {
+            let listProperty: [String] = []
             var intProperty: Int = 10
+            var dictionary: [String: Float] = [:]
 
             var _pythonCache = PythonBindingCache()
         }
 
         extension TestClass: PythonBindable {
             @MainActor static let pyType: PyType = .make("TestClass", base: .object, module: Interpreter.main) { type in
-                type.property(
-                    "int_property",
-                    getter: {
-                        _bind_getter(\\.intProperty, $1)
-                    },
-                    setter: {
-                        _bind_setter(\\.intProperty, $1)
-                    }
-                )
+                \(property("listProperty", python: "list_property", setter: false))
+                \(property("intProperty", python: "int_property"))
+                \(property("dictionary", python: "dictionary"))
                 \(newAndRepr)
                 \(interfaceBegin)
                     class TestClass:
+                        list_property: list[str]
                         int_property: int
+                        dictionary: dict[str, float]
                 \(interfaceEnd)
             }
         }
@@ -70,13 +70,7 @@ class ScriptableMacroTests: XCTestCase {
 
             extension TestClass: PythonBindable {
                 @MainActor static let pyType: PyType = .make("TestClass", base: .object, module: Interpreter.main) { type in
-                    type.property(
-                        "int_property",
-                        getter: {
-                            _bind_getter(\\.intProperty, $1)
-                        },
-                        setter: nil
-                    )
+                    \(property("intProperty", python: "int_property", setter: false))
                     \(newAndRepr)
                     \(interfaceBegin)
                         class TestClass:
@@ -345,6 +339,66 @@ class ScriptableMacroTests: XCTestCase {
         }
         """,
         macros: testMacros)
+    }
+    
+    func testOptionals() {
+        assertMacroExpansion("""
+            @Scriptable
+            class TestClass {
+                var number: Int?
+                func doSomething() -> Int? {}
+            }
+            """, expandedSource: """
+            class TestClass {
+                var number: Int?
+                func doSomething() -> Int? {}
+            
+                var _pythonCache = PythonBindingCache()
+            }
+            
+            extension TestClass: PythonBindable {
+                @MainActor static let pyType: PyType = .make("TestClass", base: .object, module: Interpreter.main) { type in
+                    \(property("number", python: "number"))
+                    type.function("do_something(self) -> int | None") {
+                        _bind_function($1, doSomething)
+                    }
+                    \(newAndRepr)
+                    \(interfaceBegin)
+                        class TestClass:
+                            number: int | None
+                            def do_something(self) -> int | None: ...
+                    \(interfaceEnd)
+                }
+            }
+            """,
+            macros: testMacros
+        )
+    }
+}
+
+private func property(_ name: String, python: String, setter: Bool = true) -> String {
+    if setter {
+    """
+    type.property(
+                "\(python)",
+                getter: {
+                    _bind_getter(\\.\(name), $1)
+                },
+                setter: {
+                    _bind_setter(\\.\(name), $1)
+                }
+            )
+    """
+    } else {
+    """
+    type.property(
+                "\(python)",
+                getter: {
+                    _bind_getter(\\.\(name), $1)
+                },
+                setter: nil
+            )
+    """
     }
 }
 

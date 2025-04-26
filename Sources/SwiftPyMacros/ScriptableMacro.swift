@@ -226,8 +226,7 @@ extension VariableDeclSyntax {
             return "{ _bind_setter(\\.\(identifier), $1) }"
         }()
         
-        let annotation = binding.typeAnnotation?.type
-            .as(IdentifierTypeSyntax.self)?.name.text
+        let annotation = binding.typeAnnotation?.type.description
         
         if let annotation {
             interface.append("    \(identifier.snakeCased): \(annotation.pyType)")
@@ -262,10 +261,7 @@ extension FunctionDeclSyntax {
 
         let returnType: String = {
             if let returnType = signature.returnClause?.type {
-                if let identifier = returnType.as(IdentifierTypeSyntax.self)?.name.text {
-                    return identifier.pyType
-                }
-                context.warning(self, "unknown return type")
+                return returnType.description.pyType
             }
             return "None"
         }()
@@ -346,8 +342,30 @@ extension String {
         return result.joined()
     }
 
+    var trim: String {
+        trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+    
     var pyType: String {
-        switch self {
+        let trimmed = trim
+        
+        if trimmed.hasPrefix("[") && trimmed.hasSuffix("]") {
+            let withoutBrackets = String(trimmed.dropFirst().dropLast())
+            if withoutBrackets.contains(":") {
+                let components = withoutBrackets.components(separatedBy: ":")
+                let part1 = components[0].trim.pyType
+                let part2 = components[1].trim.pyType
+                return "dict[\(part1), \(part2)]"
+            }
+            
+            return "list[\(withoutBrackets.pyType)]"
+        }
+        
+        if trimmed.hasSuffix("?") {
+            return String(trimmed.dropLast()).pyType + " | None"
+        }
+        
+        return switch trimmed {
         case "Int": "int"
         case "Double", "Float": "float"
         case "String": "str"
