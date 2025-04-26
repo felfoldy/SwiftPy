@@ -74,7 +74,7 @@ struct ScriptableTests {
     }
     
     @Test func createInstance() {
-        Interpreter.run("tc5 = TestClass2.create()")
+        Interpreter.run("tc5 = TestClass2.create(2)")
         #expect(main["tc5"]?.isType(TestClassWithProperties.self) == true)
     }
 }

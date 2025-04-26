@@ -144,10 +144,8 @@ struct PythonConvertibleClassTests {
         let obj = TestClass(number: 32)
         obj.toPython(main.emplace("test4"))
 
-        withKnownIssue {
-            Interpreter.run("test4.number = 'asd'")
-            #expect(obj.number == 32)
-        }
+        Interpreter.run("test4.number = 'asd'")
+        #expect(obj.number == 32)
         
         Interpreter.run("test4.number = 42")
         #expect(obj.number == 42)

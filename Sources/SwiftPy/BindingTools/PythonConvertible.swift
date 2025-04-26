@@ -17,9 +17,13 @@ public protocol PythonConvertible {
 }
 
 public extension PythonConvertible {
-    @inlinable init?(_ reference: PyAPI.Reference?) {
-        guard let value = Self.fromPython(reference) else { return nil }
-        self = value
+    @inlinable
+    init?(_ reference: PyAPI.Reference?) {
+        guard let reference else { return nil }
+        let canCast = py_istype(reference, Self.pyType) ||
+        py_isinstance(reference, Self.pyType)
+        guard canCast else { return nil }
+        self = Self.fromPython(reference)
     }
     
     @inlinable func toPython(_ reference: PyAPI.Reference?) {
@@ -36,14 +40,14 @@ public extension PythonConvertible {
         return register
     }
     
-    // TODO: Because it returns nil if the type is not matching when Self is optional it can override the value.
-    // Consider throwing an error instead of optional?
-    @inlinable static func fromPython(_ reference: PyAPI.Reference?) -> Self? {
-        guard let reference else { return nil }
-        guard py_istype(reference, pyType) || py_isinstance(reference, pyType) else {
-            return nil
+    @inlinable
+    static func cast(_ arg: PyAPI.Reference?, _ offset: Int = 0) throws(PythonError) -> Self {
+        guard let arg = arg?[offset],
+              py_istype(arg, Self.pyType) ||
+              py_isinstance(arg, Self.pyType)  else {
+            throw PythonError.TypeError("Expected \(pyType.name) got \(py_typeof(arg).name) at position \(offset)")
         }
-        return fromPython(reference)
+        return Self.fromPython(arg)
     }
 }
 
@@ -121,7 +125,7 @@ extension Float: PythonConvertible {
 
 extension Optional: PythonConvertible where Wrapped: PythonConvertible {
 
-    public static var pyType: PyType { .object }
+    public static var pyType: PyType { Wrapped.pyType }
     
     public func toPython(_ reference: PyAPI.Reference) {
         if let wrappedValue = self {
@@ -168,7 +172,7 @@ extension Array: PythonConvertible {
                 return
             }
             
-            let item = type.fromPython(item.reference)
+            let item = type.init(item.reference)
             if let item = item as? Element {
                 items.append(item)
             }

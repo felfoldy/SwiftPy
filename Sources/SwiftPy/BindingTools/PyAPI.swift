@@ -6,6 +6,7 @@
 //
 
 import pocketpy
+import Foundation
 
 /// Namespace for pocketpy typealias/interfaces.
 @MainActor
@@ -37,6 +38,29 @@ public extension PyAPI {
         return PyAPI.return(.none)
     }
     
+    @inlinable
+    static func returnOrThrow(_ block: () throws -> Void) -> Bool {
+        do {
+            try block()
+            return PyAPI.return(.none)
+        } catch let error as PythonError {
+            return py_throw(error.type, error.description)
+        } catch {
+            return py_throw(.RuntimeError, error.localizedDescription)
+        }
+    }
+
+    @inlinable
+    static func returnOrThrow(_ block: () throws -> (any PythonConvertible)?) -> Bool {
+        do {
+            return try PyAPI.return(block())
+        } catch let error as PythonError {
+            return py_throw(error.type, error.description)
+        } catch {
+            return py_throw(.RuntimeError, error.localizedDescription)
+        }
+    }
+
     @inlinable
     static func `throw`(_ error: PyType, _ message: String?) -> Bool {
         py_throw(error, message)
@@ -99,7 +123,21 @@ public extension PyType {
     static let function = PyType(tp_function.rawValue)
     
     // Errors:
+    static let SyntaxError = PyType(tp_SyntaxError.rawValue)
+    static let RecursionError = PyType(tp_RecursionError.rawValue)
+    static let OSError = PyType(tp_OSError.rawValue)
+    static let NotImplementedError = PyType(tp_NotImplementedError.rawValue)
     static let TypeError = PyType(tp_TypeError.rawValue)
+    static let IndexError = PyType(tp_IndexError.rawValue)
+    static let ValueError = PyType(tp_ValueError.rawValue)
+    static let RuntimeError = PyType(tp_RuntimeError.rawValue)
+    static let ZeroDivisionError = PyType(tp_ZeroDivisionError.rawValue)
+    static let NameError = PyType(tp_NameError.rawValue)
+    static let UnboundLocalError = PyType(tp_UnboundLocalError.rawValue)
+    static let AttributeError = PyType(tp_AttributeError.rawValue)
+    static let ImportError = PyType(tp_ImportError.rawValue)
+    static let AssertionError = PyType(tp_AssertionError.rawValue)
+    static let KeyError = PyType(tp_KeyError.rawValue)
 
     @inlinable
     func magic(_ name: String, function: PyAPI.CFunction) {
@@ -349,19 +387,70 @@ public extension PyAPI.Reference {
     @inlinable func isInstance(of type: PyType) -> Bool {
         py_isinstance(self, type)
     }
-
-    @available(*, deprecated, renamed: "attribute(_:block:)")
-    @inlinable
-    func attribute(_ name: String, register index: Int32 = 0) throws -> PyAPI.Reference? {
-        try Interpreter.printErrors {
-            py_getattr(self, py_name(name))
-        }
-        return PyAPI.returnValue.toRegister(index)
-    }
 }
 
 @MainActor public extension PyAPI.Reference? {
     @inlinable static func == <T: PythonConvertible>(lhs: PyAPI.Reference?, rhs: T?) -> Bool where T: Equatable {
         T(lhs) == rhs
+    }
+}
+
+public enum PythonError: LocalizedError {
+    case SyntaxError(String)
+    case RecursionError(String)
+    case OSError(String)
+    case NotImplementedError(String)
+    case TypeError(String)
+    case IndexError(String)
+    case ValueError(String)
+    case RuntimeError(String)
+    case ZeroDivisionError(String)
+    case NameError(String)
+    case UnboundLocalError(String)
+    case AttributeError(String)
+    case ImportError(String)
+    case AssertionError(String)
+    case KeyError(String)
+
+    public var description: String? {
+        switch self {
+        case let .SyntaxError(msg): msg
+        case let .RecursionError(msg): msg
+        case let .OSError(msg): msg
+        case let .NotImplementedError(msg): msg
+        case let .TypeError(msg): msg
+        case let .IndexError(msg): msg
+        case let .ValueError(msg): msg
+        case let .RuntimeError(msg): msg
+        case let .ZeroDivisionError(msg): msg
+        case let .NameError(msg): msg
+        case let .UnboundLocalError(msg): msg
+        case let .AttributeError(msg): msg
+        case let .ImportError(msg): msg
+        case let .AssertionError(msg): msg
+        case let .KeyError(msg): msg
+        }
+    }
+    
+    @MainActor
+    @inlinable
+    public var type: PyType {
+        switch self {
+        case .SyntaxError: .SyntaxError
+        case .RecursionError: .RecursionError
+        case .OSError: .OSError
+        case .NotImplementedError: .NotImplementedError
+        case .TypeError: .TypeError
+        case .IndexError: .IndexError
+        case .ValueError: .ValueError
+        case .RuntimeError: .RuntimeError
+        case .ZeroDivisionError: .ZeroDivisionError
+        case .NameError: .NameError
+        case .UnboundLocalError: .UnboundLocalError
+        case .AttributeError: .AttributeError
+        case .ImportError: .ImportError
+        case .AssertionError: .AssertionError
+        case .KeyError: .KeyError
+        }
     }
 }
