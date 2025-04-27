@@ -47,9 +47,7 @@ extension ScriptableMacro: ExtensionMacro {
         let members = declaration.memberBlock.members.map(\.decl)
         
         var classMeta = node.classDefinitions(className: className)
-        
-        var classInterface = [""]
-        
+
         initDeclarationVisitor(members: members, metadata: &classMeta)
         propertyDeclarationVisitor(members: members, metadata: &classMeta, context: context)
         functionDeclarationVisitor(members: members, metadata: &classMeta, context: context)
