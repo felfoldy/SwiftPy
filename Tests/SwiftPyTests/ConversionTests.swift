@@ -60,18 +60,20 @@ struct ConversionTests {
             "object": {"nestedKey": "nestedValue"}
         }
         """)
+
         let dictionary = try #require([String: Any](main["dictionary"]))
-        
         #expect(dictionary["string"] as? String == "hello")
         #expect(dictionary["integer"] as? Int == 42)
         #expect(dictionary["double"] as? Double == 3.14)
         #expect(dictionary["boolean"] as? Bool == true)
+
         let array = try #require(dictionary["array"] as? [Any?])
         try #require(array.count == 4)
         #expect(array[0] as? Int == 1)
         #expect(array[1] as? String == "two")
         #expect(array[2] as? Bool == false)
         #expect(array[3] == nil)
+
         let obj = try #require(dictionary["object"] as? [String: Any])
         #expect(obj["nestedKey"] as? String == "nestedValue")
     }

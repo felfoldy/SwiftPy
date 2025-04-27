@@ -43,18 +43,20 @@ class ModelData {
 @available(macOS 14, iOS 17, *)
 @Model
 class LookupKey {
-    @Attribute(.unique)
     var key: String
+    var value: String
 
     init(key: String, value: String) {
-        self.key = "\(key):\(value)"
+        self.key = key
+        self.value = value
     }
 }
 
 @available(macOS 14, iOS 17, *)
 @MainActor
+@Scriptable
 class ModelContext {
-    typealias PythonObject = PyAPI.Reference
+    typealias object = PyAPI.Reference
     
     private let container: ModelContainer
     private let context: SwiftData.ModelContext
@@ -80,20 +82,20 @@ class ModelContext {
         context = container.mainContext
     }
     
-    func insert(model: PythonObject) {
+    func insert(model: object) {
         let type = py_typeof(model)
         _ = type.name
         // TODO: asdict(obj) -> dict:
     }
     
-    func fetch(type: PythonObject) throws -> [PythonObject] {
+    func fetch(type: object) throws -> [object] {
         let type = py_totype(type)
         let name = type.name
         
         let descriptor = FetchDescriptor<ModelData>(
             predicate: #Predicate { model in
                 model.keys.contains(where: {
-                    $0.key == "__name__:\(name)"
+                    $0.key == "__name__" && $0.value == name
                 })
             }
         )

@@ -22,7 +22,7 @@ class ScriptableMacroTests: XCTestCase {
         class TestClass {
             let listProperty: [String] = []
             var intProperty: Int = 10
-            var dictionary: [String: Float] = [:]
+            var dictionary: [String: Float] { [:] }
         }
         """,
         expandedSource:
@@ -30,7 +30,7 @@ class ScriptableMacroTests: XCTestCase {
         class TestClass {
             let listProperty: [String] = []
             var intProperty: Int = 10
-            var dictionary: [String: Float] = [:]
+            var dictionary: [String: Float] { [:] }
 
             var _pythonCache = PythonBindingCache()
         }
@@ -39,7 +39,7 @@ class ScriptableMacroTests: XCTestCase {
             @MainActor static let pyType: PyType = .make("TestClass", base: .object, module: Interpreter.main) { type in
                 \(property("listProperty", python: "list_property", setter: false))
                 \(property("intProperty", python: "int_property"))
-                \(property("dictionary", python: "dictionary"))
+                \(property("dictionary", python: "dictionary", setter: false))
                 \(newAndRepr)
                 \(interfaceBegin)
                     class TestClass:
@@ -53,122 +53,35 @@ class ScriptableMacroTests: XCTestCase {
         macros: testMacros)
     }
     
-    func testComputedProperty() {
-        assertMacroExpansion(
-            """
-            @Scriptable
-            class TestClass {
-                var intProperty: Int { 10 }
-            }
-            """,
-            expandedSource: """
-            class TestClass {
-                var intProperty: Int { 10 }
-
-                var _pythonCache = PythonBindingCache()
-            }
-
-            extension TestClass: PythonBindable {
-                @MainActor static let pyType: PyType = .make("TestClass", base: .object, module: Interpreter.main) { type in
-                    \(property("intProperty", python: "int_property", setter: false))
-                    \(newAndRepr)
-                    \(interfaceBegin)
-                        class TestClass:
-                            int_property: int
-                    \(interfaceEnd)
-                }
-            }
-            """,
-            macros: testMacros)
-    }
-    
-    func testMethodBinding() {
-        assertMacroExpansion(
-            """
-            @Scriptable
-            class TestClass {
-                func testFunction() {}
-            }
-            """,
-            expandedSource:"""
-            class TestClass {
-                func testFunction() {}
-
-                var _pythonCache = PythonBindingCache()
-            }
-
-            extension TestClass: PythonBindable {
-                @MainActor static let pyType: PyType = .make("TestClass", base: .object, module: Interpreter.main) { type in
-                    type.function("test_function(self) -> None") {
-                        _bind_function($1, testFunction)
-                    }
-                    \(newAndRepr)
-                    \(interfaceBegin)
-                        class TestClass:
-                            def test_function(self) -> None: ...
-                    \(interfaceEnd)
-                }
-            }
-            """,
-            macros: testMacros
-        )
-    }
-    
     func testFunctionBinding() {
         assertMacroExpansion("""
         @Scriptable
         class TestClass {
-            func testFunction() -> Int { 10 }
+            func testMethod() {}
+            func testFunction(_ value: String, val2: Int) -> Int { 10 }
         }
         """, expandedSource: """
         class TestClass {
-            func testFunction() -> Int { 10 }
+            func testMethod() {}
+            func testFunction(_ value: String, val2: Int) -> Int { 10 }
         
             var _pythonCache = PythonBindingCache()
         }
         
         extension TestClass: PythonBindable {
             @MainActor static let pyType: PyType = .make("TestClass", base: .object, module: Interpreter.main) { type in
-                type.function("test_function(self) -> int") {
-                    _bind_function($1, testFunction)
-                }
+                \(function("testMethod", "test_method(self) -> None"))
+                \(function("testFunction", "test_function(self, value: str, val2: int) -> int"))
                 \(newAndRepr)
                 \(interfaceBegin)
                     class TestClass:
-                        def test_function(self) -> int: ...
+                        def test_method(self) -> None: ...
+                        def test_function(self, value: str, val2: int) -> int: ...
                 \(interfaceEnd)
             }
         }
         """,
         macros: testMacros)
-    }
-    
-    func testFunctionWithOneParameter() {
-        assertMacroExpansion("""
-        @Scriptable
-        class TestClass {
-            func testFunction(_ value: String, val2: Int) -> Int { 10 }
-        }
-        """, expandedSource: """
-        class TestClass {
-            func testFunction(_ value: String, val2: Int) -> Int { 10 }
-        
-            var _pythonCache = PythonBindingCache()
-        }
-        
-        extension TestClass: PythonBindable {
-            @MainActor static let pyType: PyType = .make("TestClass", base: .object, module: Interpreter.main) { type in
-                type.function("test_function(self, value: str, val2: int) -> int") {
-                    _bind_function($1, testFunction)
-                }
-                \(newAndRepr)
-                \(interfaceBegin)
-                    class TestClass:
-                        def test_function(self, value: str, val2: int) -> int: ...
-                \(interfaceEnd)
-            }
-        }
-        """, macros: testMacros)
     }
     
     func testScriptableAttributes() {
@@ -224,11 +137,13 @@ class ScriptableMacroTests: XCTestCase {
         @Scriptable
         class TestClass {
             init() {}
+            /// documents
             init(number: Int) {}
         }
         """, expandedSource: """
         class TestClass {
             init() {}
+            /// documents
             init(number: Int) {}
         
             var _pythonCache = PythonBindingCache()
@@ -244,7 +159,10 @@ class ScriptableMacroTests: XCTestCase {
                 \(newAndRepr)
                 \(interfaceBegin)
                     class TestClass:
-                        def __init__(self, *args, **kwargs) -> None: ...
+                        @overload
+                        def __init__(self) -> None: ...
+                        @overload
+                        def __init__(self, number: int) -> None: ...
                 \(interfaceEnd)
             }
         }
@@ -311,17 +229,13 @@ class ScriptableMacroTests: XCTestCase {
         @Scriptable
         class TestClass {
             private var number: Int = 10
-        
             internal init() {}
-        
             private func doSomething() {}
         }
         """, expandedSource: """
         class TestClass {
             private var number: Int = 10
-        
             internal init() {}
-        
             private func doSomething() {}
 
             var _pythonCache = PythonBindingCache()
@@ -374,6 +288,14 @@ class ScriptableMacroTests: XCTestCase {
             macros: testMacros
         )
     }
+}
+
+private func function(_ name: String, _ syntax: String) -> String {
+    """
+    type.function("\(syntax)") {
+                _bind_function($1, \(name))
+            }
+    """
 }
 
 private func property(_ name: String, python: String, setter: Bool = true) -> String {
