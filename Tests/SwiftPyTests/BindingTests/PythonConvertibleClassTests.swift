@@ -16,13 +16,17 @@ final class TestClass {
     
     init() {}
     
-    /// Init with multiple parameters.
-    init(a: Int, b: Int) {}
-    init(a: Int, b: Int, c: Int) {}
-    
     init(number: Int) {
         self.number = number
     }
+
+    /// Init with multiple parameters.
+    init(a: Int, b: Int) {
+        self.number = b
+    }
+    init(a: Int, b: Int, c: Int) {}
+    
+    
     
     func setNumber(value: Int) {
         number = value
@@ -138,6 +142,10 @@ struct PythonConvertibleClassTests {
     @Test func wrongInit() throws {
         let test = try #require(Interpreter.evaluate("TestClass('str')"))
         #expect(!test.isType(TestClass.self))
+        
+        let test2 = try #require(Interpreter.evaluate("TestClass(12, 3)"))
+        
+        #expect(TestClass(test2)?.number == 3)
     }
     
     @Test func pythonMutation() {

@@ -144,7 +144,11 @@ public extension PythonBindable {
             }
             return i
         }
-        return try (repeat (each Arg).cast(argv, index()))
+        let result = try (repeat (each Arg).cast(argv, index()))
+        if i != argc {
+            throw PythonError.ValueError("Expected \(i) arguments, got \(argc)")
+        }
+        return result
     }
     
     static func _castArgs<each Arg: PythonConvertible>(argv: PyAPI.Reference?, from offset: Int = 0) throws -> (repeat each Arg) {
