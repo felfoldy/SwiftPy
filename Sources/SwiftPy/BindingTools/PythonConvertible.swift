@@ -42,12 +42,20 @@ public extension PythonConvertible {
     
     @inlinable
     static func cast(_ arg: PyAPI.Reference?, _ offset: Int = 0) throws(PythonError) -> Self {
-        guard let arg = arg?[offset],
-              py_istype(arg, Self.pyType) ||
-              py_isinstance(arg, Self.pyType)  else {
-            throw PythonError.TypeError("Expected \(pyType.name) got \(py_typeof(arg).name) at position \(offset)")
+        guard let arg = arg?[offset] else {
+            throw PythonError.TypeError("Expected \(pyType.name) at position \(offset)")
         }
-        return Self.fromPython(arg)
+        
+        if py_istype(arg, Self.pyType) ||
+            py_isinstance(arg, Self.pyType) {
+            return Self.fromPython(arg)
+        }
+        
+        if arg.isNone || Self.self is ExpressibleByNilLiteral  {
+            return Self.fromPython(arg)
+        }
+
+        throw PythonError.TypeError("Expected \(pyType.name) got \(py_typeof(arg).name) at position \(offset)")
     }
 }
 

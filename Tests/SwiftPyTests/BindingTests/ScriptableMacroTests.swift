@@ -57,12 +57,12 @@ class ScriptableMacroTests: XCTestCase {
         assertMacroExpansion("""
         @Scriptable
         class TestClass {
-            func testMethod() {}
+            func testMethod(arg: Int? = nil, arg2: String = "1") {}
             func testFunction(_ value: String, val2: Int) -> Int { 10 }
         }
         """, expandedSource: """
         class TestClass {
-            func testMethod() {}
+            func testMethod(arg: Int? = nil, arg2: String = "1") {}
             func testFunction(_ value: String, val2: Int) -> Int { 10 }
         
             var _pythonCache = PythonBindingCache()
@@ -70,12 +70,12 @@ class ScriptableMacroTests: XCTestCase {
         
         extension TestClass: PythonBindable {
             @MainActor static let pyType: PyType = .make("TestClass", base: .object, module: Interpreter.main) { type in
-                \(function("testMethod", "test_method(self) -> None"))
+                \(function("testMethod", "test_method(self, arg: int | None = None, arg2: str = '1') -> None"))
                 \(function("testFunction", "test_function(self, value: str, val2: int) -> int"))
                 \(newAndRepr)
                 \(interfaceBegin)
                     class TestClass:
-                        def test_method(self) -> None: ...
+                        def test_method(self, arg: int | None = None, arg2: str = '1') -> None: ...
                         def test_function(self, value: str, val2: int) -> int: ...
                 \(interfaceEnd)
             }

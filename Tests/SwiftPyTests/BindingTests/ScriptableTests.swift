@@ -20,13 +20,13 @@ class TestClassWithProperties: PythonBindable {
     
     func changeContent(value: String) { content = value }
     func getContent() -> String { content }
-    func fetch(query: String) -> Int? { Int(query) }
+    func fetch(query: String = "0") -> Int? { Int(query) }
     static func create() -> TestClass2 {
         TestClassWithProperties()
     }
-    static func map(content: String) -> TestClass2 {
+    static func map(content: String?) -> TestClass2 {
         let tc = TestClassWithProperties()
-        tc.content = content
+        tc.content = content ?? ""
         return tc
     }
     static func log(message: String) throws {
@@ -94,15 +94,25 @@ struct ScriptableTests {
         tc6 = TestClass2.map('map')
         content = tc6.content
         """)
+        
         #expect(main["content"] == "map")
+
+        Interpreter.run("""
+        tc6 = TestClass2.map(None)
+        content = tc6.content
+        """)
+        
+        #expect(main["content"] == "")
     }
     
     @Test func returningArgumentedFunction() {
         Interpreter.run("""
         tc7 = TestClass2.create()
         number = tc7.fetch('4')
+        number2 = tc7.fetch()
         """)
         
         #expect(main["number"] == 4)
+        #expect(main["number2"] == 0)
     }
 }

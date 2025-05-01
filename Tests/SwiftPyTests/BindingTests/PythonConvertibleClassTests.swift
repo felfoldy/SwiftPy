@@ -28,7 +28,7 @@ final class TestClass {
     
     
     
-    func setNumber(value: Int) {
+    func setNumber(value: Int? = nil) {
         number = value
     }
     
@@ -65,7 +65,7 @@ extension TestClass: PythonBindable {
         } setter: {
             _bind_setter(\.number, $1)
         }
-        type.function("set_number(self, value: int) -> None") {
+        type.function("set_number(self, value: int | None) -> None") {
             _bind_function($1, setNumber)
         }
         type.function("get_number(self) -> int") {
@@ -165,6 +165,9 @@ struct PythonConvertibleClassTests {
         
         Interpreter.run("test5.set_number(10)")
         #expect(obj.number == 10)
+        
+        Interpreter.run("test5.set_number(None)")
+        #expect(obj.number == nil)
     }
     
     @Test func getNumber() {

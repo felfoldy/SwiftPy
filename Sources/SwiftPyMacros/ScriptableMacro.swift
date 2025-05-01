@@ -254,10 +254,11 @@ func functionDeclarationVisitor(
             
             parameters += signature.parameterClause.parameters
                 .map { param in
-                let name = param.secondName ?? param.firstName
-                let type = param.type.description.pyType
-                return "\(name): \(type)"
-            }
+                    let name = param.secondName ?? param.firstName
+                    let type = param.type.description.pyType
+                    let defaultExpression = param.defaultValue?.description.pyLiteralExpression ?? ""
+                    return "\(name): \(type)\(defaultExpression)"
+                }
             
             return parameters.joined(separator: ", ")
         }()
@@ -386,6 +387,15 @@ extension String {
         case "Bool": "bool"
         default: self
         }
+    }
+    
+    /// From "= nil" to " = None"
+    var pyLiteralExpression: String {
+        " " + trim
+            .replacingOccurrences(of: "nil", with: "None")
+            .replacingOccurrences(of: "\"", with: "'")
+            .replacingOccurrences(of: "true", with: "True")
+            .replacingOccurrences(of: "false", with: "False")
     }
 }
 
