@@ -385,7 +385,7 @@ extension String {
         case "Double", "Float": "float"
         case "String": "str"
         case "Bool": "bool"
-        default: self
+        default: trimmed
         }
     }
     
