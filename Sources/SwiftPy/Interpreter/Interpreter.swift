@@ -216,11 +216,22 @@ public extension Interpreter {
     static func complete(_ text: String) -> [String] {
         let module = Interpreter.shared.module("interpreter")
         let completions = module?["completions"]
+        let textStack = text.toStack
         
         let result = try? PyAPI.call(
             completions,
-            text.toRegister(0)
+            textStack.reference
         )
         return [String](result) ?? []
+    }
+
+    static func bindInterfaces(_ module: PyAPI.Reference?, _ convertibles: [PyType]) {
+        let interpreter = Interpreter.shared.module("interpreter")
+        let bind_interfaces = interpreter?["bind_interfaces"]
+        
+        _ = try? PyAPI.call(
+            bind_interfaces,
+            module
+        )
     }
 }
