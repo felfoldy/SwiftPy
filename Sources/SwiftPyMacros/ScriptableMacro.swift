@@ -49,7 +49,7 @@ extension ScriptableMacro: ExtensionMacro {
         var classMeta = node.classDefinitions(className: className)
 
         initDeclarationVisitor(members: members, metadata: &classMeta)
-        propertyDeclarationVisitor(members: members, metadata: &classMeta, context: context)
+        variableDeclarationVisitor(members: members, metadata: &classMeta, context: context)
         functionDeclarationVisitor(members: members, metadata: &classMeta, context: context)
         
         return try [
@@ -75,12 +75,15 @@ struct ClassMetadata {
     var name: String
     var base: String
     var module: String
+    var classDoc: String?
     
     var bindings: [String] = []
     
     var initSyntax: [String] = []
     var variableSyntax: [String] = []
     var functionSyntax: [String] = []
+    
+    var variableDocs: [String] = []
 
     var typeMakeArgs: String {
         "\"\(name)\", base: \(base), module: \(module)"
@@ -99,8 +102,10 @@ struct ClassMetadata {
 
 extension AttributeSyntax {
     func classDefinitions(className: String) -> ClassMetadata {
+        let docstring = description.docstring
+        
         guard let arguments = arguments?.as(LabeledExprListSyntax.self) else {
-            return ClassMetadata(className: className, name: className, base: ".object", module: "Interpreter.main")
+            return ClassMetadata(className: className, name: className, base: ".object", module: "Interpreter.main", classDoc: docstring)
         }
         
         var name = className
@@ -121,7 +126,7 @@ extension AttributeSyntax {
             }
         }
         
-        return ClassMetadata(className: className, name: name, base: base, module: module)
+        return ClassMetadata(className: className, name: name, base: base, module: module, classDoc: docstring)
     }
 }
 
@@ -137,27 +142,30 @@ func initDeclarationVisitor(members: [DeclSyntax], metadata: inout ClassMetadata
     for initMember in initMembers {
         let paramters = initMember.signature.parameterClause.parameters
         
-        metadata.initSyntax.append("@overload")
-        
-        if paramters.isEmpty {
-            bindingSyntax.append("\(metadata.className).init")
-            metadata.initSyntax.append("def __init__(self) -> None: ...")
-            continue
-        }
-
         let names = paramters
             .map { $0.firstName.text + ":" }
             .joined()
         
-        bindingSyntax.append("\(metadata.className).init(\(names))")
-        
+        bindingSyntax.append(
+            "\(metadata.className).init(\(names))"
+                .replacingOccurrences(of: "()", with: "")
+        )
+
         let argsSyntax = paramters.map { parameter in
             let name = parameter.secondName ?? parameter.firstName
             let type = parameter.type.description.pyType
             return ", \(name): \(type)"
         }.joined()
 
-        metadata.initSyntax.append("def __init__(self\(argsSyntax)) -> None: ...")
+        metadata.initSyntax.append("@overload")
+        let initSyntax = "def __init__(self\(argsSyntax)) -> None:"
+        if let docstring = initMember.description.docstring {
+            metadata.initSyntax.append(initSyntax)
+            metadata.initSyntax.append(.tab + docstring.inPythonTrippleQuotes)
+            metadata.initSyntax.append("")
+        } else {
+            metadata.initSyntax.append(initSyntax + " ...")
+        }
     }
     
     let bindings = bindingSyntax.map {
@@ -177,7 +185,7 @@ func initDeclarationVisitor(members: [DeclSyntax], metadata: inout ClassMetadata
 
 // MARK: - Property
 
-func propertyDeclarationVisitor(
+func variableDeclarationVisitor(
     members: [DeclSyntax],
     metadata: inout ClassMetadata,
     context: some MacroExpansionContext
@@ -202,6 +210,10 @@ func propertyDeclarationVisitor(
         }
         
         let identifier = pattern.identifier.text
+        
+        if let docstring = member.description.docstring {
+            metadata.variableDocs.append("\(identifier.snakeCased): \(docstring)")
+        }
         
         let setter: String = {
             if specifier != "var" { return "nil" }
@@ -275,7 +287,14 @@ func functionDeclarationVisitor(
         if isStatic {
             metadata.functionSyntax.append("@staticmethod")
         }
-        metadata.functionSyntax.append("def \(pySignature): ...")
+        let functionSyntax = "def \(pySignature):"
+        if let docstring = function.description.docstring {
+            metadata.functionSyntax.append(functionSyntax)
+            metadata.functionSyntax.append(.tab + docstring.inPythonTrippleQuotes)
+            metadata.functionSyntax.append("")
+        } else {
+            metadata.functionSyntax.append(functionSyntax + " ...")
+        }
         
         if isStatic {
             metadata.bindings.append(
@@ -298,30 +317,56 @@ func functionDeclarationVisitor(
 }
 
 func buildInterface(_ metadata: ClassMetadata) -> String {
-    let tab = "    " // 4 whitespaces
-
     var rows = ["#\"\"\"",
                 metadata.interfaceHeader]
     
-    for variableSyntax in metadata.variableSyntax {
-        rows.append(tab + variableSyntax)
+    if let classDoc = metadata.classDoc {
+        var docRows = [classDoc]
+        
+        if !metadata.variableDocs.isEmpty {
+            docRows.append("")
+            docRows.append(.tab + "Attributes:")
+            
+            for variableDoc in metadata.variableDocs {
+                docRows.append(.tab + .tab + variableDoc)
+            }
+        }
+        
+        let docstring = .tab + docRows.joined(separator: "\n")
+            .inPythonTrippleQuotes
+        rows.append(docstring)
+        rows.append("")
     }
     
-    for initSyntax in metadata.initSyntax {
-        rows.append(tab + initSyntax)
+    // Variables.
+    if !metadata.variableSyntax.isEmpty {
+        for variableSyntax in metadata.variableSyntax {
+            rows.append(.tab + variableSyntax)
+        }
+        rows.append("")
+    }
+
+    // Inits.
+    if !metadata.initSyntax.isEmpty {
+        for initSyntax in metadata.initSyntax {
+            rows.append(.tab + initSyntax)
+        }
+        rows.append("")
     }
     
-    for funcSyntax in metadata.functionSyntax {
-        rows.append(tab + funcSyntax)
+    if !metadata.functionSyntax.isEmpty {
+        for funcSyntax in metadata.functionSyntax {
+            rows.append(.tab + funcSyntax)
+        }
+        rows.append("")
+    }
+
+    if rows.count == 2 {
+        rows.append(.tab + "...")
     }
     
-    if metadata.variableSyntax.isEmpty && metadata.initSyntax.isEmpty && metadata.functionSyntax.isEmpty {
-        rows.append(tab + "...")
-    }
-    
-    rows.append("\"\"\"#")
-    
-    return rows.joined(separator: "\n")
+    let content = rows.joined(separator: "\n").trim
+    return content + "\n\"\"\"#"
 }
 
 protocol Mappable: DeclSyntaxProtocol {
@@ -397,6 +442,32 @@ extension String {
             .replacingOccurrences(of: "true", with: "True")
             .replacingOccurrences(of: "false", with: "False")
     }
+    
+    var docstring: String? {
+        var doclines: [String] = []
+        for var line in trim.components(separatedBy: .newlines) {
+            if line.isEmpty { continue }
+
+            line = line.trim
+            guard line.hasPrefix("///") else {
+                if doclines.isEmpty { return nil }
+                return doclines.joined(separator: "\n")
+            }
+            doclines.append(String(line.dropFirst(3)).trim)
+        }
+        if doclines.isEmpty { return nil }
+        return doclines.joined(separator: "\n")
+    }
+    
+    var inPythonTrippleQuotes: String {
+        if components(separatedBy: .newlines).count > 1 {
+            return .trippleQuotes + self + "\n" + .tab + .trippleQuotes
+        }
+        return .trippleQuotes + self + .trippleQuotes
+    }
+    
+    static let tab = "    "
+    static let trippleQuotes = "\"\"\""
 }
 
 extension DeclModifierListSyntax {

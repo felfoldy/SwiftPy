@@ -8,12 +8,16 @@
 import Testing
 import SwiftPy
 
+/// The TestClass.
 @Scriptable("TestClass2", module: Interpreter.main)
 class TestClassWithProperties: PythonBindable {
     typealias TestClass2 = TestClassWithProperties
     
+    /// Int constant.
     let intProperty: Int? = 12
+    /// float of 3.14
     var floatProperty: Float = 3.14
+    /// str content
     var content: String = "content"
     
     init() {}
