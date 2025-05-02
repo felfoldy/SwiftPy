@@ -10,7 +10,7 @@ import Testing
 import pocketpy
 import CoreFoundation
 
-final class TestClass {
+final class TestClass: HasSubscript {
     /// Just a number.
     var number: Int? = nil
     
@@ -25,9 +25,7 @@ final class TestClass {
         self.number = b
     }
     init(a: Int, b: Int, c: Int) {}
-    
-    
-    
+
     func setNumber(value: Int? = nil) {
         number = value
     }
@@ -36,6 +34,10 @@ final class TestClass {
         number ?? -1
     }
     
+    subscript(key: String) -> String {
+        key
+    }
+
     static func staticFunc(value: Int) -> TestClass {
         TestClass(number: 10)
     }
@@ -43,7 +45,7 @@ final class TestClass {
     var _pythonCache = PythonBindingCache()
 }
 
-extension TestClass: CustomStringConvertible {
+extension TestClass: @preconcurrency CustomStringConvertible {
     var description: String {
         "TestClass(number: \(String(describing: number)))"
     }
@@ -74,7 +76,9 @@ extension TestClass: PythonBindable {
         type.staticFunction("static_func") { argc, argv in
             _bind_staticFunction(argc, argv, staticFunc)
         }
-        
+        type.magic("__getitem__") { argc, argv in
+            __getitem__(argc, argv, __getitem__)
+        }
         type.object?.setAttribute("_interface",
             #"""
             class TestClass(builtins.object):
@@ -183,8 +187,14 @@ struct PythonConvertibleClassTests {
         #expect(Interpreter.evaluate("test7.__repr__()") == obj.description)
     }
     
-    @Test func staticFunc() async throws {
+    @Test func staticFunc() throws {
         let obj = Interpreter.evaluate("TestClass.static_func(10)")
         #expect(TestClass(obj)?.number == 10)
+    }
+    
+    @Test func bindSubscript() throws {
+        TestClass(number: 2)
+            .toPython(main.emplace("test8"))
+        #expect(Interpreter.evaluate("test8['str']") == "str")
     }
 }

@@ -269,4 +269,16 @@ public extension PythonBindable {
             return try arguments(obj)(repeat (each result))
         }
     }
+
+    @inlinable
+    static func __getitem__<Key: PythonConvertible>(_ argc: Int32, _ argv: PyAPI.Reference?, _ fn: (Self) -> (Key) -> any PythonConvertible) -> Bool {
+        PyAPI.returnOrThrow {
+            if argc != 2 {
+                throw PythonError.ValueError("Expected 2 arguments, got \(argc)")
+            }
+            let obj = try cast(argv)
+            let key = try Key.cast(argv?[1])
+            return fn(obj)(key)
+        }
+    }
 }
