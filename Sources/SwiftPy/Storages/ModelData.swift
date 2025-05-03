@@ -10,9 +10,14 @@ import SwiftData
 import Foundation
 import pocketpy
 
+@MainActor
+extension PyAPI.Reference {
+    static let storages = Interpreter.module("storages")!
+}
+
 // MARK: - Models
 
-@available(macOS 14, iOS 17, *)
+@available(macOS 15, iOS 18, *)
 @Model
 class ModelMetadata {
     @Attribute(.unique)
@@ -25,7 +30,8 @@ class ModelMetadata {
     }
 }
 
-@available(macOS 14, iOS 17, *)
+@available(macOS 15, iOS 18, *)
+@Scriptable(module: .storages)
 @Model
 class ModelData {
     @Relationship
@@ -40,9 +46,11 @@ class ModelData {
     }
 }
 
-@available(macOS 14, iOS 17, *)
+@available(macOS 15, iOS 18, *)
 @Model
 class LookupKey {
+    #Index<LookupKey>([\.key], [\.value])
+    
     var key: String
     var value: String
 
@@ -52,16 +60,26 @@ class LookupKey {
     }
 }
 
-@available(macOS 14, iOS 17, *)
+public extension Interpreter {
+    static func initStorages() {
+        if #available(macOS 15, *) {
+            _ = ModelContainer.pyType
+            _ = ModelData.pyType
+        }
+    }
+}
+
+@available(macOS 15, iOS 18, *)
 @MainActor
-@Scriptable
-class ModelContext {
+@Scriptable(module: .storages)
+class ModelContainer {
     typealias object = PyAPI.Reference
     
-    private let container: ModelContainer
-    private let context: SwiftData.ModelContext
+    internal let container: SwiftData.ModelContainer
+    internal let context: SwiftData.ModelContext
     
     init(name: String) throws {
+        
         let schema = Schema([ModelData.self,
                              LookupKey.self,
                              ModelMetadata.self],
@@ -70,28 +88,33 @@ class ModelContext {
         let configuration = ModelConfiguration(
             name,
             schema: schema,
-            isStoredInMemoryOnly: false,
+            isStoredInMemoryOnly: true,
             groupContainer: .automatic,
             cloudKitDatabase: .automatic
         )
         
-        container = try ModelContainer(
+        container = try SwiftData.ModelContainer(
+            for: ModelData.self,
+            LookupKey.self,
+            ModelMetadata.self,
             configurations: configuration
         )
         
         context = container.mainContext
     }
     
-    func insert(model: object) {
-        let type = py_typeof(model)
-        _ = type.name
-        // TODO: asdict(obj) -> dict:
+    func insert(model: object) throws {
+        // TODO: Update metadata if needed.
+        let dataRef = try model.attribute("_data")?.toStack
+        guard let modelData = ModelData(dataRef?.reference) else {
+            throw PythonError.ValueError("Invalid model data")
+        }
+        context.insert(modelData)
     }
     
-    func fetch(type: object) throws -> [object] {
+    func fetch(_ type: object) throws -> [object] {
         let type = py_totype(type)
         let name = type.name
-        
         let descriptor = FetchDescriptor<ModelData>(
             predicate: #Predicate { model in
                 model.keys.contains(where: {
@@ -105,6 +128,10 @@ class ModelContext {
         // TODO: Reconstruct models from json.
 
         return []
+    }
+    
+    func delete(model: object) throws {
+        
     }
 }
 #endif

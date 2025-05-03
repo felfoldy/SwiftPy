@@ -120,6 +120,7 @@ public extension PythonBindable {
             let result = try _checkArgs(argc: argc, argv: argv, from: 1) as (repeat each Arg)
             try initializer(repeat (each result)).storeInPython(argv)
         } catch {
+            // TODO: incorrect when the error thrown by the init itself.
             return false
         }
         

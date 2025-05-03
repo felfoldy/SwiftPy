@@ -22,9 +22,10 @@ struct AutoCompleterTests {
         #expect(Interpreter.main["x"] == "\t")
     }
     
-    @Test func globalMatches() {
-        Interpreter.input("x = completer.complete('s', 0)")
-        #expect(Interpreter.main["x"] == "str(")
+    @Test()
+    func globalMatches() {
+        Interpreter.input("x = completer.complete('pri', 0)")
+        #expect(Interpreter.main["x"] == "print(")
         
         Interpreter.input("x = completer.complete('str', 0)")
         #expect(Interpreter.main["x"] == "str(")

@@ -32,13 +32,13 @@ struct SubclassBindableTests {
                 super().__init__()
                 self.val = 'val'
 
-        test = Subclass()
+        subclass_test = Subclass()
         """)
     }
     
     @Test func startCalled() {
-        let base = Base(main["test"])
-        Interpreter.run("test.start()")
+        let base = Base(main["subclass_test"])
+        Interpreter.run("subclass_test.start()")
         
         #expect(base?.startCalled == true)
     }
