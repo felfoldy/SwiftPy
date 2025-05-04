@@ -29,7 +29,8 @@ def _model__init__(self, *args, **kwargs):
     dict = self._asdict()
     json = json.dumps(dict)
     
-    self._data = ModelData([], json)
+    nameKey = LookupKeyValue('__name__', cls.__name__)
+    self._data = ModelData([nameKey], json)
 
 def _model__repr__(self):
     cls = type(self)

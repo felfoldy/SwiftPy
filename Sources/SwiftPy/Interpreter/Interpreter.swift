@@ -40,42 +40,24 @@ public final class Interpreter {
     @usableFromInline
     static var lastFailure: String?
     
+    static var moduleBuilders: [String: (PyAPI.Reference?) -> Void] = [:]
+    
     let profiler = SignpostProfiler("Python")
 
     init() {
         py_initialize()
         
-        py_callbacks().pointee.print = { cString in
-            guard let cString else { return }
-            let str = String(cString: cString)
-                .trimmingCharacters(in: .whitespacesAndNewlines)
-            if str.isEmpty { return }
-            
-            if Interpreter.isFailed {
-                Interpreter.output.stderr(str)
-                Interpreter.isFailed = false
-                Interpreter.lastFailure = str
-            } else {
-                Interpreter.output.stdout(str)
-            }
-        }
+        setCallbacks()
         
         log.info("pocketpy [\(PK_VERSION)] initialized")
-        
-        py_callbacks().pointee.importfile = { cFilename in
-            guard let cFilename else { return nil }
-            
-            let filename = String(cString: cFilename)
-            if let content = Interpreter.importFromBundle(name: filename) {
-                return strdup(content)
-            }
-
-            return nil
-        }
         
         let builtins = py_getmodule("builtins")
         // Remove exit, maybe do a custom action instead later?
         py_deldict(builtins, py_name("exit"))
+        
+        if #available(macOS 15, iOS 18, *) {
+            hookStoragesModule()
+        }
     }
 
     deinit {
@@ -87,12 +69,12 @@ public final class Interpreter {
             let isCompiled = py_compile(code, filename, mode, false)
             guard isCompiled else { return false }
             
-            PyAPI.r0?.assign(py_retval())
+            let code = PyAPI.returnValue.toStack
 
             let function: PyAPI.Reference? = mode == EVAL_MODE ? .functions.eval : .functions.exec
 
             profiler.begin()
-            let isExecuted = py_call(function, 1, PyAPI.r0)
+            let isExecuted = py_call(function, 1, code.reference)
             profiler.end()
 
             Interpreter.output.executionTime(
@@ -233,5 +215,29 @@ public extension Interpreter {
             bind_interfaces,
             module
         )
+    }
+
+    static func makeModule(_ name: String, _ types: [PythonBindable.Type]) {
+        moduleBuilders[name] = { module in
+            // Set types.
+            for type in types {
+                let pyType = type.pyType
+                module?.setAttribute(pyType.name, pyType.object)
+            }
+
+            // Load source.
+            if let content = Interpreter.importFromBundle(name: name + ".py") {
+                py_exec(content, name, EXEC_MODE, module)
+            }
+
+            // Add module.__doc__.
+            let interpreter = Interpreter.shared.module("interpreter")
+            let bind_interfaces = interpreter?["bind_interfaces"]
+            
+            _ = try? PyAPI.call(
+                bind_interfaces,
+                module
+            )
+        }
     }
 }

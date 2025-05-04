@@ -7113,6 +7113,14 @@ int py_import(const char* path_cstr) {
         return true;
     }
 
+    if(vm->callbacks.importhook) {
+        py_GlobalRef hook_mod = vm->callbacks.importhook(path_cstr);
+        if(hook_mod) {
+            py_assign(py_retval(), hook_mod);
+            return true;
+        }
+    }
+
     // try import
     c11_string* slashed_path = c11_sv__replace(path, '.', PK_PLATFORM_SEP);
     c11_string* filename = c11_string__new3("%s.py", slashed_path->data);

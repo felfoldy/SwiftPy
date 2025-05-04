@@ -9,7 +9,7 @@ import pocketpy
 
 extension Interpreter {
     func asyncExecute(_ code: String, filename: String = "<string>", mode: py_CompileMode = EXEC_MODE) async {
-        await withUnsafeContinuation { continuation in
+        await withCheckedContinuation { continuation in
             let main = Interpreter.main
             
             // Clear the previous task before running.

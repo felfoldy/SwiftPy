@@ -23,7 +23,7 @@ struct BindingsCacheTests {
                 }
             }
 
-            static let pyType = PyType.make("BindableStruct") { type in
+            static let pyType = PyType.make("BindableStruct", module: .main) { type in
                 type.property("value") {
                     _bind_getter(\.number, $1)
                 } setter: { _bind_setter(\.number, $1) }
@@ -40,7 +40,7 @@ struct BindingsCacheTests {
         
         var _pythonCache = PythonBindingCache()
         
-        static let pyType = PyType.make("BindingsCacheTests_TestClass") { type in
+        static let pyType = PyType.make("BindingsCacheTests_TestClass", module: .main) { type in
             type.property("base") { _, argv in
                 _bind_slot(.base, argv) { root in
                     BindableStruct.Binding(root, \.base)
@@ -75,7 +75,7 @@ struct BindingsCacheTests {
         #expect(Interpreter.evaluate("obj.base.value") == 100)
     }
     
-    @Test func setStruct() async throws {
+    @Test func setStruct() throws {
         let obj = TestClass()
         obj.toPython(main.emplace("obj"))
         
@@ -88,7 +88,7 @@ struct BindingsCacheTests {
         #expect(Interpreter.evaluate("obj.base.value") == 2)
     }
     
-    @Test func valueBindingSetter() async {
+    @Test func valueBindingSetter() {
         let obj = TestClass()
         obj.toPython(main.emplace("obj"))
         

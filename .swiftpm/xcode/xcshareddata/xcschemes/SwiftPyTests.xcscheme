@@ -14,11 +14,8 @@
       shouldUseLaunchSchemeArgsEnv = "YES">
       <TestPlans>
          <TestPlanReference
-            reference = "container:../SwiftPyTests.xctestplan"
+            reference = "container:../TestPlan.xctestplan"
             default = "YES">
-         </TestPlanReference>
-         <TestPlanReference
-            reference = "container:../TestPlan.xctestplan">
          </TestPlanReference>
       </TestPlans>
       <Testables>

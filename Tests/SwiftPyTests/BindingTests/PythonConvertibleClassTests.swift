@@ -52,7 +52,7 @@ extension TestClass: @preconcurrency CustomStringConvertible {
 }
 
 extension TestClass: PythonBindable {
-    static let pyType: PyType = .make("TestClass") { type in
+    static let pyType: PyType = .make("TestClass", module: .main) { type in
         type.magic("__new__") { __new__($1) }
         type.magic("__init__") { argc, argv in
             __init__(argc, argv, TestClass.init) ||

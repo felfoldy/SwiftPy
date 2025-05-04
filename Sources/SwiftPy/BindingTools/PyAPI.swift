@@ -178,7 +178,7 @@ public extension PyType {
     @inlinable
     static func make(_ name: String,
                      base: PyType = .object,
-                     module: PyAPI.Reference = Interpreter.main,
+                     module: PyAPI.Reference? = nil,
                      bind: (PyType) -> Void) -> PyType {
         let type = py_newtype(name, base, module) { userdata in
             // Dtor callback.
@@ -250,7 +250,7 @@ public extension PyAPI.Reference {
 public extension PyAPI.Reference {
     @MainActor
     struct Functions {
-        let eval = PyAPI.Reference.modules.builtins["eval"]!
+        let eval = py_getbuiltin(py_name("eval"))!
         let exec = PyAPI.Reference.modules.builtins["exec"]!
     }
     

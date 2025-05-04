@@ -10,9 +10,19 @@ import SwiftData
 import Foundation
 import pocketpy
 
+@available(macOS 15, iOS 18, *)
+@MainActor
+func hookStoragesModule() {
+    Interpreter.makeModule("storages", [
+        ModelContainer.self,
+        ModelData.self,
+        LookupKeyValue.self,
+    ])
+}
+
 @MainActor
 extension PyAPI.Reference {
-    static let storages = Interpreter.module("storages")!
+    static let _internal = py_newmodule("_internal")!
 }
 
 // MARK: - Models
@@ -31,26 +41,28 @@ class ModelMetadata {
 }
 
 @available(macOS 15, iOS 18, *)
-@Scriptable(module: .storages)
+@Scriptable
 @Model
 class ModelData {
     @Relationship
-    var keys: [LookupKey]
+    var keys: [LookupKeyValue]
 
     @Attribute(.externalStorage)
     var json: String
     
-    init(keys: [LookupKey], json: String) {
+    init(keys: [LookupKeyValue], json: String) {
         self.keys = keys
         self.json = json
     }
 }
 
 @available(macOS 15, iOS 18, *)
+@Scriptable
 @Model
-class LookupKey {
-    #Index<LookupKey>([\.key], [\.value])
-    
+class LookupKeyValue {
+    #Unique<LookupKeyValue>([\.key, \.value])
+    #Index<LookupKeyValue>([\.key], [\.value])
+
     var key: String
     var value: String
 
@@ -60,19 +72,10 @@ class LookupKey {
     }
 }
 
-public extension Interpreter {
-    static func initStorages() {
-        if #available(macOS 15, *) {
-            _ = ModelContainer.pyType
-            _ = ModelData.pyType
-        }
-    }
-}
-
 @available(macOS 15, iOS 18, *)
 @MainActor
-@Scriptable(module: .storages)
-class ModelContainer {
+@Scriptable
+class ModelContainer: PythonBindable {
     typealias object = PyAPI.Reference
     
     internal let container: SwiftData.ModelContainer
@@ -81,7 +84,7 @@ class ModelContainer {
     init(name: String) throws {
         
         let schema = Schema([ModelData.self,
-                             LookupKey.self,
+                             LookupKeyValue.self,
                              ModelMetadata.self],
                             version: Schema.Version(0, 1, 0))
         
@@ -95,7 +98,7 @@ class ModelContainer {
         
         container = try SwiftData.ModelContainer(
             for: ModelData.self,
-            LookupKey.self,
+            LookupKeyValue.self,
             ModelMetadata.self,
             configurations: configuration
         )
@@ -131,7 +134,11 @@ class ModelContainer {
     }
     
     func delete(model: object) throws {
-        
+        let dataRef = try model.attribute("_data")?.toStack
+        guard let modelData = ModelData(dataRef?.reference) else {
+            throw PythonError.ValueError("Invalid model data")
+        }
+        context.delete(modelData)
     }
 }
 #endif
