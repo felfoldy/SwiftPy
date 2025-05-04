@@ -73,6 +73,13 @@ class LookupKeyValue {
 }
 
 @available(macOS 15, iOS 18, *)
+extension [LookupKeyValue] {
+    subscript(key: String) -> String? {
+        first(where: { $0.key == key })?.value
+    }
+}
+
+@available(macOS 15, iOS 18, *)
 @MainActor
 @Scriptable
 class ModelContainer: PythonBindable {
@@ -116,21 +123,32 @@ class ModelContainer: PythonBindable {
     }
     
     func fetch(_ type: object) throws -> [object] {
-        let type = py_totype(type)
-        let name = type.name
+        let typeObject = type
+        let typeName = py_totype(type).name
         let descriptor = FetchDescriptor<ModelData>(
             predicate: #Predicate { model in
                 model.keys.contains(where: {
-                    $0.key == "__name__" && $0.value == name
+                    $0.key == "__name__" && $0.value == typeName
                 })
             }
         )
         
         let models = try context.fetch(descriptor)
-        _ = models.map(\.json)
-        // TODO: Reconstruct models from json.
+        let fromDataRef = try typeObject.attribute("_fromdata")?.toStack
+        
+        var elements = [StackReference]()
+        
+        for model in models {
+            let modelRef = model.toStack
+            
+            try Interpreter.printErrors {
+                py_call(fromDataRef?.reference, 1, modelRef.reference)
+            }
+            
+            elements.append(PyAPI.returnValue.toStack)
+        }
 
-        return []
+        return elements.compactMap(\.reference)
     }
     
     func delete(model: object) throws {

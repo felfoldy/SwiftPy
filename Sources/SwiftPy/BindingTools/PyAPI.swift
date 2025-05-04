@@ -251,7 +251,7 @@ public extension PyAPI.Reference {
     @MainActor
     struct Functions {
         let eval = py_getbuiltin(py_name("eval"))!
-        let exec = PyAPI.Reference.modules.builtins["exec"]!
+        let exec = py_getbuiltin(py_name("exec"))!
     }
     
     @MainActor static let functions = Functions()

@@ -18,7 +18,10 @@ struct TestIntent: AppIntent {
     @MainActor static var callback: (() -> Void)?
 
     func perform() async throws -> some IntentResult {
-        lastText = text
+        await MainActor.run {
+            lastText = text
+        }
+       
         print("TestIntent - text: \(text)")
 
         // Just to continue the execution.
@@ -45,4 +48,4 @@ struct IntentsTests {
     }
 }
 
-nonisolated(unsafe) private var lastText: String? = nil
+@MainActor private var lastText: String? = nil

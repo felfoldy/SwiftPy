@@ -9,8 +9,7 @@ import Foundation
 import pocketpy
 
 extension Interpreter {
-    
-    /// Sets print output, importhook, import file.
+    /// Sets print output, importhook, importfile.
     func setCallbacks() {
         py_callbacks().pointee.print = { cString in
             guard let cString else { return }
