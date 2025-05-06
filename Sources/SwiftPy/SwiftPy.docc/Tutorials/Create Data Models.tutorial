@@ -1,0 +1,61 @@
+@Tutorial(time: 10) {
+    @Intro(title: "Define and Manage Data Models in Python") {
+        This tutorial guides you through defining data models with the built-in `storages` module in the SwiftPy interpreter, storing them in a `ModelContainer`, and performing basic Create, Read, Update, and Delete (CRUD) operations.
+    }
+
+    @Section(title: "Setup and Perform CRUD with ModelContainer") {
+        @ContentAndMedia {
+            In this section, you’ll set up a `ModelContainer` and walk through creating, fetching, updating, and deleting model instances.
+        }
+
+        @Steps {
+            @Step {
+                Define your model
+
+                Use the `@model` decorator to declare a Python class whose attributes become your schema. Every field needs either a default value or be optional.
+
+                @Code(name: "main.py", file: 01-create-data-models.py)
+            }
+
+            @Step {
+                Initialize the container
+
+                Create a `ModelContainer` to manage your model instances.
+
+                @Code(name: "main.py", file: 02-create-data-models.py)
+            }
+
+            @Step {
+                Create an item
+
+                Instantiate your model and insert it into the container.
+
+                @Code(name: "main.py", file: 03-create-data-models.py)
+            }
+
+            @Step {
+                Read items
+
+                Use `fetch(Item)` to retrieve all stored `Item` instances as Python objects.
+
+                @Code(name: "main.py", file: 04-create-data-models.py)
+            }
+
+            @Step {
+                Update an item
+
+                Simply modify the Python object’s attributes—changes are synced automatically.
+
+                @Code(name: "main.py", file: 05-create-data-models.py)
+            }
+
+            @Step {
+                Delete an item
+
+                Call `delete(item)` to remove it from the container immediately.
+
+                @Code(name: "main.py", file: 06-create-data-models.py)
+            }
+        }
+    }
+}
