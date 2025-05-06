@@ -66,11 +66,12 @@ public final class Interpreter {
     
     func execute(_ code: String, filename: String = "<string>", mode: py_CompileMode = EXEC_MODE) throws {
         try Interpreter.printErrors {
-            let isCompiled = py_compile(code, filename, mode, false)
-            guard isCompiled else { return false }
-            
-            let code = PyAPI.returnValue.toStack
-
+            py_compile(code, filename, mode, false)
+        }
+        
+        let code = PyAPI.returnValue.toStack
+        
+        try Interpreter.printErrors {
             let function: PyAPI.Reference? = mode == EVAL_MODE ? .functions.eval : .functions.exec
 
             profiler.begin()

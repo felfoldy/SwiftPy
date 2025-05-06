@@ -1,0 +1,42 @@
+{
+  "originHash" : "a63c14c8fd2fe12d93d7aa65667b2a96c14a5c31af11b9306ecb87cb602d2673",
+  "pins" : [
+    {
+      "identity" : "logtools",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/felfoldy/LogTools.git",
+      "state" : {
+        "revision" : "ff3db447006f30684103770b66e977cc51303f2e",
+        "version" : "1.1.0"
+      }
+    },
+    {
+      "identity" : "swift-docc-plugin",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/apple/swift-docc-plugin",
+      "state" : {
+        "revision" : "85e4bb4e1cd62cec64a4b8e769dcefdf0c5b9d64",
+        "version" : "1.4.3"
+      }
+    },
+    {
+      "identity" : "swift-docc-symbolkit",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/swiftlang/swift-docc-symbolkit",
+      "state" : {
+        "revision" : "b45d1f2ed151d057b54504d653e0da5552844e34",
+        "version" : "1.0.0"
+      }
+    },
+    {
+      "identity" : "swift-syntax",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/apple/swift-syntax.git",
+      "state" : {
+        "revision" : "f99ae8aa18f0cf0d53481901f88a0991dc3bd4a2",
+        "version" : "601.0.1"
+      }
+    }
+  ],
+  "version" : 3
+}

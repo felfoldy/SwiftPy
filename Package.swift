@@ -18,7 +18,8 @@ let package = Package(
     ],
     dependencies: [
         .package(url: "https://github.com/apple/swift-syntax.git", from: "601.0.1"),
-        .package(url: "https://github.com/felfoldy/LogTools.git", from: "1.1.0")
+        .package(url: "https://github.com/apple/swift-docc-plugin", from: "1.0.0"),
+        .package(url: "https://github.com/felfoldy/LogTools.git", from: "1.1.0"),
     ],
     targets: [
         .target(
