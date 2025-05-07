@@ -24,14 +24,14 @@ struct PyAPITests {
     
     @Test func setAttribute() {
         let main = Interpreter.main
-        
-        let __init__ = #def("__init__(self, val: str) -> None") { args in
-            args[0]?.setAttribute("param", args[1])
-        }
 
         Interpreter.execute("class Test: ...")
 
-        main["Test"]?.bind(__init__)
+        main["Test"]?.bind("__init__(self, val: str) -> None") { argc, argv in
+            PyAPI.returnNone {
+                argv?.setAttribute("param", argv?[1])
+            }
+        }
 
         Interpreter.execute("""
         x = Test('secret value')

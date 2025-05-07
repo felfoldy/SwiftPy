@@ -49,9 +49,11 @@ struct AsyncTests {
     @Test func asyncRun() async {
         profiler.event("AsyncTests.asyncRun")
         
-        main.bind(#def("async_func() -> AsyncTask") {
-            AsyncTask {}
-        })
+        main.bind("async_func() -> AsyncTask") { argc, argv in
+            PyBind.function(argc, argv) {
+                AsyncTask {}
+            }
+        }
         
         await Interpreter.asyncRun("""
         await async_func()
@@ -64,9 +66,9 @@ struct AsyncTests {
     @Test func asyncRunWithResult() async {
         profiler.event("AsyncTest.asyncRunWithResult")
 
-        main.bind(#def("async_func() -> AsyncTask") {
-            AsyncTask { 42 }
-        })
+        main.bind("async_func() -> AsyncTask") { _, _ in
+            PyAPI.return(AsyncTask { 42 })
+        }
         
         await Interpreter.asyncRun("""
         result = await async_func()
@@ -78,9 +80,9 @@ struct AsyncTests {
     @Test func chainingAsyncRun() async {
         profiler.event("AsyncTests.chainingAsyncRun")
         
-        main.bind(#def("async_func() -> AsyncTask") {
-            AsyncTask { 42 }
-        })
+        main.bind("async_func() -> AsyncTask") { _, _ in
+            PyAPI.return(AsyncTask { 42 })
+        }
         
         await Interpreter.asyncRun("""
         result = await async_func()

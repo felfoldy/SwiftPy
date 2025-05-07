@@ -376,8 +376,9 @@ public extension PyAPI.Reference {
         }
     }
     
-    @inlinable func bind(_ function: FunctionRegistration) {
-        py_bind(self, function.signature, function.cFunction)
+    @inlinable
+    func bind(_ signature: String, function: PyAPI.CFunction) {
+        py_bind(self, signature, function)
     }
 
     @inlinable func isType<T: PythonConvertible>(_ type: T.Type) -> Bool {
