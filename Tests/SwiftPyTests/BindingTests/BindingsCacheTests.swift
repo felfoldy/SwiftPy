@@ -96,9 +96,9 @@ struct BindingsCacheTests {
         #expect(obj.base.number == 2)
     }
     
-    @Test func classAttribute() {
-        let interface = Interpreter.evaluate("BindingsCacheTests_TestClass._interface")
-        
+    @Test func classAttribute() throws {
+        let interface: String? = Interpreter.evaluate("BindingsCacheTests_TestClass._interface")
+
         #expect(interface == """
         class BindingsCacheTests_TestClass(builtins.object):
             base: BindableStruct

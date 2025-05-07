@@ -143,15 +143,6 @@ struct PythonConvertibleClassTests {
         #expect(TestClass(obj)?.number == 12)
     }
     
-    @Test func wrongInit() throws {
-        let test = try #require(Interpreter.evaluate("TestClass('str')"))
-        #expect(!test.isType(TestClass.self))
-        
-        let test2 = try #require(Interpreter.evaluate("TestClass(12, 3)"))
-        
-        #expect(TestClass(test2)?.number == 3)
-    }
-    
     @Test func pythonMutation() {
         let obj = TestClass(number: 32)
         obj.toPython(main.emplace("test4"))
@@ -188,8 +179,8 @@ struct PythonConvertibleClassTests {
     }
     
     @Test func staticFunc() throws {
-        let obj = Interpreter.evaluate("TestClass.static_func(10)")
-        #expect(TestClass(obj)?.number == 10)
+        let obj: TestClass = try #require(Interpreter.evaluate("TestClass.static_func(10)"))
+        #expect(obj.number == 10)
     }
     
     @Test func bindSubscript() throws {

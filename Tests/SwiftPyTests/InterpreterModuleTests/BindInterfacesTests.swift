@@ -15,29 +15,31 @@ extension PyAPI.Reference {
 
 @MainActor
 struct BindInterfacesTests {
-    @Scriptable(module: .test)
+    @Scriptable
     class TestClass3 {}
     
     /// Test Class 4.
-    @Scriptable(module: .test)
+    @Scriptable
     class TestClass4 {
         /// Description.
         func testMethod() {}
     }
     
-    @Test func helpOnModule() throws {
-        Interpreter.bindInterfaces(.test, [
-            TestClass3.pyType,
-            TestClass4.pyType
+    init() {
+        Interpreter.bindModule("test", [
+            TestClass3.self,
+            TestClass4.self
         ])
-        
+    }
+    
+    @Test func helpOnModule() throws {
         Interpreter.run("""
         import test
         help(test)
         """)
 
-        let doc = try #require(
-            String(Interpreter.evaluate("test.__doc__"))
+        let doc: String = try #require(
+            Interpreter.evaluate("test.__doc__")
         )
 
         #expect(doc.contains("TestClass3"))

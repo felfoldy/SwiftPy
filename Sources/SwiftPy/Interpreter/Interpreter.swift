@@ -8,31 +8,38 @@
 import pocketpy
 import Foundation
 
-public enum InterpreterError: LocalizedError {
-    case runtimeError(String)
-    case notCallable(String)
-    
-    public var errorDescription: String? {
-        switch self {
-        case let .runtimeError(description):
-            return description
-        case let .notCallable(type):
-            return "\(type) is not callable"
-        }
-    }
-}
-
+/// A Swift interface for interacting with the embedded Python interpreter.
+///
+/// This class provides static methods to run scripts, evaluate expressions,
+/// bind Swift types as Python modules, and handle REPL input.
+///
+/// ### Examples:
+/// Execute a script with ``run(_:)``:
+/// ```swift
+/// Interpreter.run("print('Hello from Python')")
+/// ```
+///
+/// Evaluate an expression with ``evaluate(_:)``:
+/// ```swift
+/// let result: Int? = Interpreter.evaluate("3 + 6")
+/// ```
+///
+/// Bind a module with ``bindModule(_:_:)``:
+/// ```swift
+/// Interpreter.bindModule("my_module", [MySwiftClass.self])
+/// ```
 @MainActor
 public final class Interpreter {
-    public static let shared = Interpreter()
-    
     /// IO stream for console output.
     public static var output: any IOStream = DefaultIOStream()
 
     /// Bundles to import from python scripts.
     public static var bundles = [Bundle.module]
 
-    public var replLines = [String]()
+    @usableFromInline
+    static let shared = Interpreter()
+
+    var replLines = [String]()
     
     @usableFromInline
     static var isFailed = false
@@ -165,7 +172,7 @@ public extension Interpreter {
         output.input(code)
         try? shared.execute(code, filename: "<string>", mode: EXEC_MODE)
     }
-    
+
     static func asyncRun(_ code: String) async {
         output.input(code)
         await shared.asyncExecute(code)
@@ -178,24 +185,25 @@ public extension Interpreter {
         output.input(input)
         shared.repl(input: input)
     }
-    
-    /// Evaluates the expression and returns the result.
+
+    /// Evaluates the expression, casts to the given type and returns the result.
     ///
     /// - Parameter expression: Expression to evaluate.
     /// - Returns: The result of the expression.
-    static func evaluate(_ expression: String) -> PyAPI.Reference? {
-        try? shared.execute(expression, mode: EVAL_MODE)
-
-        PyAPI.r0?.assign(PyAPI.returnValue)
-        return PyAPI.r0
+    static func evaluate<Result: PythonConvertible>(_ expression: String) -> Result? {
+        do {
+            try shared.execute(expression, mode: EVAL_MODE)
+            let result = PyAPI.returnValue.toStack
+            return try Result.cast(result.reference)
+        } catch {
+            return nil
+        }
     }
 
-    /// Completes the text.
-    ///
-    /// - Note: Writes to R0 register.
+    /// Provides autocomplete suggestions for a given text.
     ///
     /// - Parameter text: Text to complete.
-    /// - Returns: Array of possible results.
+    /// - Returns: An array of string completions.
     static func complete(_ text: String) -> [String] {
         let module = Interpreter.shared.module("interpreter")
         let completions = module?["completions"]
@@ -208,17 +216,23 @@ public extension Interpreter {
         return [String](result) ?? []
     }
 
-    static func bindInterfaces(_ module: PyAPI.Reference?, _ convertibles: [PyType]) {
-        let interpreter = Interpreter.shared.module("interpreter")
-        let bind_interfaces = interpreter?["bind_interfaces"]
-        
-        _ = try? PyAPI.call(
-            bind_interfaces,
-            module
-        )
-    }
-
-    static func makeModule(_ name: String, _ types: [PythonBindable.Type]) {
+    /// Registers a new Python module by binding Swift types and loading optional source code.
+    ///
+    /// - Parameters:
+    ///   - name: The name of the module to register.
+    ///   - types: An array of types conforming to ``PythonBindable`` to expose to Python.
+    ///
+    /// This function enables dynamic module creation by:
+    /// 1. Registering Swift types as Python classes.
+    /// 2. Optionally loading and executing a `.py` file with the same name from ``bundles``.
+    /// 3. Setting module-level metadata such as documentation.
+    ///
+    /// ### Example:
+    /// ```swift
+    /// Interpreter.bindModule("my_module", [MySwiftClass.self])
+    /// ```
+    /// This exposes `MySwiftClass` to Python and runs `my_module.py` if found in the app bundle.
+    static func bindModule(_ name: String, _ types: [PythonBindable.Type]) {
         moduleBuilders[name] = { module in
             // Set types.
             for type in types {
