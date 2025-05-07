@@ -134,52 +134,6 @@ public extension PythonBindable {
         }
     }
     
-    // MARK: _bind_staticFunction
-    
-    /// `() -> Void`
-    @inlinable
-    static func _bind_staticFunction(
-        _ argc: Int32, _ argv: PyAPI.Reference?,
-        _ fn: @MainActor () throws -> Void
-    ) -> Bool {
-        PyAPI.returnOrThrow { try fn() }
-    }
-    
-    /// `() -> Any?`
-    @inlinable
-    static func _bind_staticFunction(
-        _ argc: Int32, _ argv: PyAPI.Reference?,
-        _ fn: @MainActor () throws -> (any PythonConvertible)
-    ) -> Bool {
-        PyAPI.returnOrThrow { try fn() }
-    }
-    
-    /// `(...) -> Void`
-    @inlinable
-    static func _bind_staticFunction<each Arg: PythonConvertible>(
-        _ argc: Int32,
-        _ argv: PyAPI.Reference?,
-        _ arguments: @MainActor (repeat each Arg) throws -> Void
-    ) -> Bool {
-        PyAPI.returnOrThrow {
-            let result = try PyBind.checkArgs(argc: argc, argv: argv) as (repeat (each Arg))
-            return try arguments(repeat (each result))
-        }
-    }
-    
-    /// `(...) -> Any?`
-    @inlinable
-    static func _bind_staticFunction<each Arg: PythonConvertible>(
-        _ argc: Int32,
-        _ argv: PyAPI.Reference?,
-        _ arguments: @MainActor (repeat each Arg) throws -> any PythonConvertible
-    ) -> Bool {
-        PyAPI.returnOrThrow {
-            let result = try PyBind.checkArgs(argc: argc, argv: argv) as (repeat (each Arg))
-            return try arguments(repeat (each result))
-        }
-    }
-    
     @inlinable
     static func _bind_getter<Value: PythonConvertible>(_ keypath: KeyPath<Self, Value>, _ argv: PyAPI.Reference?) -> Bool {
         PyAPI.return(Self(argv)?[keyPath: keypath])

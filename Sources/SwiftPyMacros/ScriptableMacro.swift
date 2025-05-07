@@ -300,7 +300,7 @@ func functionDeclarationVisitor(
             metadata.bindings.append(
             """
             type.staticFunction("\(identifier.snakeCased)") { argc, argv in
-                _bind_staticFunction(argc, argv, \(identifier))
+                PyBind.function(argc, argv, \(identifier))
             }
             """
             )
