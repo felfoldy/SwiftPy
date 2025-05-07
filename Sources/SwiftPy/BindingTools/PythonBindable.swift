@@ -44,7 +44,6 @@ public extension PythonBindable {
     /// Creates a new python object.
     /// - Parameters:
     ///   - reference: reference what will be initiated with a new object.
-    ///   - hasDictionary: Creates a `__dict__`.
     /// - Returns: Reference to the userdata.
     @discardableResult
     @inlinable
