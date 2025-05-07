@@ -117,7 +117,7 @@ public extension PythonBindable {
         _ initializer: @MainActor (repeat each Arg) throws -> Self
     ) -> Bool {
         do {
-            let result = try _checkArgs(argc: argc, argv: argv, from: 1) as (repeat each Arg)
+            let result = try PyBind.checkArgs(argc: argc, argv: argv, from: 1) as (repeat each Arg)
             try initializer(repeat (each result)).storeInPython(argv)
         } catch {
             // TODO: incorrect when the error thrown by the init itself.
@@ -132,33 +132,6 @@ public extension PythonBindable {
         PyAPI.returnOrThrow {
             try String(describing: cast(argv))
         }
-    }
-    
-    // MARK: _cast
-
-    static func _checkArgs<each Arg: PythonConvertible>(argc: Int32, argv: PyAPI.Reference?, from offset: Int = 0) throws -> (repeat each Arg) {
-        var i: Int = offset
-        func index() throws -> Int {
-            defer { i += 1 }
-            if i >= argc {
-                throw PythonError.ValueError("Expected more arguments, got \(argc)")
-            }
-            return i
-        }
-        let result = try (repeat (each Arg).cast(argv, index()))
-        if i != argc {
-            throw PythonError.ValueError("Expected \(i) arguments, got \(argc)")
-        }
-        return result
-    }
-    
-    static func _castArgs<each Arg: PythonConvertible>(argv: PyAPI.Reference?, from offset: Int = 0) throws -> (repeat each Arg) {
-        var i: Int = offset
-        func index() throws -> Int {
-            defer { i += 1 }
-            return i
-        }
-        return try (repeat (each Arg).cast(argv, index()))
     }
     
     // MARK: _bind_staticFunction
@@ -189,7 +162,7 @@ public extension PythonBindable {
         _ arguments: @MainActor (repeat each Arg) throws -> Void
     ) -> Bool {
         PyAPI.returnOrThrow {
-            let result = try _checkArgs(argc: argc, argv: argv) as (repeat (each Arg))
+            let result = try PyBind.checkArgs(argc: argc, argv: argv) as (repeat (each Arg))
             return try arguments(repeat (each result))
         }
     }
@@ -202,7 +175,7 @@ public extension PythonBindable {
         _ arguments: @MainActor (repeat each Arg) throws -> any PythonConvertible
     ) -> Bool {
         PyAPI.returnOrThrow {
-            let result = try _checkArgs(argc: argc, argv: argv) as (repeat (each Arg))
+            let result = try PyBind.checkArgs(argc: argc, argv: argv) as (repeat (each Arg))
             return try arguments(repeat (each result))
         }
     }
@@ -216,7 +189,7 @@ public extension PythonBindable {
     static func _bind_setter<Value: PythonConvertible>(_ keypath: ReferenceWritableKeyPath<Self, Value>, _ argv: PyAPI.Reference?) -> Bool {
         PyAPI.returnOrThrow {
             let base = try cast(argv)
-            base[keyPath: keypath] = try _castArgs(argv: argv, from: 1)
+            base[keyPath: keypath] = try PyBind.castArgs(argv: argv, from: 1)
             return ()
         }
     }
@@ -253,7 +226,7 @@ public extension PythonBindable {
     ) -> Bool {
         PyAPI.returnOrThrow {
             let obj = try cast(argv)
-            let result = try _castArgs(argv: argv, from: 1) as (repeat (each Arg))
+            let result = try PyBind.castArgs(argv: argv, from: 1) as (repeat (each Arg))
             return try arguments(obj)(repeat (each result))
         }
     }
@@ -266,7 +239,7 @@ public extension PythonBindable {
     ) -> Bool {
         PyAPI.returnOrThrow {
             let obj = try cast(argv)
-            let result = try _castArgs(argv: argv, from: 1) as (repeat (each Arg))
+            let result = try PyBind.castArgs(argv: argv, from: 1) as (repeat (each Arg))
             return try arguments(obj)(repeat (each result))
         }
     }

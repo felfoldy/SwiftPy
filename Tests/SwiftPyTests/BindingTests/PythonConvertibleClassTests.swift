@@ -74,7 +74,7 @@ extension TestClass: PythonBindable {
             _bind_function($1, getNumber)
         }
         type.staticFunction("static_func") { argc, argv in
-            _bind_staticFunction(argc, argv, staticFunc)
+            PyBind.function(argc, argv, staticFunc)
         }
         type.magic("__getitem__") { argc, argv in
             __getitem__(argc, argv, __getitem__)
