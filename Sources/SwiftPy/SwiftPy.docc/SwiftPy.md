@@ -6,8 +6,9 @@ A fast and lightweight Python interpreter with Swift macro binding tools.
 
 ## Topics
 
-### Interpreter
+### Essentials
 
+- <doc:GettingStarted>
 - ``Interpreter``
 
 ### Scriptable
