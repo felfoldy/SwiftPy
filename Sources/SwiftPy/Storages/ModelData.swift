@@ -87,9 +87,9 @@ class ModelContainer: PythonBindable {
     
     internal let container: SwiftData.ModelContainer
     internal let context: SwiftData.ModelContext
+    internal static var inMemoryOnly: Bool = false
     
     init(name: String) throws {
-        
         let schema = Schema([ModelData.self,
                              LookupKeyValue.self,
                              ModelMetadata.self],
@@ -98,7 +98,7 @@ class ModelContainer: PythonBindable {
         let configuration = ModelConfiguration(
             name,
             schema: schema,
-            isStoredInMemoryOnly: true,
+            isStoredInMemoryOnly: Self.inMemoryOnly,
             groupContainer: .automatic,
             cloudKitDatabase: .automatic
         )
@@ -161,6 +161,10 @@ class ModelContainer: PythonBindable {
         let makedata = try model.attribute("_makedata")?.toStack
         
         try PyAPI.call(makedata?.reference)
+    }
+    
+    static func inMemory(inMemory: Bool) {
+        inMemoryOnly = inMemory
     }
 }
 #endif

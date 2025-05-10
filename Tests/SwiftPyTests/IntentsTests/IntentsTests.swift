@@ -32,6 +32,10 @@ struct TestIntent: AppIntent {
 }
 
 @MainActor
+@Suite(
+    "Intents",
+    .tags(.experimental)
+)
 struct IntentsTests {
     @Test func register() async throws {
         Interpreter.register(TestIntent.self)

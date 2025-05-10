@@ -1,0 +1,18 @@
+{
+  "configurations" : [
+    {
+      "id" : "B6087ECB-F41D-4869-932C-9D287117288C",
+      "name" : "Configuration 1",
+      "options" : {
+
+      }
+    }
+  ],
+  "defaultOptions" : {
+
+  },
+  "testTargets" : [
+
+  ],
+  "version" : 1
+}

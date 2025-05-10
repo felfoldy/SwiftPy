@@ -15,7 +15,7 @@ func profile(_ name: StaticString) -> SignpostProfiler {
     return profiler
 }
 
-@Suite("Async tests", .disabled("Unstable feature"))
+@Suite("Async tests", .tags(.experimental))
 @MainActor
 struct AsyncTests {
     let main = Interpreter.main

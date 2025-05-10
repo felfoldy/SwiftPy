@@ -19,11 +19,12 @@ extension Player: HasSlots {
 }
 
 @MainActor
+@Suite("HasSlots", .tags(.experimental))
 struct HasSlotsTests {
-    @Test func registersSlots() {
-        let main = Interpreter.main
+    @Test
+    func registersSlots() {
         let player = Player()
-        player.toPython(main.emplace("player"))
+        player.toPython(.main.emplace("player"))
         
         player[.health] = 10
         

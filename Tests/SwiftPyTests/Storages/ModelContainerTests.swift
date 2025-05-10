@@ -16,6 +16,8 @@ struct ModelContainerTests {
         Interpreter.run("""
         from storages import model, ModelContainer
 
+        ModelContainer.in_memory(True)
+        
         @model
         class Item:
             name: str = ''
@@ -28,12 +30,12 @@ struct ModelContainerTests {
     @Test func insert() throws {
         Interpreter.run("""
         container = ModelContainer('insert_testing')
-        aword = Item(name='Sword')
-        container.insert(aword)
+        sword = Item(name='Sword')
+        container.insert(sword)
         """)
         
         // Backing data.
-        let data = try #require(ModelData(Interpreter.evaluate("aword._data")))
+        let data = try #require(ModelData(Interpreter.evaluate("sword._data")))
         #expect(data.json == #"{"name": "Sword", "quantity": 0, "description": null}"#)
         #expect(data.keys["__name__"] == "Item")
         
