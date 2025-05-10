@@ -6,6 +6,8 @@
     @Chapter(name: "Data Models") {
         Write your model code declaratively to add managed persistence and model fetching.
         
-        @TutorialReference(tutorial: "doc:Create-Data-Models")
+        @Image(source: storages-icon)
+        
+        @TutorialReference(tutorial: "doc:CreateDataModels")
     }
 }
