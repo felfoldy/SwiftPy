@@ -2,9 +2,9 @@ import json
 
 def _model__init__(self, *args, **kwargs):
     cls = type(self)
-    cls_d = cls.__dict__
     annotations = cls.__annotations__
     fields = annotations.keys()
+    self._fields = cls._defaults.copy()
 
     i = 0   # index into args
     for field in fields:
@@ -15,7 +15,9 @@ def _model__init__(self, *args, **kwargs):
         if i < len(args):
             self._fields[field] = args[i]
             i += 1
-        elif field in self._fields: # has default value
+            continue
+        
+        if field in self._fields: # has default value
             continue
 
         if 'None' in annotations[field]:
@@ -26,14 +28,18 @@ def _model__init__(self, *args, **kwargs):
     if '_data' in kwargs:
         self._data = kwargs.pop('_data')
     else:
-        json = json.dumps(self._fields)
-        nameKey = LookupKeyValue('__name__', cls.__name__)
-        self._data = ModelData([nameKey], json)
+        self._makedata()
     
     if len(args) > i:
         raise TypeError(f"{cls.__name__} takes {len(fields)} positional arguments but {len(args)} were given")
     if len(kwargs) > 0:
         raise TypeError(f"{cls.__name__} got an unexpected keyword argument {next(iter(kwargs))!r}")
+
+def _model_makedata(self):
+    cls = type(self)
+    json = json.dumps(self._fields)
+    nameKey = LookupKeyValue('__name__', cls.__name__)
+    self._data = ModelData([nameKey], json)
 
 def _model__repr__(self) -> str:
     cls = type(self)
@@ -62,16 +68,19 @@ def model(cls: type):
     cls.__init__ = _model__init__
     cls.__repr__ = _model__repr__
     cls._fromdata = _model_fromdata
+    cls._makedata = _model_makedata
     
     fields = cls.__annotations__.keys()
     cls_d = cls.__dict__
     
-    cls._fields = {} # Default fields.
+    cls._defaults = {}
 
+    # Remap fields into properties.
     for field in fields:
-        prop = _make_property(field, fields)
+        # set default
         if field in cls_d:
-            cls._fields[field] = cls_d[field]
-        setattr(cls, field, prop)
+            cls._defaults[field] = cls_d[field]
+    
+        setattr(cls, field, _make_property(field, fields))
     
     return cls

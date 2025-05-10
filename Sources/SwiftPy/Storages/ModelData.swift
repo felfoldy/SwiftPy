@@ -157,6 +157,10 @@ class ModelContainer: PythonBindable {
             throw PythonError.ValueError("Invalid model data")
         }
         context.delete(modelData)
+        
+        let makedata = try model.attribute("_makedata")?.toStack
+        
+        try PyAPI.call(makedata?.reference)
     }
 }
 #endif

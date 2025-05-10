@@ -28,12 +28,12 @@ struct ModelContainerTests {
     @Test func insert() throws {
         Interpreter.run("""
         container = ModelContainer('insert_testing')
-        sword = Item(name='Sword')
-        container.insert(sword)
+        aword = Item(name='Sword')
+        container.insert(aword)
         """)
         
         // Backing data.
-        let data = try #require(ModelData(Interpreter.evaluate("sword._data")))
+        let data = try #require(ModelData(Interpreter.evaluate("aword._data")))
         #expect(data.json == #"{"name": "Sword", "quantity": 0, "description": null}"#)
         #expect(data.keys["__name__"] == "Item")
         
@@ -74,5 +74,24 @@ struct ModelContainerTests {
         """)
 
         #expect(data.json == #"{"name": "Sword", "quantity": 1, "description": "A great sword"}"#)
+    }
+    
+    @available(macOS 15, *)
+    @Test func delete() throws {
+        Interpreter.run("""
+        container = ModelContainer('delete_testing')
+        sword = Item(name='Sword')
+        container.insert(sword)
+        """)
+        
+        #expect(Interpreter.evaluate("len(container.fetch(Item))") == 1)
+        
+        Interpreter.run("container.delete(sword)")
+        
+        #expect(Interpreter.evaluate("len(container.fetch(Item))") == 0)
+        
+        // Check reinser
+        Interpreter.run("container.insert(sword)")
+        #expect(Interpreter.evaluate("len(container.fetch(Item))") == 1)
     }
 }
