@@ -77,4 +77,20 @@ struct ConversionTests {
         let obj = try #require(dictionary["object"] as? [String: Any])
         #expect(obj["nestedKey"] as? String == "nestedValue")
     }
+    
+    static var casted: Double?
+    
+    @Test func castFloatFromInt() {
+        profiler.event("ConversionTests.castFloatFromInt")
+        
+        Interpreter.main.bind("will_cast(x: float) -> None") { argc, argv in
+            PyBind.function(argc, argv) { (x: Double) in
+                ConversionTests.casted = x
+            }
+        }
+        
+        Interpreter.run("will_cast(42)")
+        
+        #expect(ConversionTests.casted == 42)
+    }
 }

@@ -388,6 +388,17 @@ public extension PyAPI.Reference {
     @inlinable func isInstance(of type: PyType) -> Bool {
         py_isinstance(self, type)
     }
+    
+    @inlinable
+    func canCast(to type: PyType) -> Bool {
+        if py_isinstance(self, type) {
+            return true
+        }
+        if type == .float, canCast(to: .int) {
+            return true
+        }
+        return false
+    }
 }
 
 @MainActor public extension PyAPI.Reference? {

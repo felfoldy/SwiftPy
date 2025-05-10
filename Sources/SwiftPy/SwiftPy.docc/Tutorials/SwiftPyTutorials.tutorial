@@ -1,4 +1,4 @@
-@Tutorials(name: "SwiftPy") {
+@Tutorials(name: "SwiftPyTutorials") {
     @Intro(title: "Meet SwiftPy") {
         A fast and lightweight Python interpreter with Swift macro binding tools.
     }

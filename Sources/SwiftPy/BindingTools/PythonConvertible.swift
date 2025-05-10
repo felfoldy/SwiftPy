@@ -46,12 +46,11 @@ public extension PythonConvertible {
             throw PythonError.TypeError("Expected \(pyType.name) at position \(offset)")
         }
         
-        if py_istype(arg, Self.pyType) ||
-            py_isinstance(arg, Self.pyType) {
+        if arg.canCast(to: pyType) {
             return Self.fromPython(arg)
         }
         
-        if arg.isNone || Self.self is ExpressibleByNilLiteral  {
+        if arg.isNone && Self.self is ExpressibleByNilLiteral.Type {
             return Self.fromPython(arg)
         }
 
@@ -114,8 +113,13 @@ extension Double: PythonConvertible {
         py_newfloat(reference, self)
     }
 
-    @inlinable public static func fromPython(_ reference: PyAPI.Reference) -> Double {
-        Double(py_tofloat(reference))
+    @inlinable
+    public static func fromPython(_ reference: PyAPI.Reference) -> Double {
+        var out: py_f64 = 0
+        try? Interpreter.printErrors {
+            py_castfloat(reference, &out)
+        }
+        return out
     }
 }
 
