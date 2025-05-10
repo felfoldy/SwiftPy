@@ -207,9 +207,12 @@ public extension Interpreter {
         if let module = py_getmodule(name) {
             return module
         }
-        if py_import(name) == 1 {
+
+        let imported = try? Interpreter.printItemError(py_import(name))
+        if imported == true {
             return PyAPI.returnValue
         }
+
         return py_newmodule(name)
     }
 

@@ -242,7 +242,9 @@ public extension Interpreter {
 
             // Load source.
             if let content = Interpreter.importFromBundle(name: name + ".py") {
-                py_exec(content, name, EXEC_MODE, module)
+                try? Interpreter.printErrors {
+                    py_exec(content, name, EXEC_MODE, module)
+                }
             }
 
             // Add module.__doc__.

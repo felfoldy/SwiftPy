@@ -1,5 +1,5 @@
 //
-//  ModelTests.swift
+//  ModelContainerTests.swift
 //  SwiftPy
 //
 //  Created by Tibor Felföldy on 2025-05-03.
@@ -54,5 +54,25 @@ struct ModelContainerTests {
         #expect(Interpreter.evaluate("len(items)") == 1)
         let data = try #require(ModelData(Interpreter.evaluate("items[0]._data")))
         #expect(data.json == #"{"name": "Sword", "quantity": 0, "description": null}"#)
+    }
+    
+    @available(macOS 15, *)
+    @Test func update() throws {
+        Interpreter.run("""
+        container = ModelContainer('update_testing')
+        sword = Item(name='Sword')
+        container.insert(sword)
+        """)
+        
+        // Backing data.
+        let data = try #require(ModelData(Interpreter.evaluate("sword._data")))
+        #expect(data.json == #"{"name": "Sword", "quantity": 0, "description": null}"#)
+        
+        Interpreter.run("""
+        sword.description = "A great sword"
+        sword.quantity += 1
+        """)
+
+        #expect(data.json == #"{"name": "Sword", "quantity": 1, "description": "A great sword"}"#)
     }
 }
