@@ -30,7 +30,6 @@ extension PyAPI.Reference {
 @available(macOS 15, iOS 18, *)
 @Model
 class ModelMetadata {
-    @Attribute(.unique)
     var name: String = ""
     var fields: [String: String] = [:]
     var lookupFields: [String] = []
@@ -45,11 +44,11 @@ class ModelMetadata {
 @Model
 class ModelData {
     @Relationship(deleteRule: .cascade, inverse: \LookupKeyValue.model)
-    var keys = [LookupKeyValue]()
+    var keys: [LookupKeyValue]?
 
     @Attribute(.externalStorage)
     var json: String = ""
-    
+
     init(keys: [LookupKeyValue], json: String) {
         self.keys = keys
         self.json = json
@@ -127,9 +126,11 @@ class ModelContainer: PythonBindable {
         let typeName = py_totype(type).name
         let descriptor = FetchDescriptor<ModelData>(
             predicate: #Predicate { model in
-                model.keys.contains(where: {
-                    $0.key == "__name__" && $0.value == typeName
-                })
+                model.keys.flatMap { keys in
+                    keys.contains {
+                        $0.key == "__name__" && $0.value == typeName
+                    }
+                } ?? true
             }
         )
         

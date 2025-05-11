@@ -37,7 +37,7 @@ struct ModelContainerTests {
         // Backing data.
         let data = try #require(ModelData(Interpreter.evaluate("sword._data")))
         #expect(data.json == #"{"name": "Sword", "quantity": 0, "description": null}"#)
-        #expect(data.keys["__name__"] == "Item")
+        #expect(data.keys?["__name__"] == "Item")
         
         // Is inserted?
         let container = ModelContainer(.main["container"])
