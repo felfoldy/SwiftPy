@@ -44,8 +44,8 @@ class ModelMetadata {
 @Scriptable
 @Model
 class ModelData {
-    @Relationship
-    var keys: [LookupKeyValue]
+    @Relationship(deleteRule: .cascade, inverse: \LookupKeyValue.model)
+    var keys = [LookupKeyValue]()
 
     @Attribute(.externalStorage)
     var json: String
@@ -60,11 +60,11 @@ class ModelData {
 @Scriptable
 @Model
 class LookupKeyValue {
-    #Unique<LookupKeyValue>([\.key, \.value])
     #Index<LookupKeyValue>([\.key], [\.value])
 
     var key: String
     var value: String
+    var model: ModelData?
 
     init(key: String, value: String) {
         self.key = key
