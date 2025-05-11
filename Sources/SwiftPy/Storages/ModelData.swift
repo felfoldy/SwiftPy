@@ -31,7 +31,7 @@ extension PyAPI.Reference {
 @Model
 class ModelMetadata {
     @Attribute(.unique)
-    var name: String
+    var name: String = ""
     var fields: [String: String] = [:]
     var lookupFields: [String] = []
 
@@ -48,7 +48,7 @@ class ModelData {
     var keys = [LookupKeyValue]()
 
     @Attribute(.externalStorage)
-    var json: String
+    var json: String = ""
     
     init(keys: [LookupKeyValue], json: String) {
         self.keys = keys
@@ -62,8 +62,8 @@ class ModelData {
 class LookupKeyValue {
     #Index<LookupKeyValue>([\.key], [\.value])
 
-    var key: String
-    var value: String
+    var key: String = ""
+    var value: String = ""
     var model: ModelData?
 
     init(key: String, value: String) {
