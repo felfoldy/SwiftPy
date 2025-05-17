@@ -8,15 +8,7 @@
 import pocketpy
 import SwiftUI
 
-enum ContentModel: Hashable, Identifiable {
-    case vstack([ContentModel])
-    case text(String)
-    case empty
-    
-    var id: Self { self }
-}
-
-@available(macOS 14.0, *)
+@available(macOS 14.4, iOS 17.4, *)
 @MainActor
 @Observable
 @Scriptable("_View")
@@ -32,7 +24,7 @@ class PythonView {
             for view in _subviews {
                 view._parent = self
             }
-            
+
             if let ref = _pythonCache.reference {
                 try? Self._createBody(content: ref)
             }
@@ -47,17 +39,31 @@ class PythonView {
     
     static func _createBody(content: View) throws {
         let view = try PythonView.cast(content)
+        let models = view._subviews.compactMap(\.model)
         
         switch view.contentType {
         case "VStack":
-            let models = view._subviews.compactMap(\.model)
             view.model = .vstack(models)
+            
+        case "ScrollView":
+            view.model = .scrollView(models)
+            
+        case "Table":
+            let columnsRef = try content.attribute("columns")?.toStack
+            let columns = try [String].cast(columnsRef?.reference)
+            
+            let rowsRef = try content.attribute("rows")?.toStack
+            let rows = try [[String: String]].cast(rowsRef?.reference)
+                .map { ContentModel.TableRow(values: $0) }
+            
+            view.model = .table(keys: columns, rows: rows)
 
         case "Text":
             let textRef = try content.attribute("text")?.toStack
             let text = try String.cast(textRef?.reference)
 
             view.model = .text(text)
+
         default:
             view.model = .empty
         }
@@ -69,7 +75,7 @@ class PythonView {
 }
 
 @MainActor
-@available(macOS 14.0, *)
+@available(macOS 14.4, iOS 17.4, *)
 @Observable
 @Scriptable("Window")
 class PythonWindow {
@@ -81,9 +87,7 @@ class PythonWindow {
     
     @ViewBuilder
     internal func makeView() -> some SwiftUI.View {
-        if let view = view?.model?.makeView() {
-            view
-        }
+        view?.model?.body
     }
     
     func open() {
@@ -91,8 +95,8 @@ class PythonWindow {
     }
 }
 
-@available(macOS 14.0, *)
-public struct ScriptableWindow: Scene {
+@available(macOS 14.4, iOS 17.4, *)
+public struct PythonWindows: Scene {
     let name: String
     var content = PythonWindow()
 
@@ -115,26 +119,7 @@ public struct ScriptableWindow: Scene {
     }
 }
 
-extension ContentModel {
-    @ViewBuilder
-    func makeView() -> some View {
-        switch self {
-        case let .vstack(contents):
-            VStack {
-                ForEach(contents) { content in
-                    AnyView(content.makeView())
-                }
-            }
-        case let .text(text):
-            Text(text)
-
-        case .empty:
-            EmptyView()
-        }
-    }
-}
-
-@available(macOS 14.0, *)
+@available(macOS 14.4, *)
 @MainActor
 extension PyType {
     static let `View` = PythonView.pyType

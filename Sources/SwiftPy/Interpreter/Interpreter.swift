@@ -65,6 +65,7 @@ public final class Interpreter {
         if #available(macOS 15, iOS 18, *) {
             Interpreter.bindModule("views", [
                 PythonView.self,
+                PythonWindow.self,
             ])
             
             hookStoragesModule()
