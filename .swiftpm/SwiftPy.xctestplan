@@ -12,7 +12,13 @@
 
   },
   "testTargets" : [
-
+    {
+      "target" : {
+        "containerPath" : "container:",
+        "identifier" : "SwiftPyTests",
+        "name" : "SwiftPyTests"
+      }
+    }
   ],
   "version" : 1
 }

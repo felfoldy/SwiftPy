@@ -63,6 +63,10 @@ public final class Interpreter {
         py_deldict(builtins, py_name("exit"))
         
         if #available(macOS 15, iOS 18, *) {
+            Interpreter.bindModule("views", [
+                PythonView.self,
+            ])
+            
             hookStoragesModule()
         }
     }
