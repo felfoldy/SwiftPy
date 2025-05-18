@@ -14,9 +14,8 @@ import SwiftUI
 @Scriptable("_View")
 class PythonView {
     typealias View = PyAPI.Reference
-    
-    private let contentType: String
 
+    var _isConfigured: Bool = false
     weak var _parent: PythonView?
     var _modifiedView: PythonView?
 
@@ -32,60 +31,37 @@ class PythonView {
         }
     }
 
-    internal var model: ContentModel?
+    internal let contentType: String
+    internal var model: ViewSyntax?
     
     init(contentType: String) {
         self.contentType = contentType
     }
     
-    static func _createBody(content: View) throws {
-        let view = try PythonView.cast(content)
-        let models = view._subviews.compactMap(\.model)
-        
-        switch view.contentType {
-        case "VStack":
-            view.model = .vstack(models)
-            
-        case "ScrollView":
-            view.model = .scrollView(models)
-            
-        case "Table":
-            let columnsRef = try content.attribute("columns")?.toStack
-            let columns = try [String].cast(columnsRef?.reference)
-            
-            let rowsRef = try content.attribute("rows")?.toStack
-            let rows = try [[String: String]].cast(rowsRef?.reference)
-                .map { ContentModel.TableRow(values: $0) }
-            
-            view.model = .table(keys: columns, rows: rows)
-        
-        case "SystemImage":
-            let systemNameRef = try content.self.attribute("name")?.toStack
-            let systemName = try String.cast(systemNameRef?.reference)
-
-            view.model = .systemImage(systemName)
-            
-        case "FontModifier":
-            let fontRef = try content.attribute("font")?.toStack
-            let fontName = try String.cast(fontRef?.reference)
-            
-            if let modified = view._modifiedView?.model {
-                view.model = .fontModifier(fontName, content: modified)
-            }
-
-        case "Text":
-            let textRef = try content.attribute("text")?.toStack
-            let text = try String.cast(textRef?.reference)
-
-            view.model = .text(text)
-
-        default:
-            view.model = .empty
+    func _config() {
+        _isConfigured = true
+        if let ref = _pythonCache.reference {
+            try? Self._createBody(content: ref)
         }
+    }
+    
+    static func _createBody(content: View) throws {
+        try generateModel(content: content)
     }
     
     static func _makeId() -> String {
         UUID().uuidString
+    }
+}
+
+@available(macOS 14.4, iOS 17.4, *)
+extension PythonView: @preconcurrency CustomStringConvertible {
+    var description: String {
+        if let model {
+            return String(describing: model.body)
+        } else {
+            return "Uninitialized View"
+        }
     }
 }
 

@@ -4,20 +4,10 @@ class View(_View):
         self._states = {}
         
     def update(self):
-        _View._create_body(self)
-        if self._parent:
-            _View._create_body(self._parent)
-            
-    def font(self, font: str) -> View:
-        view = FontModifier(self)
-        view.font = font
-        return view
-
-
-class ViewModifier(View):
-    def __init__(self, content: View):
-        super().__init__()
-        self._modified_view = content
+        if self._is_configured:
+            _View._create_body(self)
+            if self._parent:
+                _View._create_body(self._parent)
 
 
 def state():
@@ -53,6 +43,8 @@ def view_init(cls: type):
             else:
                 raise TypeError(f"{cls.__name__} missing required argument {field!r}")
         
+        self._config()
+        
     cls.__init__ = _view_init
     return cls
 
@@ -81,6 +73,7 @@ class Table(View):
             { key: str(value) for key, value in row.items() }
             for row in rows
         ]
+        self._config()
 
 
 # MARK: - Containers
@@ -90,6 +83,7 @@ class ContainerView(View):
         super().__init__()
         if views:
             self._subviews = list(views)
+        self._config()
 
     def __call__(self, *views: View):
         self._subviews = list(views)
@@ -111,8 +105,51 @@ class ScrollView(ContainerView):
 
 # MARK: - ViewModifiers
 
+class ViewModifier(View):
+    @classmethod
+    def make(cls: type):
+        def _method(self, *args, **kwargs):
+            annotations = cls.__annotations__
+            fields = list(annotations.keys())
+            instance = cls()
+            instance._modified_view = self
+            
+            i = 0
+            for field in fields:
+                if field in kwargs:
+                    setattr(instance, field, kwargs.pop(field))
+                elif i < len(args):
+                    setattr(instance, field, args[i])
+                    i += 1
+                else:
+                    raise TypeError(f"{mod_cls.__name__} missing required argument {field!r}")
+            
+            instance._config()
+            return instance
+        return _method
+
+    @property
+    def content(self) -> View:
+        self._modified_view
+
+
 class Font:
+    large_title = 'large_title'
     title = 'title'
+    title2 = 'title2'
+    title3 = 'title3'
+    headline = 'headline'
+    subheadline = 'subheadline'
+    body = 'body'
+    callout = 'callout'
+    footnote = 'footnote'
+    caption = 'caption'
+    caption2 = 'caption2'
+    body = 'body'
+
 
 class FontModifier(ViewModifier):
     font: str = state()
+
+
+View.font = FontModifier.make()
