@@ -7,123 +7,135 @@
 
 import SwiftUI
 
-@available(macOS 14.4, iOS 17.4, *)
-indirect enum ViewSyntax: Hashable, Identifiable {
-    case vstack([ViewSyntax])
-    case scrollView([ViewSyntax])
-    case table(keys: [String], rows: [TableRow])
-    case systemImage(String)
-    case text(String)
-    case fontModifier(String, content: ViewSyntax)
-    case empty
-    
-    var id: Self { self }
-}
-
-@available(macOS 14.4, iOS 17.4, *)
 @MainActor
-extension ViewSyntax: View {
+@available(macOS 14.4, iOS 17.4, *)
+public struct ViewSyntaxBuilder {
+    static var resolver: [String: any ViewSyntax.Type] = [
+        "Text": TextSyntax.self,
+        "SystemImage": SystemImageSyntax.self,
+        "FontModifier": FontModifierSyntax.self,
+        "VStack": VStackSyntax.self,
+        "ScrollView": ScrollViewSyntax.self,
+        "Table": TableSyntax.self,
+    ]
+}
+
+public protocol ViewSyntaxBase: Hashable, Identifiable, Equatable, View, Sendable {}
+
+@available(macOS 14.4, iOS 17.4, *)
+extension ViewSyntaxBase {
+    nonisolated public var id: Self { self }
+}
+
+@available(macOS 14.4, iOS 17.4, *)
+public protocol ViewSyntax: ViewSyntaxBase {
+    static func build(view: PyAPI.Reference,
+                      context: PythonViewContext) throws -> Self
+}
+
+@available(macOS 14.4, iOS 17.4, *)
+public struct AnyPythonViewSyntax: ViewSyntaxBase, @preconcurrency CustomStringConvertible {
+    let syntax: any ViewSyntax
+    
+    public var body: some View {
+        AnyView(syntax)
+    }
+    
+    public var description: String {
+        String(describing: syntax)
+    }
+    
+    nonisolated public static func ==(
+        lhs: AnyPythonViewSyntax,
+        rhs: AnyPythonViewSyntax
+    ) -> Bool {
+        lhs.hashValue == rhs.hashValue
+    }
+    
+    nonisolated public func hash(into hasher: inout Hasher) {
+        hasher.combine(syntax)
+    }
+}
+
+@available(macOS 14.4, iOS 17.4, *)
+struct VStackSyntax: ViewSyntax {
+    let contents: [AnyPythonViewSyntax]
+    
     var body: some View {
-        switch self {
-        case let .vstack(contents):
-            VStack { subviews(contents) }
-            
-        case let .scrollView(contents):
-            ScrollView { subviews(contents) }
-            
-        case let .table(keys, rows):
-            Table(rows) {
-                TableColumnForEach(keys, id: \.self) { key in
-                    TableColumn(key) { row in
-                        if let value = row.values[keys[0]] {
-                            Text(value)
-                        }
-                    }
-                }
+        VStack {
+            ForEach(contents) { content in
+                content
             }
-            
-        case let .text(text):
-            Text(text)
-            
-        case let .fontModifier(styleName, content):
-            AnyView(content.body)
-                .font(.system(.textStyle(styleName)))
-            
-        case let .systemImage(name):
-            Image(systemName: name)
-            
-        case .empty:
-            EmptyView()
         }
     }
     
-    func subviews(_ contents: [ViewSyntax]) -> some View {
-        ForEach(contents) { content in
-            AnyView(content.body)
-        }
+    static func build(view: PyAPI.Reference, context: PythonViewContext) throws -> VStackSyntax {
+        VStackSyntax(
+            contents: context.subviews
+                .map(AnyPythonViewSyntax.init)
+        )
     }
 }
 
 @available(macOS 14.4, iOS 17.4, *)
-extension ViewSyntax {
-    struct TableRow: Hashable, Identifiable {
-        let id = UUID()
-        let values: [String: String]
-    }
-}
-
-@available(macOS 14.4, iOS 17.4, *)
-extension PythonView {
-    static func generateModel(content: View) throws {
-        let view = try PythonView.cast(content)
-        let models = view._subviews.compactMap(\.model)
-        
-        switch view.contentType {
-        case "VStack":
-            view.model = .vstack(models)
-            
-        case "ScrollView":
-            view.model = .scrollView(models)
-            
-        case "Table":
-            let columnsRef = try content.attribute("columns")?.toStack
-            let columns = try [String].cast(columnsRef?.reference)
-            
-            let rowsRef = try content.attribute("rows")?.toStack
-            let rows = try [[String: String]].cast(rowsRef?.reference)
-                .map { ViewSyntax.TableRow(values: $0) }
-            
-            view.model = .table(keys: columns, rows: rows)
-            
-        case "SystemImage":
-            let systemNameRef = try content.self.attribute("name")?.toStack
-            let systemName = try String.cast(systemNameRef?.reference)
-            
-            view.model = .systemImage(systemName)
-            
-        case "FontModifier":
-            let fontRef = try content.attribute("font")?.toStack
-            let fontName = try String.cast(fontRef?.reference)
-            
-            if let modified = view._modifiedView?.model {
-                view.model = .fontModifier(fontName, content: modified)
+struct ScrollViewSyntax: ViewSyntax {
+    let contents: [AnyPythonViewSyntax]
+    
+    var body: some View {
+        ScrollView {
+            ForEach(contents) { content in
+                content
             }
-            
-        case "Text":
-            let textRef = try content.attribute("text")?.toStack
-            let text = try String.cast(textRef?.reference)
-            
-            view.model = .text(text)
-            
-        default:
-            view.model = .empty
         }
+    }
+    
+    static func build(view: PyAPI.Reference, context: PythonViewContext) throws -> ScrollViewSyntax {
+        ScrollViewSyntax(contents: context.anySubviews())
     }
 }
 
-extension Font.TextStyle {
-    static func textStyle(_ name: String) -> Font.TextStyle {
-        switch name {
+@available(macOS 14.4, iOS 17.4, *)
+struct TextSyntax: ViewSyntax {
+    let text: String
+    
+    var body: some View {
+        Text(text)
+    }
+    
+    static func build(view: PyAPI.Reference, context: PythonViewContext) throws -> TextSyntax {
+        try TextSyntax(text: view.castAttribute("text"))
+    }
+}
+
+@available(macOS 14.4, iOS 17.4, *)
+struct SystemImageSyntax: ViewSyntax {
+    let name: String
+    
+    var body: some View {
+        Image(systemName: name)
+    }
+    
+    static func build(view: PyAPI.Reference, context: PythonViewContext) throws -> SystemImageSyntax {
+        try SystemImageSyntax(name: view.castAttribute("name"))
+    }
+}
+
+@available(macOS 14.4, iOS 17.4, *)
+struct FontModifierSyntax: ViewSyntax {
+    let content: AnyPythonViewSyntax
+    let style: String
+
+    var body: some View {
+        content
+            .font(.system(
+                textStyle(),
+                design: .default,
+                weight: .none
+            ))
+    }
+    
+    func textStyle() -> Font.TextStyle {
+        switch style {
         case "large_title": .largeTitle
         case "title": .title
         case "title2": .title2
@@ -138,4 +150,45 @@ extension Font.TextStyle {
         default: .body
         }
     }
+    
+    static func build(view: PyAPI.Reference, context: PythonViewContext) throws -> FontModifierSyntax {
+        try FontModifierSyntax(
+            content: context.anyContent(),
+            style: view.castAttribute("font")
+        )
+    }
+}
+
+@available(macOS 14.4, iOS 17.4, *)
+struct TableSyntax: ViewSyntax {
+    struct TableRow: Hashable, Identifiable {
+        let id = UUID()
+        let values: [String: String]
+    }
+    
+    let columns: [String]
+    let rows: [TableRow]
+    
+    var body: some View {
+        Table(rows) {
+            TableColumnForEach(columns) { column in
+                TableColumn(column) { row in
+                    Text(row.values[column] ?? "")
+                }
+            }
+        }
+    }
+    
+    static func build(view: PyAPI.Reference, context: PythonViewContext) throws -> TableSyntax {
+        let rows: [[String: String]] = try view.castAttribute("rows")
+
+        return try TableSyntax(
+            columns: view.castAttribute("columns"),
+            rows: rows.map { TableRow(values: $0) }
+        )
+    }
+}
+
+extension String: @retroactive Identifiable {
+    public var id: Self { self }
 }

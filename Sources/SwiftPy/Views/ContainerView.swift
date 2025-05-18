@@ -9,6 +9,23 @@ import pocketpy
 import SwiftUI
 
 @available(macOS 14.4, iOS 17.4, *)
+public struct PythonViewContext {
+    var content: (any ViewSyntax)?
+    var subviews: [any ViewSyntax]
+    
+    public func anyContent() throws -> AnyPythonViewSyntax {
+        guard let content else {
+            throw PythonError.RuntimeError("Modified content is missing")
+        }
+        return AnyPythonViewSyntax(syntax: content)
+    }
+    
+    public func anySubviews() -> [AnyPythonViewSyntax] {
+        subviews.map(AnyPythonViewSyntax.init)
+    }
+}
+
+@available(macOS 14.4, iOS 17.4, *)
 @MainActor
 @Observable
 @Scriptable("_View")
@@ -26,13 +43,13 @@ class PythonView {
             }
 
             if let ref = _pythonCache.reference {
-                try? Self._createBody(content: ref)
+                try? Self._buildSyntax(view: ref)
             }
         }
     }
 
     internal let contentType: String
-    internal var model: ViewSyntax?
+    internal var syntax: (any ViewSyntax)?
     
     init(contentType: String) {
         self.contentType = contentType
@@ -41,12 +58,25 @@ class PythonView {
     func _config() {
         _isConfigured = true
         if let ref = _pythonCache.reference {
-            try? Self._createBody(content: ref)
+            try? Self._buildSyntax(view: ref)
         }
     }
     
-    static func _createBody(content: View) throws {
-        try generateModel(content: content)
+    static func _buildSyntax(view: View) throws {
+        let pythonView = try PythonView.cast(view)
+        
+        log.notice("build \(pythonView.contentType)")
+        
+        let syntax = ViewSyntaxBuilder
+            .resolver[pythonView.contentType]
+        
+        let context = PythonViewContext(
+            content: pythonView._modifiedView?.syntax,
+            subviews: pythonView._subviews.compactMap(\.syntax)
+        )
+        
+        pythonView.syntax = try syntax?
+            .build(view: view, context: context)
     }
     
     static func _makeId() -> String {
@@ -57,8 +87,8 @@ class PythonView {
 @available(macOS 14.4, iOS 17.4, *)
 extension PythonView: @preconcurrency CustomStringConvertible {
     var description: String {
-        if let model {
-            return String(describing: model.body)
+        if let syntax {
+            return String(describing: syntax)
         } else {
             return "Uninitialized View"
         }
@@ -78,7 +108,11 @@ class PythonWindow {
     
     @ViewBuilder
     internal func makeView() -> some SwiftUI.View {
-        view?.model?.body
+        if let model = view?.syntax {
+            AnyView(model)
+        } else {
+            EmptyView()
+        }
     }
     
     func open() {

@@ -311,6 +311,12 @@ public extension PyAPI.Reference {
         return PyAPI.returnValue
     }
     
+    @inlinable
+    func castAttribute<Result: PythonConvertible>(_ name: String) throws -> Result {
+        let ref = try attribute(name)?.toStack
+        return try Result.cast(ref?.reference)
+    }
+    
     /// Pushes `self` onto the Python stack and passes it as a temporary reference.
     /// - Parameter block: Closure receiving the temporary `PyAPI.Reference?`.
     /// - Throws: Errors thrown within the closure.

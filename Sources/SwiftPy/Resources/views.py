@@ -5,9 +5,9 @@ class View(_View):
         
     def update(self):
         if self._is_configured:
-            _View._create_body(self)
+            _View._build_syntax(self)
             if self._parent:
-                _View._create_body(self._parent)
+                _View._build_syntax(self._parent)
 
 
 def state():
@@ -62,12 +62,14 @@ class SystemImage(View):
 
 
 class Table(View):
+    columns: list[str] = state()
     rows: list[dict[str, str]] = state()
 
     def __init__(self, rows: list[dict[str, Any]]):
-        super().__init__()
         if not rows:
             raise ValueError("Table requires at least one row of data")
+    
+        super().__init__()
         self.columns = list(rows[0].keys())
         self.rows = [
             { key: str(value) for key, value in row.items() }
