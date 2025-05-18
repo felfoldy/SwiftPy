@@ -135,23 +135,49 @@ class ViewModifier(View):
         self._modified_view
 
 
-class Font:
-    large_title = 'large_title'
-    title = 'title'
-    title2 = 'title2'
-    title3 = 'title3'
-    headline = 'headline'
-    subheadline = 'subheadline'
-    body = 'body'
-    callout = 'callout'
-    footnote = 'footnote'
-    caption = 'caption'
-    caption2 = 'caption2'
-    body = 'body'
-
-
 class FontModifier(ViewModifier):
     font: str = state()
 
 
+class ForegroundModifier(ViewModifier):
+    style: str = state()
+
+
 View.font = FontModifier.make()
+View.foreground = ForegroundModifier.make()
+
+
+# MARK: - Types
+
+class Font:
+    LARGE_TITLE = 'large_title'
+    TITLE = 'title'
+    TITLE2 = 'title2'
+    TITLE3 = 'title3'
+    HEADLINE = 'headline'
+    SUBHEADLINE = 'subheadline'
+    BODY = 'body'
+    CALLOUT = 'callout'
+    FOOTNOTE = 'footnote'
+    CAPTION = 'caption'
+    CAPTION2 = 'caption2'
+
+
+class Color:
+    RED     = 'red'
+    ORANGE  = 'orange'
+    YELLOW  = 'yellow'
+    GREEN   = 'green'
+    MINT    = 'mint'
+    TEAL    = 'teal'
+    CYAN    = 'cyan'
+    BLUE    = 'blue'
+    INDIGO  = 'indigo'
+    PURPLE  = 'purple'
+    PINK    = 'pink'
+    BROWN   = 'brown'
+    WHITE   = 'white'
+    GRAY    = 'gray'
+    BLACK   = 'black'
+    CLEAR   = 'clear'
+    
