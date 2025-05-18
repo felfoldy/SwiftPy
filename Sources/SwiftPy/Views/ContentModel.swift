@@ -9,11 +9,13 @@ import SwiftUI
 
 
 @available(macOS 14.4, iOS 17.4, *)
-enum ContentModel: Hashable, Identifiable {
+indirect enum ContentModel: Hashable, Identifiable {
     case vstack([ContentModel])
     case scrollView([ContentModel])
     case table(keys: [String], rows: [TableRow])
+    case systemImage(String)
     case text(String)
+    case fontModifier(String, content: ContentModel)
     case empty
     
     var id: Self { self }
@@ -43,6 +45,13 @@ extension ContentModel: View {
             
         case let .text(text):
             Text(text)
+            
+        case let .fontModifier(_, content):
+            AnyView(content.body)
+                .font(.title)
+
+        case let .systemImage(name):
+            Image(systemName: name)
 
         case .empty:
             EmptyView()

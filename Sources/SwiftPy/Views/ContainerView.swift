@@ -18,6 +18,7 @@ class PythonView {
     private let contentType: String
 
     weak var _parent: PythonView?
+    var _modifiedView: PythonView?
 
     var _subviews: [PythonView] = [] {
         didSet {
@@ -57,6 +58,20 @@ class PythonView {
                 .map { ContentModel.TableRow(values: $0) }
             
             view.model = .table(keys: columns, rows: rows)
+        
+        case "SystemImage":
+            let systemNameRef = try content.self.attribute("name")?.toStack
+            let systemName = try String.cast(systemNameRef?.reference)
+
+            view.model = .systemImage(systemName)
+            
+        case "FontModifier":
+            let fontRef = try content.attribute("font")?.toStack
+            let fontName = try String.cast(fontRef?.reference)
+            
+            if let modified = view._modifiedView?.model {
+                view.model = .fontModifier(fontName, content: modified)
+            }
 
         case "Text":
             let textRef = try content.attribute("text")?.toStack
