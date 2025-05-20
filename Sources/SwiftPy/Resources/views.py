@@ -143,8 +143,12 @@ class ForegroundModifier(ViewModifier):
     style: str = state()
 
 
+class TitleModifier(ViewModifier):
+    title: str = state()
+
 View.font = FontModifier.make()
 View.foreground = ForegroundModifier.make()
+View.title = TitleModifier.make()
 
 
 # MARK: - Types

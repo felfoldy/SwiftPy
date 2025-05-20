@@ -20,6 +20,7 @@ public struct ViewSyntaxBuilder {
         // Modifiers
         "FontModifier": FontModifierSyntax.self,
         "ForegroundModifier": ForegroundModifierSyntax.self,
+        "TitleModifier": TitleModifierSyntax.self,
     ]
 }
 

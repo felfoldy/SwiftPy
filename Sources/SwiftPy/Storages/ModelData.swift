@@ -149,12 +149,12 @@ class ModelContainer: PythonBindable {
         try PyAPI.call(makedata?.reference)
     }
     
-    func inspect(_ type: object) throws -> object {
+    func inspect(_ type: object) throws {
         let typeObject = type
         let typeName = py_totype(type).name
         let modelsRef = try context.fetch(.models(name: typeName)).toStack
-        let makeTable = try typeObject.attribute("_maketable")
-        return try PyAPI.call(makeTable, modelsRef.reference)
+        let makeTable = try typeObject.attribute("_inspect")
+        try PyAPI.call(makeTable, modelsRef.reference)
     }
     
     static func inMemory(inMemory: Bool) {

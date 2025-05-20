@@ -1,5 +1,5 @@
 import json
-from views import Table
+from views import Window, Table
 
 def _model__init__(self, *args, **kwargs):
     cls = type(self)
@@ -59,7 +59,9 @@ def _model_makemodels(cls, models: list[ModelData]):
     return elements
     
 @classmethod
-def _model_maketable(cls, models: list[ModelData]) -> Table:
+def _model_inspect(cls, models: list[ModelData]):
+    window = Window(f"Table{cls.__name__}")
+
     rows = []
     for model in models:
         model_d = json.loads(model.json)
@@ -68,7 +70,8 @@ def _model_maketable(cls, models: list[ModelData]) -> Table:
         row.update(str_row)
         rows.append(row)
     
-    return Table(rows)
+    window.view = Table(rows).title(cls.__name__)
+    window.open()
 
 
 def _make_property(field: str, all_fields: list[str]):
@@ -87,7 +90,7 @@ def model(cls: type):
     cls.__repr__ = _model__repr__
     cls._makedata = _model_makedata
     cls._makemodels = _model_makemodels
-    cls._maketable = _model_maketable
+    cls._inspect = _model_inspect
     
     fields = cls.__annotations__.keys()
     cls_d = cls.__dict__
