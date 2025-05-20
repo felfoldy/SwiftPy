@@ -50,18 +50,26 @@ def _model__repr__(self) -> str:
     return f"{type(self).__name__}({', '.join(args)})"
     
 @classmethod
-def _model_fromdata(cls, data: ModelData):
-    args = json.loads(data.json)
-    return cls(**args, _data=data)
-    
-@classmethod
-def _model_make_models(cls, models: list[ModelData]):
+def _model_makemodels(cls, models: list[ModelData]):
     elements = []
     for model in models:
         args = json.loads(model.json)
         element = cls(**args, _data=model)
         elements.append(element)
     return elements
+    
+@classmethod
+def _model_maketable(cls, models: list[ModelData]) -> Table:
+    rows = []
+    for model in models:
+        model_d = json.loads(model.json)
+        row = { "id": str(model.persistent_id) }
+        str_row = {k: str(v) for k, v in model_d.items()}
+        row.update(str_row)
+        rows.append(row)
+    
+    return Table(rows)
+
 
 def _make_property(field: str, all_fields: list[str]):
     def fget(self):
@@ -77,9 +85,9 @@ def model(cls: type):
     assert type(cls) is type
     cls.__init__ = _model__init__
     cls.__repr__ = _model__repr__
-    cls._fromdata = _model_fromdata
     cls._makedata = _model_makedata
-    cls._make_models = _model_make_models
+    cls._makemodels = _model_makemodels
+    cls._maketable = _model_maketable
     
     fields = cls.__annotations__.keys()
     cls_d = cls.__dict__
@@ -95,19 +103,3 @@ def model(cls: type):
         setattr(cls, field, _make_property(field, fields))
     
     return cls
-
-def create_table(models: list) -> Table:
-    cls = type(models[0])
-    fields = cls.__annotations__.keys()
-
-    rows = []
-
-    for model in models:
-        obj_d = model._fields
-        row = {}
-
-        for field in fields:
-            row[field] = f"{obj_d[field]}"
-        rows.append(row)
-    
-    return Table(rows)

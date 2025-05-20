@@ -49,6 +49,8 @@ class ModelData {
     @Attribute(.externalStorage)
     var json: String = ""
 
+    var persistentId: Int?
+
     init(keys: [LookupKeyValue], json: String) {
         self.keys = keys
         self.json = json
@@ -115,38 +117,26 @@ class ModelContainer: PythonBindable {
     func insert(model: object) throws {
         // TODO: Update metadata if needed.
         let dataRef = try model.attribute("_data")?.toStack
-        guard let modelData = ModelData(dataRef?.reference) else {
+        guard let modelData = ModelData(dataRef?.reference),
+              let keys = modelData.keys,
+              let name = keys.first(where: { $0.key == "__name__" })?.value else {
             throw PythonError.ValueError("Invalid model data")
         }
+        
+        let count = try context.fetchCount(.models(name: name))
+        modelData.persistentId = count
+        
         context.insert(modelData)
     }
     
     func fetch(_ type: object) throws -> object {
         let typeObject = type
         let typeName = py_totype(type).name
-        let descriptor = FetchDescriptor<ModelData>(
-            predicate: #Predicate { model in
-                model.keys.flatMap { keys in
-                    keys.contains {
-                        $0.key == "__name__" && $0.value == typeName
-                    }
-                } ?? true
-            }
-        )
-        
-        let modelsRef = try context.fetch(descriptor).toStack
-        let makeModels = try typeObject.attribute("_make_models")
+        let modelsRef = try context.fetch(.models(name: typeName)).toStack
+        let makeModels = try typeObject.attribute("_makemodels")
         return try PyAPI.call(makeModels, modelsRef.reference)
     }
-    
-//    func inspect(_ type: object) throws -> object {
-//        let resultsRef = try fetch(type).toStack
-//        
-//        let storages = Interpreter.module("storages")
-//        let createTable = storages?["create_table"]
-//        return try PyAPI.call(createTable, resultsRef.reference)
-//    }
-    
+
     func delete(model: object) throws {
         let dataRef = try model.attribute("_data")?.toStack
         guard let modelData = ModelData(dataRef?.reference) else {
@@ -154,13 +144,37 @@ class ModelContainer: PythonBindable {
         }
         context.delete(modelData)
         
+        // Recreate the underlying model data for the object so it can be inserted again.
         let makedata = try model.attribute("_makedata")?.toStack
-        
         try PyAPI.call(makedata?.reference)
+    }
+    
+    func inspect(_ type: object) throws -> object {
+        let typeObject = type
+        let typeName = py_totype(type).name
+        let modelsRef = try context.fetch(.models(name: typeName)).toStack
+        let makeTable = try typeObject.attribute("_maketable")
+        return try PyAPI.call(makeTable, modelsRef.reference)
     }
     
     static func inMemory(inMemory: Bool) {
         inMemoryOnly = inMemory
+    }
+}
+
+@available(macOS 15, iOS 18, *)
+extension FetchDescriptor<ModelData> {
+    static func models(name: String) -> Self {
+        FetchDescriptor(
+            predicate: #Predicate { model in
+                model.keys.flatMap { keys in
+                    keys.contains {
+                        $0.key == "__name__" && $0.value == name
+                    }
+                } ?? true
+            },
+            sortBy: [SortDescriptor(\.persistentId)]
+        )
     }
 }
 #endif

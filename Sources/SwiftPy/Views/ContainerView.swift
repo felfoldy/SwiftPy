@@ -65,8 +65,6 @@ class PythonView {
     static func _buildSyntax(view: View) throws {
         let pythonView = try PythonView.cast(view)
         
-        log.notice("build \(pythonView.contentType)")
-        
         let syntax = ViewSyntaxBuilder
             .resolver[pythonView.contentType]
         
