@@ -1,4 +1,5 @@
 import json
+from views import Table
 
 def _model__init__(self, *args, **kwargs):
     cls = type(self)
@@ -52,6 +53,15 @@ def _model__repr__(self) -> str:
 def _model_fromdata(cls, data: ModelData):
     args = json.loads(data.json)
     return cls(**args, _data=data)
+    
+@classmethod
+def _model_make_models(cls, models: list[ModelData]):
+    elements = []
+    for model in models:
+        args = json.loads(model.json)
+        element = cls(**args, _data=model)
+        elements.append(element)
+    return elements
 
 def _make_property(field: str, all_fields: list[str]):
     def fget(self):
@@ -69,6 +79,7 @@ def model(cls: type):
     cls.__repr__ = _model__repr__
     cls._fromdata = _model_fromdata
     cls._makedata = _model_makedata
+    cls._make_models = _model_make_models
     
     fields = cls.__annotations__.keys()
     cls_d = cls.__dict__
@@ -84,3 +95,19 @@ def model(cls: type):
         setattr(cls, field, _make_property(field, fields))
     
     return cls
+
+def create_table(models: list) -> Table:
+    cls = type(models[0])
+    fields = cls.__annotations__.keys()
+
+    rows = []
+
+    for model in models:
+        obj_d = model._fields
+        row = {}
+
+        for field in fields:
+            row[field] = f"{obj_d[field]}"
+        rows.append(row)
+    
+    return Table(rows)

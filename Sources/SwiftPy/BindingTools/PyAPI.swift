@@ -98,7 +98,7 @@ public extension PyAPI {
     ///   - argument: Argument to pass.
     /// - Returns: Return value from the function.
     @inlinable @discardableResult
-    static func call(_ function: PyAPI.Reference?, _ argument: PyAPI.Reference?) throws -> PyAPI.Reference? {
+    static func call(_ function: PyAPI.Reference?, _ argument: PyAPI.Reference?) throws -> PyAPI.Reference {
         try Interpreter.printErrors {
             py_call(function, 1, argument)
         }

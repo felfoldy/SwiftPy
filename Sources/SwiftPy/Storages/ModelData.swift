@@ -121,7 +121,7 @@ class ModelContainer: PythonBindable {
         context.insert(modelData)
     }
     
-    func fetch(_ type: object) throws -> [object] {
+    func fetch(_ type: object) throws -> object {
         let typeObject = type
         let typeName = py_totype(type).name
         let descriptor = FetchDescriptor<ModelData>(
@@ -134,23 +134,18 @@ class ModelContainer: PythonBindable {
             }
         )
         
-        let models = try context.fetch(descriptor)
-        let fromDataRef = try typeObject.attribute("_fromdata")?.toStack
-        
-        var elements = [StackReference]()
-        
-        for model in models {
-            let modelRef = model.toStack
-            
-            try Interpreter.printErrors {
-                py_call(fromDataRef?.reference, 1, modelRef.reference)
-            }
-            
-            elements.append(PyAPI.returnValue.toStack)
-        }
-
-        return elements.compactMap(\.reference)
+        let modelsRef = try context.fetch(descriptor).toStack
+        let makeModels = try typeObject.attribute("_make_models")
+        return try PyAPI.call(makeModels, modelsRef.reference)
     }
+    
+//    func inspect(_ type: object) throws -> object {
+//        let resultsRef = try fetch(type).toStack
+//        
+//        let storages = Interpreter.module("storages")
+//        let createTable = storages?["create_table"]
+//        return try PyAPI.call(createTable, resultsRef.reference)
+//    }
     
     func delete(model: object) throws {
         let dataRef = try model.attribute("_data")?.toStack

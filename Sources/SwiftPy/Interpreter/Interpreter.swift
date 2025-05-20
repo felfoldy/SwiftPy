@@ -124,7 +124,7 @@ public final class Interpreter {
                 continue
             }
 
-            if !replLines.isEmpty || ":({[".contains(lastChar) {
+            if !replLines.isEmpty || ":({[".contains(lastChar) || line.first == "@" {
                 replLines.append(line)
                 continue
             }
