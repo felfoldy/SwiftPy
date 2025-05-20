@@ -10,11 +10,10 @@ import SwiftUI
 
 @available(macOS 14.4, iOS 17.4, *)
 public struct PythonViewContext {
-    var content: (any ViewSyntax)?
     var subviews: [any ViewSyntax]
     
     public func anyContent() throws -> AnyPythonViewSyntax {
-        guard let content else {
+        guard let content = subviews.first else {
             throw PythonError.RuntimeError("Modified content is missing")
         }
         return AnyPythonViewSyntax(syntax: content)
@@ -34,13 +33,14 @@ class PythonView {
 
     var _isConfigured: Bool = false
     weak var _parent: PythonView?
-    var _modifiedView: PythonView?
 
     var _subviews: [PythonView] = [] {
         didSet {
             for view in _subviews {
                 view._parent = self
             }
+
+            guard _isConfigured else { return }
 
             if let ref = _pythonCache.reference {
                 try? Self._buildSyntax(view: ref)
@@ -71,7 +71,6 @@ class PythonView {
             .resolver[pythonView.contentType]
         
         let context = PythonViewContext(
-            content: pythonView._modifiedView?.syntax,
             subviews: pythonView._subviews.compactMap(\.syntax)
         )
         

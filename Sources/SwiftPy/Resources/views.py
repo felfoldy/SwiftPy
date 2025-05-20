@@ -114,7 +114,7 @@ class ViewModifier(View):
             annotations = cls.__annotations__
             fields = list(annotations.keys())
             instance = cls()
-            instance._modified_view = self
+            instance._subviews = [self]
             
             i = 0
             for field in fields:
@@ -132,7 +132,7 @@ class ViewModifier(View):
 
     @property
     def content(self) -> View:
-        self._modified_view
+        return self._subviews[0]
 
 
 class FontModifier(ViewModifier):
