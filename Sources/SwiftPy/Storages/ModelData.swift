@@ -20,11 +20,6 @@ func hookStoragesModule() {
     ])
 }
 
-@MainActor
-extension PyAPI.Reference {
-    static let _internal = py_newmodule("_internal")!
-}
-
 // MARK: - Models
 
 @available(macOS 15, iOS 18, *)
@@ -89,6 +84,7 @@ class ModelContainer: PythonBindable {
     internal let container: SwiftData.ModelContainer
     internal let context: SwiftData.ModelContext
     internal static var inMemoryOnly: Bool = false
+    internal static var containers = [ModelContainer]()
     
     init(name: String) throws {
         let schema = Schema([ModelData.self,
@@ -112,6 +108,8 @@ class ModelContainer: PythonBindable {
         )
         
         context = container.mainContext
+        
+        ModelContainer.containers.append(self)
     }
     
     func insert(model: object) throws {
@@ -159,6 +157,12 @@ class ModelContainer: PythonBindable {
     
     static func inMemory(inMemory: Bool) {
         inMemoryOnly = inMemory
+    }
+    
+    static func updated() {
+        for container in containers where container.context.hasChanges {
+            
+        }
     }
 }
 

@@ -62,7 +62,7 @@ public final class Interpreter {
         // Remove exit, maybe do a custom action instead later?
         py_deldict(builtins, py_name("exit"))
         
-        if #available(macOS 15, iOS 18, *) {
+        if #available(macOS 15, iOS 18, visionOS 2, *) {
             Interpreter.bindModule("views", [
                 PythonView.self,
                 PythonWindow.self,

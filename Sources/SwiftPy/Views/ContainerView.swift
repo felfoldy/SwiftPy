@@ -24,7 +24,7 @@ public struct PythonViewContext {
     }
 }
 
-@available(macOS 14.4, iOS 17.4, *)
+@available(macOS 14.4, iOS 17.4, visionOS 1.1, *)
 @MainActor
 @Observable
 @Scriptable("_View")
@@ -101,10 +101,4 @@ extension PythonView: @preconcurrency CustomStringConvertible {
             return "Uninitialized View"
         }
     }
-}
-
-@available(macOS 14.4, *)
-@MainActor
-extension PyType {
-    static let `View` = PythonView.pyType
 }

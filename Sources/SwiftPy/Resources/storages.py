@@ -60,7 +60,7 @@ def _model_makemodels(cls, models: list[ModelData]):
     
 @classmethod
 def _model_inspect(cls, models: list[ModelData]):
-    window = Window(f"Table{cls.__name__}")
+    window = Window.make_if_needed(f"Table{cls.__name__}")
 
     rows = []
     for model in models:
@@ -81,6 +81,7 @@ def _make_property(field: str, all_fields: list[str]):
     def fset(self, value):
         self._fields[field] = value
         self._data.json = json.dumps(self._fields)
+        ModelContainer.updated()
 
     return property(fget, fset)
 

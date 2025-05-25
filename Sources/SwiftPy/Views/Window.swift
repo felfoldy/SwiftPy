@@ -39,6 +39,14 @@ class PythonWindow: Identifiable {
             EmptyView()
         }
     }
+    
+    static func makeIfNeeded(_ id: String) -> PythonWindow {
+        if let window = PythonWindow.windows[WindowKey(id: id)] {
+            window
+        } else {
+            PythonWindow(id: id)
+        }
+    }
 
     internal static var open: (WindowKey) -> Void = { _ in }
     internal static var windows = [WindowKey: PythonWindow]()
