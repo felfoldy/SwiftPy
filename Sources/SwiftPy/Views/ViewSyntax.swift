@@ -16,6 +16,7 @@ public struct ViewSyntaxBuilder {
         "VStack": VStackSyntax.self,
         "ScrollView": ScrollViewSyntax.self,
         "Table": TableSyntax.self,
+        "WebView": WebViewSyntax.self,
         
         // Modifiers
         "FontModifier": FontModifierSyntax.self,

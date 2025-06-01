@@ -78,6 +78,10 @@ class Table(View):
         self._config()
 
 
+@view_init
+class WebView(View):
+    url: str = state()
+
 # MARK: - Containers
 
 class ContainerView(View):

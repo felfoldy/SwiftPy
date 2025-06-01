@@ -1,5 +1,5 @@
 import json
-from views import Window, Table
+from views import Window, Table, WebView
 
 def _model__init__(self, *args, **kwargs):
     cls = type(self)
@@ -107,3 +107,8 @@ def model(cls: type):
         setattr(cls, field, _make_property(field, fields))
     
     return cls
+
+def show_tutorials():
+    window = Window.make_if_needed('storages-tutorial')
+    window.view = WebView('https://felfoldy.github.io/SwiftPy/tutorials/swiftpy/createdatamodels')
+    window.open()
