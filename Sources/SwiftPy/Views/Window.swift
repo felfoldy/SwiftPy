@@ -28,7 +28,7 @@ class PythonWindow: Identifiable {
     }
 
     func open() {
-        PythonWindow.open(id)
+        EnvironmentValues().openWindow(value: id)
     }
 
     @ViewBuilder
@@ -40,6 +40,13 @@ class PythonWindow: Identifiable {
         }
     }
     
+    static func openUrl(url: String) throws {
+        guard let url = URL(string: url) else {
+            throw PythonError.ValueError("Invalid URL: \(url)")
+        }
+        EnvironmentValues().openURL(url)
+    }
+    
     static func makeIfNeeded(_ id: String) -> PythonWindow {
         if let window = PythonWindow.windows[WindowKey(id: id)] {
             window
@@ -48,19 +55,15 @@ class PythonWindow: Identifiable {
         }
     }
 
-    internal static var open: (WindowKey) -> Void = { _ in }
     internal static var windows = [WindowKey: PythonWindow]()
 }
 
 @available(macOS 14.4, iOS 17.4, *)
 public struct PythonWindows: Scene {
-    @Environment(\.openWindow) var openWindow
     @Environment(\.dismissWindow) var dismissWindow
 
-    public init() {
-        PythonWindow.open = open(key:)
-    }
-
+    public init() {}
+    
     public var body: some Scene {
         WindowGroup(for: PythonWindow.ID.self) { $key in
             if let key {
@@ -73,9 +76,5 @@ public struct PythonWindows: Scene {
                 }
             }
         }
-    }
-    
-    func open(key: WindowKey) {
-        openWindow(value: key)
     }
 }
