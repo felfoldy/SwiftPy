@@ -46,8 +46,8 @@ class PythonWindow: Identifiable {
         }
         EnvironmentValues().openURL(url)
     }
-    
-    static func makeIfNeeded(_ id: String) -> PythonWindow {
+
+    static func create(_ id: String) -> PythonWindow {
         if let window = PythonWindow.windows[WindowKey(id: id)] {
             window
         } else {

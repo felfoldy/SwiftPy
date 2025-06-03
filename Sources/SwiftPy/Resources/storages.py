@@ -60,7 +60,7 @@ def _model_makemodels(cls, models: list[ModelData]):
     
 @classmethod
 def _model_inspect(cls, models: list[ModelData]):
-    window = Window.make_if_needed(f"Table{cls.__name__}")
+    window = Window.create(f"Table{cls.__name__}")
 
     rows = []
     for model in models:
@@ -109,6 +109,6 @@ def model(cls: type):
     return cls
 
 def show_tutorials():
-    window = Window.make_if_needed('storages-tutorial')
+    window = Window.create('storages-tutorial')
     window.view = WebView('https://felfoldy.github.io/SwiftPy/tutorials/swiftpy/createdatamodels')
     window.open()
