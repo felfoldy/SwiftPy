@@ -62,6 +62,21 @@ public final class Interpreter {
         // Remove exit, maybe do a custom action instead later?
         py_deldict(builtins, py_name("exit"))
         
+        let sys = py_getmodule("sys")
+
+        #if os(visionOS)
+        let osName = "visionos"
+        #elseif os(iOS)
+        let osName = UIDevice.current.userInterfaceIdiom == .pad ? "ipados" : "ios"
+        #elseif os(macOS)
+        let osName = "macos"
+        #else
+        let osName = "unknown"
+        #endif
+        
+        let osNameRef = osName.toStack
+        py_setattr(sys, py_name("os"), osNameRef.reference)
+
         if #available(macOS 15, iOS 18, visionOS 2, *) {
             Interpreter.bindModule("views", [
                 PythonView.self,

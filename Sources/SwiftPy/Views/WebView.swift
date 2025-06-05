@@ -20,6 +20,18 @@ struct WebView: UIViewRepresentable {
 
     func updateUIView(_ uiView: WKWebView, context: Context) {}
 }
+#elseif canImport(AppKit)
+struct WebView: NSViewRepresentable {
+    let url: URL
+    
+    func makeNSView(context: Context) -> WKWebView {
+        let view = WKWebView()
+        view.load(URLRequest(url: url))
+        return view
+    }
+    
+    func updateNSView(_ uiView: WKWebView, context: Context) {}
+}
 #endif
 
 @available(macOS 14.4, iOS 17.4, *)
