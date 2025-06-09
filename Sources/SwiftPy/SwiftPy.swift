@@ -6,7 +6,7 @@ import pocketpy
 import Foundation
 import LogTools
 
-let log = Logger(subsystem: "com.felfoldy.PythonTools", category: "Interpreter")
+let log = Logger(subsystem: "com.felfoldy.SwiftPy", category: "Interpreter")
 
 @attached(member, names: named(_pythonCache))
 @attached(extension, conformances: PythonBindable, names: named(pyType))

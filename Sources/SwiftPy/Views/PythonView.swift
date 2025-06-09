@@ -102,3 +102,35 @@ extension PythonView: @preconcurrency CustomStringConvertible {
         }
     }
 }
+
+@available(macOS 14.4, iOS 17.4, *)
+public struct PythonContainerView: View {
+    @Observable
+    @Scriptable
+    class Context {
+        typealias View = PythonView
+
+        var view: View?
+    }
+    
+    let name: String
+    @State var context = Context()
+    
+    public init(_ name: String) {
+        self.name = name
+    }
+    
+    public var body: some View {
+        Group {
+            if let view = context.view?.syntax {
+                AnyView(view)
+            }
+        }
+        .onAppear {
+            context.toPython(.main.emplace(name))
+        }
+        .onDisappear {
+            Interpreter.main.deleteAttribute(name)
+        }
+    }
+}
