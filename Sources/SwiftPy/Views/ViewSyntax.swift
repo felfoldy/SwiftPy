@@ -17,6 +17,7 @@ public struct ViewSyntaxBuilder {
         "ScrollView": ScrollViewSyntax.self,
         "Table": TableSyntax.self,
         "WebView": WebViewSyntax.self,
+        "Button": ButtonSyntax.self,
         
         // Modifiers
         "FontModifier": FontModifierSyntax.self,

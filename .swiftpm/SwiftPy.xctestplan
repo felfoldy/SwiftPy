@@ -13,6 +13,11 @@
   },
   "testTargets" : [
     {
+      "skippedTags" : {
+        "tags" : [
+          ".experimental"
+        ]
+      },
       "target" : {
         "containerPath" : "container:",
         "identifier" : "SwiftPyTests",

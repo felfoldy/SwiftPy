@@ -82,6 +82,20 @@ class Table(View):
 class WebView(View):
     url: str = state()
 
+
+class Button(View):
+    action: Callable = state()
+
+    def __init__(self, label: Any, action: Callable | None):
+        super().__init__()
+        if isinstance(label, View):
+            self._subviews = [label]
+        if isinstance(label, str):
+            self._subviews = [Text(label)]
+        self.action = action
+        self._config()
+
+
 # MARK: - Containers
 
 class ContainerView(View):
