@@ -10,11 +10,11 @@ import SwiftUI
 @available(macOS 14.4, iOS 17.4, *)
 public struct ButtonSyntax: ViewSyntax {
     let label: AnyPythonViewSyntax
-    let action: PyAPI.Reference
+    let action: () -> Void
     
     public var body: some View {
         Button {
-            _ = try? PyAPI.call(action)
+            action()
         } label: {
             label
         }
@@ -22,21 +22,21 @@ public struct ButtonSyntax: ViewSyntax {
     
     public static func build(view: PyAPI.Reference, context: PythonViewContext) throws -> ButtonSyntax {
         try ButtonSyntax(
-            label: context.anyContent(),
-            action: view.castAttribute("action")
-        )
+            label: context.anyContent()
+        ) {
+            _ = try? PyAPI.call(view.attribute("_action"))
+        }
     }
     
     nonisolated static public func ==(lhs: ButtonSyntax, rhs: ButtonSyntax) -> Bool {
         MainActor.assumeIsolated {
-            lhs.label == rhs.label && lhs.action == rhs.action
+            lhs.label == rhs.label
         }
     }
     
     nonisolated public func hash(into hasher: inout Hasher) {
         MainActor.assumeIsolated {
             hasher.combine(label)
-            hasher.combine(action)
         }
     }
 }

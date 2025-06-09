@@ -84,15 +84,13 @@ class WebView(View):
 
 
 class Button(View):
-    action: Callable = state()
-
-    def __init__(self, label: Any, action: Callable | None):
+    def __init__(self, label: Any, action: Callable):
         super().__init__()
+        self._action = action
         if isinstance(label, View):
             self._subviews = [label]
         if isinstance(label, str):
             self._subviews = [Text(label)]
-        self.action = action
         self._config()
 
 
