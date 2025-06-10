@@ -13,18 +13,18 @@ extension PyAPI.Reference {
     static let test = Interpreter.module("test") ?? .main
 }
 
+@Scriptable
+class TestClass3 {}
+
+/// Test Class 4.
+@Scriptable
+class TestClass4 {
+    /// Description.
+    func testMethod() {}
+}
+
 @MainActor
 struct BindInterfacesTests {
-    @Scriptable
-    class TestClass3 {}
-    
-    /// Test Class 4.
-    @Scriptable
-    class TestClass4 {
-        /// Description.
-        func testMethod() {}
-    }
-    
     init() {
         Interpreter.bindModule("test", [
             TestClass3.self,

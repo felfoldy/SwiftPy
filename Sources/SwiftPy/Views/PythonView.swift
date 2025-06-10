@@ -28,7 +28,7 @@ public struct PythonViewContext {
 @MainActor
 @Observable
 @Scriptable("_View")
-class PythonView {
+public class PythonView {
     typealias View = PyAPI.Reference
 
     var _isConfigured: Bool = false
@@ -94,7 +94,7 @@ class PythonView {
 
 @available(macOS 14.4, iOS 17.4, *)
 extension PythonView: @preconcurrency CustomStringConvertible {
-    var description: String {
+    public var description: String {
         if let syntax {
             return String(describing: syntax)
         } else {

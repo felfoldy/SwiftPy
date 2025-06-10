@@ -12,9 +12,11 @@ import Foundation
 
 public struct ScriptableMacro: MemberMacro {
     public static func expansion(of node: AttributeSyntax, providingMembersOf declaration: some DeclGroupSyntax, conformingTo protocols: [TypeSyntax], in context: some MacroExpansionContext) throws -> [DeclSyntax] {
-        [
-        // Add cache.
-        "var _pythonCache = PythonBindingCache()",
+        let classDecl = declaration.as(ClassDeclSyntax.self)
+        let visibility = classDecl?.modifiers.map(\.name.text).map { $0 + " " }.first { $0.contains("public") } ?? ""
+        return [
+            // Add cache.
+            "\(raw: visibility)var _pythonCache = PythonBindingCache()",
         ]
     }
 }
@@ -48,6 +50,7 @@ extension ScriptableMacro: ExtensionMacro {
         let members = declaration.memberBlock.members.map(\.decl)
         
         var classMeta = node.classDefinitions(className: className)
+        classMeta.visibility = classDecl.modifiers.map(\.name.text).map { $0 + " " }.first { $0.contains("public") } ?? ""
 
         initDeclarationVisitor(members: members, metadata: &classMeta)
         variableDeclarationVisitor(members: members, metadata: &classMeta, context: context)
@@ -56,7 +59,7 @@ extension ScriptableMacro: ExtensionMacro {
         return try [
             ExtensionDeclSyntax("extension \(raw: className)\(raw: confirmance)") {
             """
-            @MainActor static let pyType: PyType = .make(\(raw: classMeta.typeMakeArgs)) { type in
+            @MainActor \(raw: classMeta.visibility)static let pyType: PyType = .make(\(raw: classMeta.typeMakeArgs)) { type in
             \(raw: classMeta.bindings.joined(separator: "\n"))
             type.magic("__new__") { __new__($1) }
             type.magic("__repr__") { __repr__($1) }
@@ -72,6 +75,7 @@ extension ScriptableMacro: ExtensionMacro {
 }
 
 struct ClassMetadata {
+    var visibility: String = ""
     var className: String
     var name: String
     var base: String
