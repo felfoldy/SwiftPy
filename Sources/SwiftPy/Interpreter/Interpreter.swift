@@ -7,6 +7,9 @@
 
 import pocketpy
 import Foundation
+#if canImport(UIKit)
+import UIKit
+#endif
 
 /// A Swift interface for interacting with the embedded Python interpreter.
 ///
