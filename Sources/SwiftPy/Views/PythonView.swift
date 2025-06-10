@@ -94,6 +94,13 @@ public class PythonView {
 
 @available(macOS 14.4, iOS 17.4, *)
 extension PythonView: @preconcurrency CustomStringConvertible {
+    public var view: AnyPythonViewSyntax? {
+        if let syntax {
+            return AnyPythonViewSyntax(syntax: syntax)
+        }
+        return nil
+    }
+    
     public var description: String {
         if let syntax {
             return String(describing: syntax)
