@@ -15,7 +15,7 @@ func profile(_ name: StaticString) -> SignpostProfiler {
     return profiler
 }
 
-@Suite("Async tests", .tags(.experimental))
+@Suite("Async tests")
 @MainActor
 struct AsyncTests {
     let main = Interpreter.main
@@ -24,24 +24,24 @@ struct AsyncTests {
     @Test func codeToRun() {
         profiler.event("AsyncTests.codeToRun")
 
-        let decoder = AsyncDecoder("""
+        let decoder = AsyncContext("""
         await URL.download()
         print('finished')
-        """)
+        """, filename: "<string>") {}
         
-        #expect(decoder.code == "task = URL.download()")
+        #expect(decoder.code == "URL.download()")
         #expect(decoder.continuationCode == "print('finished')")
     }
     
     @Test func result() {
         profiler.event("AsyncTests.result")
         
-        let decoder = AsyncDecoder("""
+        let decoder = AsyncContext("""
         result = await async_func()
         print(result)
-        """)
+        """, filename: "<string>") {}
 
-        #expect(decoder.code == "task = async_func()")
+        #expect(decoder.code == "async_func()")
         #expect(decoder.continuationCode == "print(result)")
         #expect(decoder.resultName == "result")
     }

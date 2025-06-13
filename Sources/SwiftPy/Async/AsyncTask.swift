@@ -7,39 +7,23 @@
 
 import pocketpy
 
+typealias TaskResult = PythonConvertible & Sendable
+
 extension Interpreter {
     func asyncExecute(_ code: String, filename: String = "<string>", mode: py_CompileMode = EXEC_MODE) async {
-        await withCheckedContinuation { continuation in
-            let main = Interpreter.main
-            
-            // Clear the previous task before running.
-            if main["task"] != nil {
-                try? Interpreter.printErrors {
-                    py_delattr(main, py_name("task"))
-                }
+        await withCheckedContinuation { continuation in            
+            let decoder = AsyncContext(code, filename: filename) {
+                continuation.resume()
             }
-
-            let decoder = AsyncDecoder(code)
-            
-            if decoder.didMatch {
-                AsyncTask.completion = {
-                    continuation.resume()
-                }
-            }
+            AsyncContext.current = decoder
+            defer { AsyncContext.current = nil }
             
             do {
                 try Interpreter.shared.execute(decoder.code, filename: filename, mode: mode)
 
-                guard let task = main["task"] else {
+                if !decoder.didMatch {
                     continuation.resume()
-                    return
                 }
-
-                decoder.resultName?
-                    .toPython(task.emplace("result"))
-
-                decoder.continuationCode?
-                    .toPython(task.emplace("continuation_code"))
             } catch {
                 continuation.resume()
                 return
@@ -49,49 +33,39 @@ extension Interpreter {
 }
 
 public class AsyncTask: PythonBindable {
-    static var completion: (() -> Void)?
-    
     public init(_ task: @escaping () async -> Void) {
-        let completion = AsyncTask.completion
+        let context = AsyncContext.current
         
         Task {
             await task()
+            
+            guard let context else { return }
 
-            guard let reference = _pythonCache.reference else {
-                completion?()
-                return
+            if let continuation = context.continuationCode {
+                await Interpreter.shared.asyncExecute(continuation, filename: context.filename)
             }
-
-            if let continuation = reference["continuation_code"],
-               let code = String(continuation) {
-                await Interpreter.shared.asyncExecute(code, filename: "<async_continuation>")
-            }
-            completion?()
+            context.completion()
         }
     }
     
     public init<T: PythonConvertible>(_ task: @escaping () async -> T?) where T: Sendable {
-        let completion = AsyncTask.completion
-        
+        let context = AsyncContext.current
+
         Task {
             let result = await task()
 
-            guard let reference = _pythonCache.reference else {
-                completion?()
-                return
-            }
+            guard let context else { return }
 
-            if let resultName = String(reference["result"]) {
+            if let resultName = context.resultName {
                 result?.toPython(
-                    Interpreter.main.emplace(resultName)
+                    .main.emplace(resultName)
                 )
             }
 
-            if let continuation = reference["continuation_code"],
-               let code = String(continuation) {
-                await Interpreter.shared.asyncExecute(code, filename: "<async_continuation>")
+            if let continuation = context.continuationCode {
+                await Interpreter.shared.asyncExecute(continuation, filename: context.filename)
             }
-            completion?()
+            context.completion()
         }
     }
     

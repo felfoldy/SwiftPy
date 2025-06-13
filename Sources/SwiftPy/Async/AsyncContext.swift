@@ -1,5 +1,5 @@
 //
-//  AsyncDecoder.swift
+//  AsyncContext.swift
 //  SwiftPy
 //
 //  Created by Tibor Felföldy on 2025-04-05.
@@ -8,13 +8,22 @@
 import pocketpy
 import Foundation
 
-struct AsyncDecoder {
+@MainActor
+struct AsyncContext {
+    static var current: AsyncContext?
+    
     let code: String
     let continuationCode: String?
     let resultName: String?
     let didMatch: Bool
-    
-    init(_ code: String) {
+
+    let completion: () -> Void
+    let filename: String
+
+    init(_ code: String, filename: String, completion: @escaping () -> Void) {
+        self.filename = filename
+        self.completion = completion
+        
         let lines = code.components(separatedBy: .newlines)
         
         var codeToExecute = [String]()
@@ -43,8 +52,7 @@ struct AsyncDecoder {
                 }
                 
                 // Replace the matched line with "task = <call>"
-                let newLine = "task = \(call)"
-                codeToExecute.append(newLine)
+                codeToExecute.append(call)
                 self.code = codeToExecute.joined(separator: "\n")
                 self.continuationCode = Self.joinRest(lines, from: i + 1)
                 self.resultName = capturedResultName
