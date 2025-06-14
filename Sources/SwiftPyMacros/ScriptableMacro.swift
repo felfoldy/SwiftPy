@@ -292,7 +292,9 @@ func functionDeclarationVisitor(
         if isStatic {
             metadata.functionSyntax.append("@staticmethod")
         }
-        let functionSyntax = "def \(pySignature):"
+        let isAsync = signature.effectSpecifiers?.asyncSpecifier != nil
+        let functionSyntax = isAsync ? "async def \(pySignature):" : "def \(pySignature):"
+
         if let docstring = function.description.docstring {
             metadata.functionSyntax.append(functionSyntax)
             metadata.functionSyntax.append(.tab + docstring.inPythonTrippleQuotes)

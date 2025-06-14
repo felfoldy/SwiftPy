@@ -200,10 +200,12 @@ class ScriptableMacroTests: XCTestCase {
         @Scriptable
         class TestClass {
             static func testFunction() -> Int { 10 }
+            static func asyncFunction() async -> Int { 10 }
         }
         """, expandedSource: """
         class TestClass {
             static func testFunction() -> Int { 10 }
+            static func asyncFunction() async -> Int { 10 }
         
             var _pythonCache = PythonBindingCache()
         }
@@ -213,11 +215,16 @@ class ScriptableMacroTests: XCTestCase {
                 type.staticFunction("test_function") { argc, argv in
                     PyBind.function(argc, argv, testFunction)
                 }
+                type.staticFunction("async_function") { argc, argv in
+                    PyBind.function(argc, argv, asyncFunction)
+                }
                 \(newAndRepr)
                 \(interfaceBegin)
                     class TestClass:
                         @staticmethod
                         def test_function() -> int: ...
+                        @staticmethod
+                        async def async_function() -> int: ...
                 \(interfaceEnd)
             }
         }

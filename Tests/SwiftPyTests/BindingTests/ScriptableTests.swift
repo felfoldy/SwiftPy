@@ -28,6 +28,9 @@ class TestClassWithProperties: PythonBindable {
     static func create() -> TestClass2 {
         TestClassWithProperties()
     }
+    static func asyncCreate() async -> TestClass2 {
+        TestClassWithProperties()
+    }
     static func map(content: String?) -> TestClass2 {
         let tc = TestClassWithProperties()
         tc.content = content ?? ""
@@ -88,7 +91,7 @@ struct ScriptableTests {
         #expect(Interpreter.evaluate("tc4.get_content()") == "changed")
     }
     
-    @Test func staticFuncTests() {
+    @Test func staticFuncTests() async {
         Interpreter.run("TestClass2.log('asd')")
         
         Interpreter.run("tc5 = TestClass2.create()")
@@ -107,13 +110,19 @@ struct ScriptableTests {
         """)
         
         #expect(main["content"] == "")
+        
+        await Interpreter.asyncRun("""
+        tc7 = await TestClass2.async_create()
+        """)
+        
+        #expect(main["tc7"]?.isType(TestClassWithProperties.self) == true)
     }
     
     @Test func returningArgumentedFunction() {
         Interpreter.run("""
-        tc7 = TestClass2.create()
-        number = tc7.fetch('4')
-        number2 = tc7.fetch()
+        tc8 = TestClass2.create()
+        number = tc8.fetch('4')
+        number2 = tc8.fetch()
         """)
         
         #expect(main["number"] == 4)
