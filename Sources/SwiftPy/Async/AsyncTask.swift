@@ -6,6 +6,7 @@
 //
 
 import pocketpy
+import Foundation
 
 typealias TaskResult = PythonConvertible & Sendable
 
@@ -32,13 +33,45 @@ extension Interpreter {
     }
 }
 
-public class AsyncTask: PythonBindable {
-    public init(_ task: @escaping () async -> Void) {
+@MainActor
+@Scriptable
+public class AsyncTask {
+    internal let task: Task<Void, Never>
+    
+    internal static var tasks = [UUID: AsyncTask]()
+    
+    private init(task: @escaping () async -> Void) {
+        let id = UUID()
+        
+        self.task = Task {
+            await task()
+            AsyncTask.tasks[id] = nil
+        }
+
+        AsyncTask.tasks[id] = self
+    }
+
+    deinit {
+        task.cancel()
+    }
+
+    public func cancel() {
+        task.cancel()
+    }
+}
+
+extension AsyncTask {
+    public convenience init(_ task: @escaping () async throws -> Void) {
         let context = AsyncContext.current
         
-        Task {
-            await task()
-            
+        self.init {
+            do {
+                try await task()
+            } catch {
+                log.critical(error.localizedDescription)
+                context?.completion()
+            }
+
             guard let context else { return }
 
             if let continuation = context.continuationCode {
@@ -48,28 +81,29 @@ public class AsyncTask: PythonBindable {
         }
     }
     
-    public init<T: PythonConvertible>(_ task: @escaping () async -> T?) where T: Sendable {
+    public convenience init<T: PythonConvertible>(_ task: @escaping () async throws -> T?) where T: Sendable {
         let context = AsyncContext.current
 
-        Task {
-            let result = await task()
+        self.init {
+            do {
+                let result = try await task()
 
-            guard let context else { return }
+                guard let context else { return }
 
-            if let resultName = context.resultName {
-                result?.toPython(
-                    .main.emplace(resultName)
-                )
+                if let resultName = context.resultName {
+                    result?.toPython(
+                        .main.emplace(resultName)
+                    )
+                }
+
+                if let continuation = context.continuationCode {
+                    await Interpreter.shared.asyncExecute(continuation, filename: context.filename)
+                }
+                context.completion()
+            } catch {
+                log.critical(error.localizedDescription)
+                context?.completion()
             }
-
-            if let continuation = context.continuationCode {
-                await Interpreter.shared.asyncExecute(continuation, filename: context.filename)
-            }
-            context.completion()
         }
     }
-    
-    public var _pythonCache = PythonBindingCache()
-    
-    public static var pyType: PyType = .make("AsyncTask") { _ in }
 }
