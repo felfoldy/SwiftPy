@@ -81,7 +81,7 @@ extension AsyncTask {
         }
     }
     
-    public convenience init<T: PythonConvertible>(_ task: @escaping () async throws -> T?) where T: Sendable {
+    public convenience init<T: PythonConvertible>(_ task: @escaping () async throws -> T) where T: Sendable {
         let context = AsyncContext.current
 
         self.init {
@@ -91,7 +91,7 @@ extension AsyncTask {
                 guard let context else { return }
 
                 if let resultName = context.resultName {
-                    result?.toPython(
+                    result.toPython(
                         .main.emplace(resultName)
                     )
                 }

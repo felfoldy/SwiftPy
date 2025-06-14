@@ -75,6 +75,19 @@ public enum PyBind {
             return try fn()
         }
     }
+    
+    /// `() async -> Void`
+    @inlinable
+    public static func function(
+        _ argc: Int32,
+        _ argv: @autoclosure () -> PyAPI.Reference?,
+        _ fn: @MainActor @escaping () async throws -> Void
+    ) -> Bool {
+        PyAPI.returnOrThrow {
+            try checkArgCount(argc, expected: 0)
+            return AsyncTask { try await fn() }
+        }
+    }
 
     /// `() -> Any`
     @inlinable
@@ -85,7 +98,20 @@ public enum PyBind {
     ) -> Bool {
         PyAPI.returnOrThrow { try fn() }
     }
-    
+
+    /// `() async -> Any`
+    @inlinable
+    public static func function<Result: PythonConvertible>(
+        _ argc: Int32,
+        _ argv: @autoclosure () -> PyAPI.Reference?,
+        _ fn: @MainActor @escaping () async throws -> Result
+    ) -> Bool where Result: Sendable {
+        PyAPI.returnOrThrow {
+            try checkArgCount(argc, expected: 0)
+            return AsyncTask { try await fn() }
+        }
+    }
+
     /// `(...) -> Void`
     @inlinable
     public static func function<each Arg: PythonConvertible>(
@@ -98,7 +124,22 @@ public enum PyBind {
             return try arguments(repeat (each result))
         }
     }
-    
+
+    /// `(...) async -> Void`
+    @inlinable
+    public static func function<each Arg: PythonConvertible>(
+        _ argc: Int32,
+        _ argv: PyAPI.Reference?,
+        _ fn: @MainActor @escaping (repeat each Arg) async throws -> Void
+    ) -> Bool {
+        PyAPI.returnOrThrow {
+            let arguments = try checkArgs(argc: argc, argv: argv) as (repeat (each Arg))
+            return AsyncTask {
+                try await fn(repeat (each arguments))
+            }
+        }
+    }
+
     /// `(...) -> Any`
     @inlinable
     public static func function<each Arg: PythonConvertible>(
@@ -109,6 +150,24 @@ public enum PyBind {
         PyAPI.returnOrThrow {
             let result = try checkArgs(argc: argc, argv: argv) as (repeat (each Arg))
             return try arguments(repeat (each result))
+        }
+    }
+    
+    /// `(...) async -> Any`
+    @inlinable
+    public static func function<
+        each Arg: PythonConvertible,
+        Result: PythonConvertible
+    >(
+        _ argc: Int32,
+        _ argv: PyAPI.Reference?,
+        _ fn: @MainActor @escaping (repeat each Arg) async throws -> Result
+    ) -> Bool where Result: Sendable {
+        PyAPI.returnOrThrow {
+            let arguments = try checkArgs(argc: argc, argv: argv) as (repeat (each Arg))
+            return AsyncTask {
+                try await fn(repeat (each arguments))
+            }
         }
     }
 }

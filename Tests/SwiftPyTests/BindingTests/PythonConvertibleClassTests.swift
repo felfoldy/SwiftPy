@@ -41,7 +41,11 @@ final class TestClass: HasSubscript {
     static func staticFunc(value: Int) -> TestClass {
         TestClass(number: 10)
     }
-    
+
+    static func asyncCreate() async -> TestClass {
+        TestClass(number: 10)
+    }
+
     var _pythonCache = PythonBindingCache()
 }
 
@@ -75,6 +79,9 @@ extension TestClass: PythonBindable {
         }
         type.staticFunction("static_func") { argc, argv in
             PyBind.function(argc, argv, staticFunc)
+        }
+        type.staticFunction("async_create") { argc, argv in
+            PyBind.function(argc, argv, asyncCreate)
         }
         type.magic("__getitem__") { argc, argv in
             __getitem__(argc, argv, __getitem__)
@@ -187,5 +194,14 @@ struct PythonConvertibleClassTests {
         TestClass(number: 2)
             .toPython(main.emplace("test8"))
         #expect(Interpreter.evaluate("test8['str']") == "str")
+    }
+    
+    @Test func asyncStaticFunc() async throws {
+        await Interpreter.asyncRun("""
+        test9 = await TestClass.async_create()
+        """)
+
+        let result = try #require(TestClass(.main["test9"]))
+        #expect(result.number == 10)
     }
 }
