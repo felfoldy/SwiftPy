@@ -24,7 +24,7 @@ class TestClassWithProperties: PythonBindable {
     
     func changeContent(value: String) { content = value }
     func getContent() -> String { content }
-    func fetch(query: String = "0") -> Int? { Int(query) }
+    func fetch(query: String = "0") async -> Int? { Int(query) }
     static func create() -> TestClass2 {
         TestClassWithProperties()
     }
@@ -118,11 +118,11 @@ struct ScriptableTests {
         #expect(main["tc7"]?.isType(TestClassWithProperties.self) == true)
     }
     
-    @Test func returningArgumentedFunction() {
-        Interpreter.run("""
+    @Test func returningArgumentedFunction() async {
+        await Interpreter.asyncRun("""
         tc8 = TestClass2.create()
-        number = tc8.fetch('4')
-        number2 = tc8.fetch()
+        number = await tc8.fetch('4')
+        number2 = await tc8.fetch()
         """)
         
         #expect(main["number"] == 4)

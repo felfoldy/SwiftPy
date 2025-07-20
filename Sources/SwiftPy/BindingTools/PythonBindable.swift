@@ -159,7 +159,21 @@ public extension PythonBindable {
             try fn(cast(argv))()
         }
     }
-    
+
+    /// `() async -> Void`
+    @inlinable
+    static func _bind_function(
+        _ argv: PyAPI.Reference?,
+        _ fn: @escaping (Self) -> () async throws -> Void
+    ) -> Bool {
+        PyAPI.returnOrThrow {
+            let args = try cast(argv)
+            return AsyncTask {
+                try await fn(args)()
+            }
+        }
+    }
+
     /// `() -> Result?`
     @inlinable
     static func _bind_function(
@@ -170,7 +184,21 @@ public extension PythonBindable {
             try fn(cast(argv))()
         }
     }
-    
+
+    /// `() async -> Result?`
+    @inlinable
+    static func _bind_function<Result: PythonConvertible>(
+        _ argv: PyAPI.Reference?,
+        _ fn: @escaping (Self) -> () async throws -> Result
+    ) -> Bool where Result: Sendable {
+        PyAPI.returnOrThrow {
+            let args = try cast(argv)
+            return AsyncTask {
+                try await fn(args)()
+            }
+        }
+    }
+
     /// `(...) -> Void`
     @inlinable
     static func _bind_function<each Arg: PythonConvertible>(
@@ -183,7 +211,23 @@ public extension PythonBindable {
             return try arguments(obj)(repeat (each result))
         }
     }
-    
+
+    /// `(...) async -> Void`
+    @inlinable
+    static func _bind_function<each Arg: PythonConvertible>(
+        _ argv: PyAPI.Reference?,
+        _ fn: @escaping (Self) -> (repeat each Arg) async throws -> Void
+    ) -> Bool where (repeat each Arg): Sendable {
+        PyAPI.returnOrThrow {
+            let obj = try cast(argv)
+            let args = try PyBind.castArgs(argv: argv, from: 1) as (repeat (each Arg))
+
+            return AsyncTask {
+                try await fn(obj)(repeat each args)
+            }
+        }
+    }
+
     /// `(...) -> any`
     @inlinable
     static func _bind_function<each Arg: PythonConvertible>(
@@ -194,6 +238,22 @@ public extension PythonBindable {
             let obj = try cast(argv)
             let result = try PyBind.castArgs(argv: argv, from: 1) as (repeat (each Arg))
             return try arguments(obj)(repeat (each result))
+        }
+    }
+    
+    /// `(...) async -> any`
+    @inlinable
+    static func _bind_function<each Arg: PythonConvertible, Result: PythonConvertible>(
+        _ argv: PyAPI.Reference?,
+        _ fn: @escaping (Self) -> (repeat each Arg) async throws -> Result
+    ) -> Bool where Result: Sendable, (repeat each Arg): Sendable {
+        PyAPI.returnOrThrow {
+            let obj = try cast(argv)
+            let args = try PyBind.castArgs(argv: argv, from: 1) as (repeat (each Arg))
+            
+            return AsyncTask {
+                try await fn(obj)(repeat each args)
+            }
         }
     }
 
