@@ -67,17 +67,17 @@ extension AsyncTask {
         self.init {
             do {
                 try await task()
+                
+                guard let context else { return }
+
+                if let continuation = context.continuationCode {
+                    await Interpreter.shared.asyncExecute(continuation, filename: context.filename)
+                }
+                context.completion()
             } catch {
                 log.critical(error.localizedDescription)
                 context?.completion()
             }
-
-            guard let context else { return }
-
-            if let continuation = context.continuationCode {
-                await Interpreter.shared.asyncExecute(continuation, filename: context.filename)
-            }
-            context.completion()
         }
     }
     
