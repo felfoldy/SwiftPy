@@ -94,15 +94,15 @@ public final class Interpreter {
         py_finalize()
     }
     
-    func execute(_ code: String, filename: String = "<string>", mode: py_CompileMode = EXEC_MODE) throws {
+    func execute(_ code: String, filename: String, mode: CompileMode = .execution) throws {
         try Interpreter.printErrors {
-            py_compile(code, filename, mode, false)
+            py_compile(code, filename, mode.pyMode, false)
         }
         
         let code = PyAPI.returnValue.toStack
         
         try Interpreter.printErrors {
-            let function: PyAPI.Reference? = mode == EVAL_MODE ? .functions.eval : .functions.exec
+            let function: PyAPI.Reference? = mode == .evaluation ? .functions.eval : .functions.exec
 
             profiler.begin()
             let isExecuted = py_call(function, 1, code.reference)
@@ -128,27 +128,6 @@ public final class Interpreter {
         }
         
         return nil
-    }
-
-    func repl(input: String) {
-        for line in input.components(separatedBy: .newlines) {
-            if line.isEmpty, !replLines.isEmpty {
-                let joinedBuffer = replLines.joined(separator: "\n")
-                try? execute(joinedBuffer, filename: "<stdin>", mode: SINGLE_MODE)
-                replLines.removeAll()
-            }
-
-            guard let lastChar = line.last else {
-                continue
-            }
-
-            if !replLines.isEmpty || ":({[".contains(lastChar) || line.first == "@" {
-                replLines.append(line)
-                continue
-            }
-            
-            try? execute(line, filename: "<stdin>", mode: SINGLE_MODE)
-        }
     }
     
     @inlinable
@@ -183,30 +162,22 @@ public extension Interpreter {
     ///
     /// Does not output the input to the console.
     /// - Parameter code: Code to execute.
-    static func execute(_ code: String) {
-        try? shared.execute(code)
+    static func execute(_ code: String, filename: String = "<string>", mode: CompileMode = .execution) {
+        try? shared.execute(code, filename: filename, mode: mode)
     }
 
     /// Runs a code in execution mode.
     /// 
     /// Performs profiling and outputs the input to the console.
     /// - Parameter code: Code to execute.
-    static func run(_ code: String) {
+    static func run(_ code: String, filename: String = "<string>", mode: CompileMode = .execution) {
         output.input(code)
-        try? shared.execute(code, filename: "<string>", mode: EXEC_MODE)
+        try? shared.execute(code, filename: filename, mode: mode)
     }
 
-    static func asyncRun(_ code: String) async {
+    static func asyncRun(_ code: String, filename: String = "<string>", mode: CompileMode = .execution) async {
         output.input(code)
-        await shared.asyncExecute(code)
-    }
-
-    /// Interactive interpreter input.
-    ///
-    /// - Parameter input: Input to run.
-    static func input(_ input: String) {
-        output.input(input)
-        shared.repl(input: input)
+        await shared.asyncExecute(code, filename: filename, mode: mode)
     }
 
     /// Evaluates the expression, casts to the given type and returns the result.
@@ -215,7 +186,7 @@ public extension Interpreter {
     /// - Returns: The result of the expression.
     static func evaluate<Result: PythonConvertible>(_ expression: String) -> Result? {
         do {
-            try shared.execute(expression, mode: EVAL_MODE)
+            try shared.execute(expression, filename: "<string>", mode: .evaluation)
             let result = PyAPI.returnValue.toStack
             return try Result.cast(result.reference)
         } catch {

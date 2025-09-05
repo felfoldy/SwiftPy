@@ -126,18 +126,18 @@ struct PythonConvertibleClassTests {
         
         obj.toPython(main.emplace("test3"))
         
-        Interpreter.input("test3.number")
+        Interpreter.run("test3.number")
         #expect(obj._pythonCache.reference != nil)
         
         // Uses cache.
         obj.toPython(main.emplace("test4"))
                 
         Interpreter.run("del test3")
-        Interpreter.input("gc.collect()")
+        Interpreter.run("gc.collect()")
         #expect(obj._pythonCache.reference != nil)
         
         Interpreter.run("del test4")
-        Interpreter.input("gc.collect()")
+        Interpreter.run("gc.collect()")
         #expect(obj._pythonCache.reference == nil)
     }
     

@@ -19,10 +19,12 @@ struct AsyncContext {
 
     let completion: () -> Void
     let filename: String
+    let mode: CompileMode
 
-    init(_ code: String, filename: String, completion: @escaping () -> Void) {
+    init(_ code: String, filename: String, mode: CompileMode, completion: @escaping () -> Void) {
         self.filename = filename
         self.completion = completion
+        self.mode = mode
         
         let lines = code.components(separatedBy: .newlines)
         

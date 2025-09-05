@@ -12,27 +12,27 @@ import pocketpy
 @MainActor
 struct AutoCompleterTests {
     init() {
-        Interpreter.input("from rlcompleter import Completer")
-        Interpreter.input("completer = Completer()")
+        Interpreter.run("from rlcompleter import Completer")
+        Interpreter.run("completer = Completer()")
     }
     
     @Test func returnTabOnEmptyString() {
-        Interpreter.input("x = completer.complete('', 0)")
+        Interpreter.run("x = completer.complete('', 0)")
 
         #expect(Interpreter.main["x"] == "\t")
     }
     
     @Test()
     func globalMatches() {
-        Interpreter.input("x = completer.complete('pri', 0)")
+        Interpreter.run("x = completer.complete('pri', 0)")
         #expect(Interpreter.main["x"] == "print(")
         
-        Interpreter.input("x = completer.complete('str', 0)")
+        Interpreter.run("x = completer.complete('str', 0)")
         #expect(Interpreter.main["x"] == "str(")
     }
     
     @Test func attributeMatches() {
-        Interpreter.input("x = completer.complete('completer.c', 0)")
+        Interpreter.run("x = completer.complete('completer.c', 0)")
         #expect(Interpreter.main["x"] == "completer.complete(")
     }
     

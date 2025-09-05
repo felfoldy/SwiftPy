@@ -14,7 +14,7 @@ struct OutputStreamTests {
         let outputStream = TestOutputStream()
         Interpreter.output = outputStream
 
-        Interpreter.input("3 + 4")
+        Interpreter.run("3 + 4", mode: .single)
 
         #expect(outputStream.lastInput == "3 + 4")
         #expect(outputStream.lastStdOut == "7")
@@ -36,27 +36,11 @@ struct OutputStreamTests {
         #expect(time > 0)
     }
     
-    @Test func multileREPLOutput() throws {
-        let outputStream = TestOutputStream()
-        Interpreter.output = outputStream
-        
-        _ = Interpreter.complete("fo")
-        Interpreter.input("for i in range(0, 3):")
-        #expect(outputStream.lastExecutionTime == nil)
-        Interpreter.input("    i")
-        #expect(outputStream.lastExecutionTime == nil)
-        Interpreter.input("")
-        #expect(outputStream.lastExecutionTime != nil)
-        
-        #expect(outputStream.lastInput == "")
-        #expect(outputStream.lastStdOut == "2")
-    }
-    
     @Test func outputPrint() {
         let outputStream = TestOutputStream()
         Interpreter.output = outputStream
 
-        Interpreter.input("print('str')")
+        Interpreter.run("print('str')")
 
         #expect(outputStream.lastStdOut == "str")
     }

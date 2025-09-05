@@ -11,9 +11,9 @@ import Foundation
 typealias TaskResult = PythonConvertible & Sendable
 
 extension Interpreter {
-    func asyncExecute(_ code: String, filename: String = "<string>", mode: py_CompileMode = EXEC_MODE) async {
-        await withCheckedContinuation { continuation in            
-            let decoder = AsyncContext(code, filename: filename) {
+    func asyncExecute(_ code: String, filename: String, mode: CompileMode) async {
+        await withCheckedContinuation { continuation in
+            let decoder = AsyncContext(code, filename: filename, mode: mode) {
                 continuation.resume()
             }
             AsyncContext.current = decoder
@@ -71,7 +71,7 @@ extension AsyncTask {
                 guard let context else { return }
 
                 if let continuation = context.continuationCode {
-                    await Interpreter.shared.asyncExecute(continuation, filename: context.filename)
+                    await Interpreter.shared.asyncExecute(continuation, filename: context.filename, mode: context.mode)
                 }
                 context.completion()
             } catch {
@@ -97,7 +97,7 @@ extension AsyncTask {
                 }
 
                 if let continuation = context.continuationCode {
-                    await Interpreter.shared.asyncExecute(continuation, filename: context.filename)
+                    await Interpreter.shared.asyncExecute(continuation, filename: context.filename, mode: context.mode)
                 }
                 context.completion()
             } catch {

@@ -10,11 +10,11 @@ import SwiftSyntaxMacrosTestSupport
 import SwiftPyMacros
 import XCTest
 
-let testMacros: [String: Macro.Type] = [
-    "Scriptable": ScriptableMacro.self
-]
-
 class ScriptableMacroTests: XCTestCase {
+    let testMacros: [String: Macro.Type] = [
+        "Scriptable": ScriptableMacro.self
+    ]
+
     func testPropertyBinding() {
         assertMacroExpansion(
         """

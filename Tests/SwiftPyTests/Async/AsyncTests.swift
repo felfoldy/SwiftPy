@@ -27,7 +27,7 @@ struct AsyncTests {
         let decoder = AsyncContext("""
         await URL.download()
         print('finished')
-        """, filename: "<string>") {}
+        """, filename: "<string>", mode: .execution) {}
         
         #expect(decoder.code == "URL.download()")
         #expect(decoder.continuationCode == "print('finished')")
@@ -39,7 +39,7 @@ struct AsyncTests {
         let decoder = AsyncContext("""
         result = await async_func()
         print(result)
-        """, filename: "<string>") {}
+        """, filename: "<string>", mode: .evaluation) {}
 
         #expect(decoder.code == "async_func()")
         #expect(decoder.continuationCode == "print(result)")
