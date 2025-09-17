@@ -138,7 +138,7 @@ class Completer:
             for word in words:
                 if (word[:n] == attr and not (noprefix and word[:n+1] == noprefix)):
                     
-                    match = f"{expr}.{word}"
+                    pattern = f"{expr}.{word}"
                     
                     attribute = getattr(type(thisobject), word, None)
                     if isinstance(attribute, property):
@@ -148,14 +148,14 @@ class Completer:
                         # this is not callable (because it is a property).
                         # Also, getattr(thisobject, word) will evaluate the
                         # property method, which is not desirable.
-                        matches.append(match)
+                        matches.append(pattern)
                         continue
 
                     value = getattr(thisobject, word, None)
                     if value is not None:
-                        matches.append(self._callable_postfix(value, match))
+                        matches.append(self._callable_postfix(value, pattern))
                     else:
-                        matches.append(match)
+                        matches.append(pattern)
 
             if matches or not noprefix:
                 break

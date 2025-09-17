@@ -37,7 +37,8 @@ let package = Package(
             name: "SwiftPyTests",
             dependencies: [
                 "SwiftPy",
-                .product(name: "SwiftSyntaxMacrosTestSupport", package: "swift-syntax")
+                .product(name: "SwiftSyntaxMacrosTestSupport", package: "swift-syntax"),
+                .product(name: "SwiftCompilerPlugin", package: "swift-syntax"),
             ]
         ),
         .macro(

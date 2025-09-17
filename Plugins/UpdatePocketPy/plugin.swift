@@ -39,5 +39,15 @@ struct UpdatePocketPy: CommandPlugin {
             atomically: true,
             encoding: .utf8
         )
+        
+        // TODO: include these too?
+        //
+        // void py_assign2(py_Ref dst, py_Ref src) {
+        //     *(dst) = *(src);
+        // }
+        //
+        // py_Ref py_arg2(py_Ref argv, int i) {
+        //     return &argv[i];
+        // }
     }
 }

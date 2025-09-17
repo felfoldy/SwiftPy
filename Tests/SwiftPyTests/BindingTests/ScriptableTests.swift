@@ -9,7 +9,7 @@ import Testing
 import SwiftPy
 
 /// The TestClass.
-@Scriptable("TestClass2")
+@Scriptable("TestClass2", base: .object)
 class TestClassWithProperties: PythonBindable {
     typealias TestClass2 = TestClassWithProperties
     

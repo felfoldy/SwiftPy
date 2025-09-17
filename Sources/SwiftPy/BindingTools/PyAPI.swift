@@ -141,7 +141,8 @@ public extension PyType {
 
     @inlinable
     func magic(_ name: String, function: PyAPI.CFunction) {
-        py_newnativefunc(py_tpgetmagic(self, py_name(name)), function)
+        py_bindmagic(self, py_name(name), function)
+        //py_newnativefunc(py_tpgetmagic(self, py_name(name)), function)
     }
 
     @inlinable
@@ -285,7 +286,7 @@ public extension PyAPI.Reference {
     }
 
     @inlinable func assign(_ newValue: PyAPI.Reference?) {
-        py_assign(self, newValue)
+        py_assign2(self, newValue)
     }
     
     /// Retrieves the attribute with the given name and passes it as a temporary reference.
@@ -324,7 +325,7 @@ public extension PyAPI.Reference {
     func temp(_ block: (PyAPI.Reference?) throws -> Void) throws {
         let tmp = py_pushtmp()
         defer { py_pop() }
-        py_assign(tmp, self)
+        assign(tmp)
         try block(tmp)
     }
 
@@ -367,8 +368,7 @@ public extension PyAPI.Reference {
     
     @inlinable
     subscript(index: Int) -> PyAPI.Reference? {
-        let argument = Int(bitPattern: self) + (index << 4)
-        return PyAPI.Reference(bitPattern: argument)
+        py_arg2(self, Int32(index))
     }
     
     @inlinable

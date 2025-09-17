@@ -5,6 +5,16 @@
  */
  
 #include "pocketpy.h"
+// interpreter/bindings.h
+
+
+bool generator__next__(int argc, py_Ref argv);
+bool array2d_like_iterator__next__(int argc, py_Ref argv);
+bool list_iterator__next__(int argc, py_Ref argv);
+bool tuple_iterator__next__(int argc, py_Ref argv);
+bool dict_items__next__(int argc, py_Ref argv);
+bool range_iterator__next__(int argc, py_Ref argv);
+bool str_iterator__next__(int argc, py_Ref argv);
 // interpreter/modules.h
 
 
@@ -25,8 +35,9 @@ void pk__add_module_inspect();
 void pk__add_module_pickle();
 void pk__add_module_base64();
 void pk__add_module_importlib();
+void pk__add_module_unicodedata();
 
-void pk__add_module_linalg();
+void pk__add_module_vmath();
 void pk__add_module_array2d();
 void pk__add_module_colorcvt();
 
@@ -39,12 +50,19 @@ void pk__add_module_libhv();
 #else
 #define pk__add_module_libhv()
 #endif
+
+#ifdef PK_BUILD_MODULE_CUTE_PNG
+void pk__add_module_cute_png();
+#else
+#define pk__add_module_cute_png()
+#endif
+
 // objects/base.h
 
 
 typedef struct PyObject PyObject;
 typedef struct VM VM;
-extern VM* pk_current_vm;
+extern _Thread_local VM* pk_current_vm;
 
 typedef struct py_TValue {
     py_Type type;
@@ -59,9 +77,74 @@ typedef struct py_TValue {
         PyObject* _obj;
         c11_vec2 _vec2;
         c11_vec2i _vec2i;
+        c11_vec3 _vec3;
+        c11_vec3i _vec3i;
+        c11_color32 _color32;
         void* _ptr;
+        char _chars[16];
     };
 } py_TValue;
+
+// objects/namedict.h
+
+
+typedef struct NameDict_KV {
+    py_Name key;
+    py_TValue value;
+} NameDict_KV;
+
+// https://github.com/pocketpy/pocketpy/blob/v1.x/include/pocketpy/namedict.h
+typedef struct NameDict {
+    int length;
+    float load_factor;
+    int capacity;
+    int critical_size;
+    uintptr_t mask;
+    NameDict_KV* items;
+} NameDict;
+
+NameDict* NameDict__new(float load_factor);
+void NameDict__delete(NameDict* self);
+void NameDict__ctor(NameDict* self, float load_factor);
+void NameDict__dtor(NameDict* self);
+py_TValue* NameDict__try_get(NameDict* self, py_Name key);
+bool NameDict__contains(NameDict* self, py_Name key);
+void NameDict__set(NameDict* self, py_Name key, py_TValue* value);
+bool NameDict__del(NameDict* self, py_Name key);
+void NameDict__clear(NameDict* self);
+// objects/object.h
+
+
+typedef struct PyObject {
+    py_Type type;  // we have a duplicated type here for convenience
+    // bool _;
+    bool gc_marked;
+    int slots;  // number of slots in the object
+    char flex[];
+} PyObject;
+
+// slots >= 0, allocate N slots
+// slots == -1, allocate a dict
+
+// | HEADER | <N slots> | <userdata>
+// | HEADER | <dict>    | <userdata>
+
+py_TValue* PyObject__slots(PyObject* self);
+NameDict* PyObject__dict(PyObject* self);
+void* PyObject__userdata(PyObject* self);
+
+#define PK_OBJ_SLOTS_SIZE(slots) ((slots) >= 0 ? sizeof(py_TValue) * (slots) : sizeof(NameDict))
+
+void PyObject__dtor(PyObject* self);
+
+
+#define pk__mark_value(val)                                                                        \
+    if((val)->is_ptr && !(val)->_obj->gc_marked) {                                                 \
+        PyObject* obj = (val)->_obj;                                                               \
+        obj->gc_marked = true;                                                                     \
+        c11_vector__push(PyObject*, p_stack, obj);                                                 \
+    }
+
 
 // common/_generated.h
 
@@ -77,6 +160,7 @@ extern const char kPythonLibs_dataclasses[];
 extern const char kPythonLibs_datetime[];
 extern const char kPythonLibs_functools[];
 extern const char kPythonLibs_heapq[];
+extern const char kPythonLibs_linalg[];
 extern const char kPythonLibs_operator[];
 extern const char kPythonLibs_typing[];
 
@@ -155,10 +239,154 @@ void FixedMemoryPool__ctor(FixedMemoryPool* self, int BlockSize, int BlockCount)
 void FixedMemoryPool__dtor(FixedMemoryPool* self);
 void* FixedMemoryPool__alloc(FixedMemoryPool* self);
 void FixedMemoryPool__dealloc(FixedMemoryPool* self, void* p);
+// common/name.h
+
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+void pk_names_initialize();
+void pk_names_finalize();
+
+#define MAGIC_METHOD(x) extern py_Name x;
+#ifdef MAGIC_METHOD
+
+// math operators
+MAGIC_METHOD(__lt__)
+MAGIC_METHOD(__le__)
+MAGIC_METHOD(__gt__)
+MAGIC_METHOD(__ge__)
+/////////////////////////////
+MAGIC_METHOD(__neg__)
+MAGIC_METHOD(__abs__)
+MAGIC_METHOD(__round__)
+MAGIC_METHOD(__divmod__)
+/////////////////////////////
+MAGIC_METHOD(__add__)
+MAGIC_METHOD(__radd__)
+MAGIC_METHOD(__sub__)
+MAGIC_METHOD(__rsub__)
+MAGIC_METHOD(__mul__)
+MAGIC_METHOD(__rmul__)
+MAGIC_METHOD(__truediv__)
+MAGIC_METHOD(__rtruediv__)
+MAGIC_METHOD(__floordiv__)
+MAGIC_METHOD(__rfloordiv__)
+MAGIC_METHOD(__mod__)
+MAGIC_METHOD(__rmod__)
+MAGIC_METHOD(__pow__)
+MAGIC_METHOD(__rpow__)
+MAGIC_METHOD(__matmul__)
+MAGIC_METHOD(__lshift__)
+MAGIC_METHOD(__rshift__)
+MAGIC_METHOD(__and__)
+MAGIC_METHOD(__or__)
+MAGIC_METHOD(__xor__)
+/////////////////////////////
+MAGIC_METHOD(__repr__)
+MAGIC_METHOD(__str__)
+MAGIC_METHOD(__hash__)
+MAGIC_METHOD(__len__)
+MAGIC_METHOD(__iter__)
+MAGIC_METHOD(__next__)
+MAGIC_METHOD(__contains__)
+MAGIC_METHOD(__bool__)
+MAGIC_METHOD(__invert__)
+/////////////////////////////
+MAGIC_METHOD(__eq__)
+MAGIC_METHOD(__ne__)
+// indexer
+MAGIC_METHOD(__getitem__)
+MAGIC_METHOD(__setitem__)
+MAGIC_METHOD(__delitem__)
+// specials
+MAGIC_METHOD(__new__)
+MAGIC_METHOD(__init__)
+MAGIC_METHOD(__call__)
+MAGIC_METHOD(__enter__)
+MAGIC_METHOD(__exit__)
+MAGIC_METHOD(__name__)
+MAGIC_METHOD(__all__)
+MAGIC_METHOD(__package__)
+MAGIC_METHOD(__path__)
+MAGIC_METHOD(__class__)
+MAGIC_METHOD(__getattr__)
+MAGIC_METHOD(__reduce__)
+MAGIC_METHOD(__missing__)
+
+#endif
+#undef MAGIC_METHOD
+
+py_Name py_namev(c11_sv name);
+c11_sv py_name2sv(py_Name index);
+py_Name py_name(const char* name);
+const char* py_name2str(py_Name index);
+
+#ifdef __cplusplus
+}  // extern "C"
+#endif
+
+// common/socket.h
+
+
+#include <stdint.h>
+
+#if PK_ENABLE_OS
+
+typedef void* c11_socket_handler;
+
+enum c11_address_family { C11_AF_INET = 2 };
+
+enum c11_socket_kind { C11_SOCK_STREAM = 1 };
+
+c11_socket_handler c11_socket_create(int family, int type, int protocol);
+int c11_socket_bind(c11_socket_handler socket, const char* hostname, unsigned short port);
+int c11_socket_listen(c11_socket_handler socket, int backlog);
+c11_socket_handler
+    c11_socket_accept(c11_socket_handler socket, char* client_ip, unsigned short* client_port);
+int c11_socket_connect(c11_socket_handler socket,
+                       const char* server_ip,
+                       unsigned short server_port);
+
+int c11_socket_recv(c11_socket_handler socket, char* buffer, int maxsize);
+int c11_socket_send(c11_socket_handler socket, const char* senddata, int datalen);
+int c11_socket_close(c11_socket_handler socket);
+int c11_socket_set_block(c11_socket_handler socket, int flag);
+c11_socket_handler c11_socket_invalid_socket_handler();
+int c11_socket_get_last_error();
+
+#endif // PK_ENABLE_OS
+// common/threads.h
+
+
+#if PK_ENABLE_THREADS
+
+#include <stdatomic.h>
+#include <stdbool.h>
+
+#if __EMSCRIPTEN__ || __APPLE__ || __linux__
+#include <pthread.h>
+#define PK_USE_PTHREADS 1
+typedef pthread_t c11_thrd_t;
+typedef void* c11_thrd_retval_t;
+#else
+#include <threads.h>
+#define PK_USE_PTHREADS 0
+typedef thrd_t c11_thrd_t;
+typedef int c11_thrd_retval_t;
+#endif
+
+bool c11_thrd_create(c11_thrd_t* thrd, c11_thrd_retval_t (*func)(void*), void* arg);
+void c11_thrd_yield();
+
+#endif
 // common/utils.h
 
 
 #include <stdio.h>
+#include <stdlib.h>
+#include <assert.h>
 
 #define PK_REGION(name) 1
 
@@ -181,6 +409,9 @@ void FixedMemoryPool__dealloc(FixedMemoryPool* self, void* p);
         abort();                                                                                   \
     } while(0)
 
+#define c11__rtassert(cond)                                                                        \
+    if(!(cond)) c11__abort("assertion failed: %s", #cond)
+
 #define c11__min(a, b) ((a) < (b) ? (a) : (b))
 #define c11__max(a, b) ((a) > (b) ? (a) : (b))
 
@@ -201,12 +432,9 @@ typedef struct RefCounted {
         }                                                                                          \
     } while(0)
 
-
 // common/vector.h
 
 
-#include <stdlib.h>
-#include <assert.h>
 #include <string.h>
 #include <stdbool.h>
 
@@ -226,6 +454,7 @@ void* c11_vector__emplace(c11_vector* self);
 bool c11_vector__contains(const c11_vector* self, void* elem);
 void* c11_vector__submit(c11_vector* self, int* length);
 void c11_vector__swap(c11_vector* self, c11_vector* other);
+int c11_vector__nextcap(c11_vector* self);
 
 #define c11__getitem(T, self, index) (((T*)(self)->data)[index])
 #define c11__setitem(T, self, index, value) ((T*)(self)->data)[index] = value;
@@ -233,7 +462,9 @@ void c11_vector__swap(c11_vector* self, c11_vector* other);
 
 #define c11_vector__push(T, self, elem)                                                            \
     do {                                                                                           \
-        if((self)->length == (self)->capacity) c11_vector__reserve((self), (self)->capacity * 2);  \
+        if((self)->length == (self)->capacity) {                                                   \
+            c11_vector__reserve((self), c11_vector__nextcap((self)));                              \
+        }                                                                                          \
         ((T*)(self)->data)[(self)->length] = (elem);                                               \
         (self)->length++;                                                                          \
     } while(0)
@@ -245,15 +476,19 @@ void c11_vector__swap(c11_vector* self, c11_vector* other);
 #define c11_vector__extend(T, self, p, size)                                                       \
     do {                                                                                           \
         int min_capacity = (self)->length + (size);                                                \
-        if((self)->capacity < min_capacity)                                                        \
-            c11_vector__reserve((self), c11__max((self)->capacity * 2, min_capacity));             \
+        if((self)->capacity < min_capacity) {                                                      \
+            int nextcap = c11_vector__nextcap(self);                                               \
+            c11_vector__reserve((self), c11__max(nextcap, min_capacity));                          \
+        }                                                                                          \
         memcpy((T*)(self)->data + (self)->length, (p), (size) * sizeof(T));                        \
         (self)->length += (size);                                                                  \
     } while(0)
 
 #define c11_vector__insert(T, self, index, elem)                                                   \
     do {                                                                                           \
-        if((self)->length == (self)->capacity) c11_vector__reserve((self), (self)->capacity * 2);  \
+        if((self)->length == (self)->capacity) {                                                   \
+            c11_vector__reserve((self), c11_vector__nextcap(self));                                \
+        }                                                                                          \
         T* p = (T*)(self)->data + (index);                                                         \
         memmove(p + 1, p, ((self)->length - (index)) * sizeof(T));                                 \
         *p = (elem);                                                                               \
@@ -285,10 +520,51 @@ void c11_vector__swap(c11_vector* self, c11_vector* other);
 #define c11__foreach(T, self, it)                                                                  \
     for(T* it = (self)->data; it && it != (T*)(self)->data + (self)->length; it++)
 
+// interpreter/typeinfo.h
+
+
+typedef struct py_TypeInfo {
+    py_Name name;
+    py_Type index;
+    py_Type base;
+    struct py_TypeInfo* base_ti;
+
+    py_TValue self;
+    py_GlobalRef module;
+
+    bool is_python;  // is it a python class? (not derived from c object)
+    bool is_final;  // can it be subclassed?
+
+    bool (*getattribute)(py_Ref self, py_Name name) PY_RAISE PY_RETURN;
+    bool (*setattribute)(py_Ref self, py_Name name, py_Ref val) PY_RAISE PY_RETURN;
+    bool (*delattribute)(py_Ref self, py_Name name) PY_RAISE;
+    bool (*getunboundmethod)(py_Ref self, py_Name name) PY_RETURN;
+
+    py_TValue annotations;
+    py_Dtor dtor;  // destructor for this type, NULL if no dtor
+    void (*on_end_subclass)(struct py_TypeInfo*);  // backdoor for enum module
+} py_TypeInfo;
+
+py_TypeInfo* pk_typeinfo(py_Type type);
+py_ItemRef pk_tpfindname(py_TypeInfo* ti, py_Name name);
+#define pk_tpfindmagic pk_tpfindname
+
+py_Type pk_newtype(const char* name,
+                   py_Type base,
+                   const py_GlobalRef module,
+                   void (*dtor)(void*),
+                   bool is_python,
+                   bool is_final);
+
+
+py_Type pk_newtypewithmode(py_Name name,
+                   py_Type base,
+                   const py_GlobalRef module,
+                   void (*dtor)(void*),
+                   bool is_python,
+                   bool is_final, enum py_CompileMode mode);
 // interpreter/types.h
 
-
-#define PK_DICT_MAX_COLLISION 4
 
 typedef struct {
     uint64_t hash;
@@ -297,20 +573,224 @@ typedef struct {
 } DictEntry;
 
 typedef struct {
-    int _[PK_DICT_MAX_COLLISION];
-} DictIndex;
-
-typedef struct {
     int length;
     uint32_t capacity;
-    DictIndex* indices;
+    uint32_t null_index_value;
+    bool index_is_short;
+    void* indices;
     c11_vector /*T=DictEntry*/ entries;
 } Dict;
 
 typedef c11_vector List;
 
-void c11_chunked_array2d__mark(void* ud);
-void function__gc_mark(void* ud);
+void c11_chunked_array2d__mark(void* ud, c11_vector* p_stack);
+void function__gc_mark(void* ud, c11_vector* p_stack);
+
+// objects/bintree.h
+
+
+typedef struct BinTreeConfig {
+    int (*f_cmp)(void* lhs, void* rhs);
+    bool need_free_key;
+} BinTreeConfig;
+
+typedef struct BinTree {
+    void* key;
+    py_TValue value;
+    const BinTreeConfig* config;
+    struct BinTree* left;
+    struct BinTree* right;
+} BinTree;
+
+void BinTree__ctor(BinTree* self, void* key, py_Ref value, const BinTreeConfig* config);
+void BinTree__dtor(BinTree* self);
+void BinTree__set(BinTree* self, void* key, py_Ref value);
+py_Ref BinTree__try_get(BinTree* self, void* key);
+bool BinTree__contains(BinTree* self, void* key);
+void BinTree__apply_mark(BinTree* self, c11_vector* p_stack);
+
+// objects/iterator.h
+
+
+typedef struct tuple_iterator {
+    py_TValue* p;
+    int length;
+    int index;
+} tuple_iterator;
+
+typedef struct list_iterator {
+    c11_vector* vec;
+    int index;
+} list_iterator;
+
+// common/chunkedvector.h
+
+
+typedef struct c11_chunkedvector_chunk {
+    int length;
+    int capacity;
+    void* data;
+} c11_chunkedvector_chunk;
+
+typedef struct c11_chunkedvector {
+    c11_vector /*T=c11_chunkedvector_chunk*/ chunks;
+    int length;
+    int capacity;
+    int elem_size;
+    int initial_chunks;
+} c11_chunkedvector;
+
+// chunks[0]: size=1, total_capacity=1
+// chunks[1]: size=2, total_capacity=3
+// chunks[2]: size=4, total_capacity=7
+// chunks[3]: size=8, total_capacity=15
+// chunks[4]: size=16, total_capacity=31
+// chunks[5]: size=32, total_capacity=63
+// ...
+// chunks[n]: size=2^n, total_capacity=2^(n+1)-1
+
+void c11_chunkedvector__ctor(c11_chunkedvector* self, int elem_size, int initial_chunks);
+void c11_chunkedvector__dtor(c11_chunkedvector* self);
+void* c11_chunkedvector__emplace(c11_chunkedvector* self);
+void* c11_chunkedvector__at(c11_chunkedvector* self, int index);
+// objects/container.h
+
+
+#include <stdint.h>
+
+#define FIXEDHASH_T__HEADER
+#define K py_Name
+#define V py_TValue
+#define NAME CachedNames
+#if !defined(FIXEDHASH_T__HEADER) && !defined(FIXEDHASH_T__SOURCE)
+
+#include "pocketpy/common/chunkedvector.h"
+#include "pocketpy/config.h"
+#include <stdint.h>
+
+#define FIXEDHASH_T__HEADER
+#define FIXEDHASH_T__SOURCE
+/* Input */
+#define K int
+#define V float
+#define NAME c11_fixedhash_d2f
+#endif
+
+/* Optional Input */
+#ifndef hash
+#define hash(a) ((uint64_t)(a))
+#endif
+
+#ifndef equal
+#define equal(a, b) ((a) == (b))
+#endif
+
+/* Temporary macros */
+#define CONCAT(A, B) CONCAT_(A, B)
+#define CONCAT_(A, B) A##B
+
+#define KV CONCAT(NAME, _KV)
+#define METHOD(name) CONCAT(NAME, CONCAT(__, name))
+
+#ifdef FIXEDHASH_T__HEADER
+/* Declaration */
+typedef struct {
+    uint64_t hash;
+    K key;
+    V val;
+} KV;
+
+typedef struct {
+    int length;
+    uint16_t indices[0x10000];
+    c11_chunkedvector /*T=FixedHashEntry*/ entries;
+} NAME;
+
+void METHOD(ctor)(NAME* self);
+void METHOD(dtor)(NAME* self);
+NAME* METHOD(new)();
+void METHOD(delete)(NAME* self);
+void METHOD(set)(NAME* self, K key, V* value);
+V* METHOD(try_get)(NAME* self, K key);
+bool METHOD(contains)(NAME* self, K key);
+
+#endif
+
+#ifdef FIXEDHASH_T__SOURCE
+/* Implementation */
+
+void METHOD(ctor)(NAME* self) {
+    self->length = 0;
+    memset(self->indices, 0xFF, sizeof(self->indices));
+    c11_chunkedvector__ctor(&self->entries, sizeof(KV), 0);
+}
+
+void METHOD(dtor)(NAME* self) { c11_chunkedvector__dtor(&self->entries); }
+
+NAME* METHOD(new)() {
+    NAME* self = PK_MALLOC(sizeof(NAME));
+    METHOD(ctor)(self);
+    return self;
+}
+
+void METHOD(delete)(NAME* self) {
+    METHOD(dtor)(self);
+    PK_FREE(self);
+}
+
+void METHOD(set)(NAME* self, K key, V* value) {
+    uint64_t hash_value = hash(key);
+    int index = (uint16_t)(hash_value & 0xFFFF);
+    while(self->indices[index] != 0xFFFF) {
+        KV* entry = c11_chunkedvector__at(&self->entries, self->indices[index]);
+        if(equal(entry->key, key)) {
+            entry->val = *value;
+            return;
+        }
+        index = ((5 * index) + 1) & 0xFFFF;
+    }
+    if(self->length >= 65000) abort();
+    KV* kv = c11_chunkedvector__emplace(&self->entries);
+    kv->hash = hash_value;
+    kv->key = key;
+    kv->val = *value;
+    self->indices[index] = self->entries.length - 1;
+    self->length++;
+}
+
+V* METHOD(try_get)(NAME* self, K key) {
+    uint64_t hash_value = hash(key);
+    int index = (uint16_t)(hash_value & 0xFFFF);
+    while(self->indices[index] != 0xFFFF) {
+        KV* entry = c11_chunkedvector__at(&self->entries, self->indices[index]);
+        if(equal(entry->key, key)) return &entry->val;
+        index = ((5 * index) + 1) & 0xFFFF;
+    }
+    return NULL;
+}
+
+bool METHOD(contains)(NAME* self, K key) {
+    V* value = METHOD(try_get)(self, key);
+    return value != NULL;
+}
+
+#endif
+
+/* Undefine all macros */
+#undef KV
+#undef METHOD
+#undef CONCAT
+#undef CONCAT_
+
+#undef K
+#undef V
+#undef NAME
+#undef less
+#undef partial_less
+#undef equal
+#undef hash
+
+#undef FIXEDHASH_T__HEADER
 // common/str.h
 
 
@@ -323,11 +803,19 @@ typedef struct c11_string {
     char data[];  // flexible array member
 } c11_string;
 
+c11_string* pk_tostr(py_Ref self);
+
 /* bytes */
 typedef struct c11_bytes {
     int size;
     unsigned char data[];  // flexible array member
 } c11_bytes;
+
+typedef struct {
+    int start;
+    int end;
+    char data[4];
+} c11_u32_range;
 
 bool c11_bytes__eq(c11_bytes* self, c11_bytes* other);
 
@@ -362,21 +850,27 @@ int c11_sv__index2(c11_sv self, c11_sv sub, int start);
 int c11_sv__count(c11_sv self, c11_sv sub);
 bool c11_sv__startswith(c11_sv self, c11_sv prefix);
 bool c11_sv__endswith(c11_sv self, c11_sv suffix);
+uint64_t c11_sv__hash(c11_sv self);
 
 c11_string* c11_sv__replace(c11_sv self, char old, char new_);
 c11_string* c11_sv__replace2(c11_sv self, c11_sv old, c11_sv new_);
 
 c11_vector /* T=c11_sv */ c11_sv__split(c11_sv self, char sep);
 c11_vector /* T=c11_sv */ c11_sv__split2(c11_sv self, c11_sv sep);
+c11_vector /* T=c11_sv */ c11_sv__splitwhitespace(c11_sv self);
 
 // misc
 int c11__unicode_index_to_byte(const char* data, int i);
 int c11__byte_index_to_unicode(const char* data, int n);
 
 bool c11__is_unicode_Lo_char(int c);
+const char* c11__search_u32_ranges(int c, const c11_u32_range* p, int n_ranges);
 int c11__u8_header(unsigned char c, bool suppress);
 int c11__u8_value(int u8bytes, const char* data);
 int c11__u32_to_u8(uint32_t utf32_char, char utf8_output[4]);
+
+char* c11_strdup(const char* str);
+unsigned char* c11_memdup(const unsigned char* data, int size);
 
 typedef enum IntParsingResult {
     IntParsing_SUCCESS,
@@ -391,14 +885,19 @@ IntParsingResult c11__parse_uint(c11_sv text, int64_t* out, int base);
 
 #define kPoolArenaSize (120 * 1024)
 #define kMultiPoolCount 5
-#define kPoolMaxBlockSize (32*kMultiPoolCount)
+#define kPoolMaxBlockSize (32 * kMultiPoolCount)
 
 typedef struct PoolArena {
     int block_size;
     int block_count;
     int unused_length;
-    int* unused;
-    char data[kPoolArenaSize];
+
+    union {
+        char data[kPoolArenaSize];
+        int64_t _align64;
+    };
+
+    int unused[];
 } PoolArena;
 
 typedef struct Pool {
@@ -416,196 +915,13 @@ int MultiPool__sweep_dealloc(MultiPool* self);
 void MultiPool__ctor(MultiPool* self);
 void MultiPool__dtor(MultiPool* self);
 c11_string* MultiPool__summary(MultiPool* self);
-// objects/namedict.h
-
-
-#include <stdint.h>
-
-#define SMALLMAP_T__HEADER
-#define K uint16_t
-#define V py_TValue
-#define NAME NameDict
-#if !defined(SMALLMAP_T__HEADER) && !defined(SMALLMAP_T__SOURCE)
-#include "pocketpy/common/vector.h"
-
-#define SMALLMAP_T__HEADER
-#define SMALLMAP_T__SOURCE
-/* Input */
-#define K int
-#define V float
-#define NAME c11_smallmap_i2f
-#endif
-
-/* Optional Input */
-#ifndef less
-#define less(a, b) ((a) < (b))
-#endif
-
-#ifndef equal
-#define equal(a, b) ((a) == (b))
-#endif
-
-/* Temporary macros */
-#define partial_less(a, b) less((a).key, (b))
-#define CONCAT(A, B) CONCAT_(A, B)
-#define CONCAT_(A, B) A##B
-
-#define KV CONCAT(NAME, _KV)
-#define METHOD(name) CONCAT(NAME, CONCAT(__, name))
-
-#ifdef SMALLMAP_T__HEADER
-/* Declaration */
-typedef struct {
-    K key;
-    V value;
-} KV;
-
-typedef c11_vector NAME;
-
-void METHOD(ctor)(NAME* self);
-void METHOD(dtor)(NAME* self);
-NAME* METHOD(new)();
-void METHOD(delete)(NAME* self);
-void METHOD(set)(NAME* self, K key, V value);
-V* METHOD(try_get)(const NAME* self, K key);
-V METHOD(get)(const NAME* self, K key, V default_value);
-bool METHOD(contains)(const NAME* self, K key);
-bool METHOD(del)(NAME* self, K key);
-void METHOD(clear)(NAME* self);
-
-#endif
-
-#ifdef SMALLMAP_T__SOURCE
-/* Implementation */
-
-void METHOD(ctor)(NAME* self) {
-    c11_vector__ctor(self, sizeof(KV));
-    c11_vector__reserve(self, 4);
-}
-
-void METHOD(dtor)(NAME* self) { c11_vector__dtor(self); }
-
-NAME* METHOD(new)() {
-    NAME* self = PK_MALLOC(sizeof(NAME));
-    METHOD(ctor)(self);
-    return self;
-}
-
-void METHOD(delete)(NAME* self) {
-    METHOD(dtor)(self);
-    PK_FREE(self);
-}
-
-void METHOD(set)(NAME* self, K key, V value) {
-    int index;
-    c11__lower_bound(KV, self->data, self->length, key, partial_less, &index);
-    if(index != self->length) {
-        KV* it = c11__at(KV, self, index);
-        if(equal(it->key, key)) {
-            it->value = value;
-            return;
-        }
-    }
-    KV kv = {key, value};
-    c11_vector__insert(KV, self, index, kv);
-}
-
-V* METHOD(try_get)(const NAME* self, K key) {
-    int index;
-    c11__lower_bound(KV, self->data, self->length, key, partial_less, &index);
-    if(index != self->length) {
-        KV* it = c11__at(KV, self, index);
-        if(equal(it->key, key)) return &it->value;
-    }
-    return NULL;
-}
-
-V METHOD(get)(const NAME* self, K key, V default_value) {
-    V* p = METHOD(try_get)(self, key);
-    return p ? *p : default_value;
-}
-
-bool METHOD(contains)(const NAME* self, K key) { return METHOD(try_get)(self, key) != NULL; }
-
-bool METHOD(del)(NAME* self, K key) {
-    int index;
-    c11__lower_bound(KV, self->data, self->length, key, partial_less, &index);
-    if(index != self->length) {
-        KV* it = c11__at(KV, self, index);
-        if(equal(it->key, key)) {
-            c11_vector__erase(KV, self, index);
-            return true;
-        }
-    }
-    return false;
-}
-
-void METHOD(clear)(NAME* self) { c11_vector__clear(self); }
-
-#endif
-
-/* Undefine all macros */
-#undef KV
-#undef METHOD
-#undef CONCAT
-#undef CONCAT_
-
-#undef K
-#undef V
-#undef NAME
-#undef less
-#undef partial_less
-#undef equal
-
-#undef SMALLMAP_T__HEADER
-
-/* A simple binary tree for storing modules. */
-typedef struct ModuleDict {
-    const char* path;
-    py_TValue module;
-    struct ModuleDict* left;
-    struct ModuleDict* right;
-} ModuleDict;
-
-void ModuleDict__ctor(ModuleDict* self, const char* path, py_TValue module);
-void ModuleDict__dtor(ModuleDict* self);
-void ModuleDict__set(ModuleDict* self, const char* key, py_TValue val);
-py_TValue* ModuleDict__try_get(ModuleDict* self, const char* path);
-bool ModuleDict__contains(ModuleDict* self, const char* path);
-void ModuleDict__apply_mark(ModuleDict* self);
-
-// objects/object.h
-
-
-typedef struct PyObject {
-    py_Type type;  // we have a duplicated type here for convenience
-    // bool _;
-    bool gc_marked;
-    int slots;  // number of slots in the object
-    char flex[];
-} PyObject;
-
-// slots >= 0, allocate N slots
-// slots == -1, allocate a dict
-
-// | HEADER | <N slots> | <userdata>
-// | HEADER | <dict>    | <userdata>
-
-py_TValue* PyObject__slots(PyObject* self);
-NameDict* PyObject__dict(PyObject* self);
-void* PyObject__userdata(PyObject* self);
-
-#define PK_OBJ_SLOTS_SIZE(slots) ((slots) >= 0 ? sizeof(py_TValue) * (slots) : sizeof(NameDict))
-
-void PyObject__dtor(PyObject* self);
-void PyObject__mark(PyObject* self);
-
 // interpreter/heap.h
 
 
 typedef struct ManagedHeap {
     MultiPool small_objects;
-    c11_vector /* PyObject* */ large_objects;
+    c11_vector /* PyObject_p */ large_objects;
+    c11_vector /* PyObject_p */ gc_roots;
 
     int freed_ma[3];
     int gc_threshold;  // threshold for gc_counter
@@ -627,68 +943,26 @@ PyObject* ManagedHeap__gcnew(ManagedHeap* self, py_Type type, int slots, int uds
 // external implementation
 void ManagedHeap__mark(ManagedHeap* self);
 
-// interpreter/typeinfo.h
-
-
-#define PK_MAGIC_SLOTS_COMMON_LENGTH (__missing__ - __xor__)
-#define PK_MAGIC_SLOTS_UNCOMMON_LENGTH (__xor__ + 1)
-#define PK_MAX_CHUNK_LENGTH 256
-
-typedef struct py_TypeInfo {
-    py_Name name;
-    py_Type base;
-    struct py_TypeInfo* base_ti;
-
-    py_TValue self;
-    py_TValue module;  // the module where the type is defined
-
-    bool is_python;  // is it a python class? (not derived from c object)
-    bool is_sealed;  // can it be subclassed?
-
-    void (*dtor)(void*);
-
-    py_TValue annotations;  // type annotations
-
-    void (*on_end_subclass)(struct py_TypeInfo*);  // backdoor for enum module
-
-    /* Magic Slots */
-    py_TValue magic_0[PK_MAGIC_SLOTS_COMMON_LENGTH];  // common magic slots
-    py_TValue* magic_1;                               // uncommon magic slots
-} py_TypeInfo;
-
-typedef struct TypeList {
-    int length;
-    py_TypeInfo* chunks[PK_MAX_CHUNK_LENGTH];
-} TypeList;
-
-void TypeList__ctor(TypeList* self);
-void TypeList__dtor(TypeList* self);
-py_TypeInfo* TypeList__get(TypeList* self, py_Type index);
-py_TypeInfo* TypeList__emplace(TypeList* self);
-void TypeList__apply(TypeList* self, void (*f)(py_TypeInfo*, void*), void* ctx);
-py_TValue* TypeList__magic(py_TypeInfo* self, unsigned index);
-py_TValue* TypeList__magic_readonly(py_TypeInfo* self, unsigned index);
-
-#define TypeList__magic_common(ti, index) ((ti)->magic_0 + ((index)-PK_MAGIC_SLOTS_UNCOMMON_LENGTH))
-
 // common/smallmap.h
 
 
 #include <stdint.h>
 
 #define SMALLMAP_T__HEADER
-#define K uint16_t
+#define K py_Name
 #define V int
-#define NAME c11_smallmap_n2i
+#define NAME c11_smallmap_n2d
 #if !defined(SMALLMAP_T__HEADER) && !defined(SMALLMAP_T__SOURCE)
 #include "pocketpy/common/vector.h"
+#include "pocketpy/common/utils.h"
+#include "pocketpy/config.h"
 
 #define SMALLMAP_T__HEADER
 #define SMALLMAP_T__SOURCE
 /* Input */
 #define K int
 #define V float
-#define NAME c11_smallmap_i2f
+#define NAME c11_smallmap_d2f
 #endif
 
 /* Optional Input */
@@ -814,22 +1088,163 @@ void METHOD(clear)(NAME* self) { c11_vector__clear(self); }
 
 #undef SMALLMAP_T__HEADER
 
-
 #define SMALLMAP_T__HEADER
-#define K c11_sv
-#define V uint16_t
-#define NAME c11_smallmap_s2n
-#define less(a, b)      (c11_sv__cmp((a), (b)) <  0)
-#define equal(a, b)     (c11_sv__cmp((a), (b)) == 0)
+#define K int
+#define V int
+#define NAME c11_smallmap_d2d
 #if !defined(SMALLMAP_T__HEADER) && !defined(SMALLMAP_T__SOURCE)
 #include "pocketpy/common/vector.h"
+#include "pocketpy/common/utils.h"
+#include "pocketpy/config.h"
 
 #define SMALLMAP_T__HEADER
 #define SMALLMAP_T__SOURCE
 /* Input */
 #define K int
 #define V float
-#define NAME c11_smallmap_i2f
+#define NAME c11_smallmap_d2f
+#endif
+
+/* Optional Input */
+#ifndef less
+#define less(a, b) ((a) < (b))
+#endif
+
+#ifndef equal
+#define equal(a, b) ((a) == (b))
+#endif
+
+/* Temporary macros */
+#define partial_less(a, b) less((a).key, (b))
+#define CONCAT(A, B) CONCAT_(A, B)
+#define CONCAT_(A, B) A##B
+
+#define KV CONCAT(NAME, _KV)
+#define METHOD(name) CONCAT(NAME, CONCAT(__, name))
+
+#ifdef SMALLMAP_T__HEADER
+/* Declaration */
+typedef struct {
+    K key;
+    V value;
+} KV;
+
+typedef c11_vector NAME;
+
+void METHOD(ctor)(NAME* self);
+void METHOD(dtor)(NAME* self);
+NAME* METHOD(new)();
+void METHOD(delete)(NAME* self);
+void METHOD(set)(NAME* self, K key, V value);
+V* METHOD(try_get)(const NAME* self, K key);
+V METHOD(get)(const NAME* self, K key, V default_value);
+bool METHOD(contains)(const NAME* self, K key);
+bool METHOD(del)(NAME* self, K key);
+void METHOD(clear)(NAME* self);
+
+#endif
+
+#ifdef SMALLMAP_T__SOURCE
+/* Implementation */
+
+void METHOD(ctor)(NAME* self) {
+    c11_vector__ctor(self, sizeof(KV));
+    c11_vector__reserve(self, 4);
+}
+
+void METHOD(dtor)(NAME* self) { c11_vector__dtor(self); }
+
+NAME* METHOD(new)() {
+    NAME* self = PK_MALLOC(sizeof(NAME));
+    METHOD(ctor)(self);
+    return self;
+}
+
+void METHOD(delete)(NAME* self) {
+    METHOD(dtor)(self);
+    PK_FREE(self);
+}
+
+void METHOD(set)(NAME* self, K key, V value) {
+    int index;
+    c11__lower_bound(KV, self->data, self->length, key, partial_less, &index);
+    if(index != self->length) {
+        KV* it = c11__at(KV, self, index);
+        if(equal(it->key, key)) {
+            it->value = value;
+            return;
+        }
+    }
+    KV kv = {key, value};
+    c11_vector__insert(KV, self, index, kv);
+}
+
+V* METHOD(try_get)(const NAME* self, K key) {
+    int index;
+    c11__lower_bound(KV, self->data, self->length, key, partial_less, &index);
+    if(index != self->length) {
+        KV* it = c11__at(KV, self, index);
+        if(equal(it->key, key)) return &it->value;
+    }
+    return NULL;
+}
+
+V METHOD(get)(const NAME* self, K key, V default_value) {
+    V* p = METHOD(try_get)(self, key);
+    return p ? *p : default_value;
+}
+
+bool METHOD(contains)(const NAME* self, K key) { return METHOD(try_get)(self, key) != NULL; }
+
+bool METHOD(del)(NAME* self, K key) {
+    int index;
+    c11__lower_bound(KV, self->data, self->length, key, partial_less, &index);
+    if(index != self->length) {
+        KV* it = c11__at(KV, self, index);
+        if(equal(it->key, key)) {
+            c11_vector__erase(KV, self, index);
+            return true;
+        }
+    }
+    return false;
+}
+
+void METHOD(clear)(NAME* self) { c11_vector__clear(self); }
+
+#endif
+
+/* Undefine all macros */
+#undef KV
+#undef METHOD
+#undef CONCAT
+#undef CONCAT_
+
+#undef K
+#undef V
+#undef NAME
+#undef less
+#undef partial_less
+#undef equal
+
+#undef SMALLMAP_T__HEADER
+
+#define SMALLMAP_T__HEADER
+#define K c11_sv
+#define V int
+#define NAME c11_smallmap_v2d
+#define less(a, b)      (c11_sv__cmp((a), (b)) <  0)
+#define equal(a, b)     (c11_sv__cmp((a), (b)) == 0)
+#if !defined(SMALLMAP_T__HEADER) && !defined(SMALLMAP_T__SOURCE)
+#include "pocketpy/common/vector.h"
+#include "pocketpy/common/utils.h"
+#include "pocketpy/config.h"
+
+#define SMALLMAP_T__HEADER
+#define SMALLMAP_T__SOURCE
+/* Input */
+#define K int
+#define V float
+#define NAME c11_smallmap_d2f
 #endif
 
 /* Optional Input */
@@ -958,17 +1373,19 @@ void METHOD(clear)(NAME* self) { c11_vector__clear(self); }
 
 #define SMALLMAP_T__HEADER
 #define K void*
-#define V int
+#define V py_i64
 #define NAME c11_smallmap_p2i
 #if !defined(SMALLMAP_T__HEADER) && !defined(SMALLMAP_T__SOURCE)
 #include "pocketpy/common/vector.h"
+#include "pocketpy/common/utils.h"
+#include "pocketpy/config.h"
 
 #define SMALLMAP_T__HEADER
 #define SMALLMAP_T__SOURCE
 /* Input */
 #define K int
 #define V float
-#define NAME c11_smallmap_i2f
+#define NAME c11_smallmap_d2f
 #endif
 
 /* Optional Input */
@@ -1124,7 +1541,7 @@ typedef struct c11_array2d_view {
     c11_vec2i origin;
 } c11_array2d_view;
 
-c11_array2d* py_newarray2d(py_OutRef out, int n_cols, int n_rows);
+c11_array2d* c11_newarray2d(py_OutRef out, int n_cols, int n_rows);
 
 /* chunked_array2d */
 #define SMALLMAP_T__HEADER
@@ -1135,13 +1552,15 @@ c11_array2d* py_newarray2d(py_OutRef out, int n_cols, int n_rows);
 #define equal(a, b) (a._i64 == b._i64)
 #if !defined(SMALLMAP_T__HEADER) && !defined(SMALLMAP_T__SOURCE)
 #include "pocketpy/common/vector.h"
+#include "pocketpy/common/utils.h"
+#include "pocketpy/config.h"
 
 #define SMALLMAP_T__HEADER
 #define SMALLMAP_T__SOURCE
 /* Input */
 #define K int
 #define V float
-#define NAME c11_smallmap_i2f
+#define NAME c11_smallmap_d2f
 #endif
 
 /* Optional Input */
@@ -1281,23 +1700,6 @@ typedef struct c11_chunked_array2d {
 py_Ref c11_chunked_array2d__get(c11_chunked_array2d* self, int col, int row);
 bool c11_chunked_array2d__set(c11_chunked_array2d* self, int col, int row, py_Ref value);
 
-// interpreter/name.h
-
-
-typedef struct {
-    char* data;     // null-terminated data
-    int size;       // size of the data excluding the null-terminator
-    py_TValue obj;  // cached `str` object (lazy initialized)
-} RInternedEntry;
-
-typedef struct {
-    c11_smallmap_s2n interned;
-    c11_vector /* T=RInternedEntry */ r_interned;
-} InternedNames;
-
-void InternedNames__ctor(InternedNames* self);
-void InternedNames__dtor(InternedNames* self);
-
 // common/sstream.h
 
 
@@ -1367,6 +1769,7 @@ void SourceData__snapshot(const struct SourceData* self,
 
 #define BC_NOARG 0
 #define BC_KEEPLINE -1
+#define BC_RETURN_VIRTUAL 5
 
 typedef enum FuncType {
     FuncType_UNSET,
@@ -1448,11 +1851,30 @@ OPCODE(BUILD_SET)
 OPCODE(BUILD_SLICE)
 OPCODE(BUILD_STRING)
 /**************************/
-OPCODE(BINARY_OP)
+OPCODE(BINARY_ADD)
+OPCODE(BINARY_SUB)
+OPCODE(BINARY_MUL)
+OPCODE(BINARY_TRUEDIV)
+OPCODE(BINARY_FLOORDIV)
+OPCODE(BINARY_MOD)
+OPCODE(BINARY_POW)
+OPCODE(BINARY_LSHIFT)
+OPCODE(BINARY_RSHIFT)
+OPCODE(BINARY_AND)
+OPCODE(BINARY_OR)
+OPCODE(BINARY_XOR)
+OPCODE(BINARY_MATMUL)
+OPCODE(COMPARE_LT)
+OPCODE(COMPARE_LE)
+OPCODE(COMPARE_EQ)
+OPCODE(COMPARE_NE)
+OPCODE(COMPARE_GT)
+OPCODE(COMPARE_GE)
 OPCODE(IS_OP)
 OPCODE(CONTAINS_OP)
 /**************************/
 OPCODE(JUMP_FORWARD)
+OPCODE(POP_JUMP_IF_NOT_MATCH)
 OPCODE(POP_JUMP_IF_FALSE)
 OPCODE(POP_JUMP_IF_TRUE)
 OPCODE(JUMP_IF_TRUE_OR_POP)
@@ -1530,7 +1952,6 @@ typedef struct CodeBlock {
 
 typedef struct BytecodeEx {
     int lineno;       // line number for each bytecode
-    bool is_virtual;  // whether this bytecode is virtual (not in source code)
     int iblock;       // block index
 } BytecodeEx;
 
@@ -1543,9 +1964,11 @@ typedef struct CodeObject {
 
     c11_vector /*T=py_TValue*/ consts;  // constants
     c11_vector /*T=py_Name*/ varnames;  // local variables
-    int nlocals;                        // cached varnames.size()
+    c11_vector /*T=py_Name*/ names;
+    int nlocals;
 
-    c11_smallmap_n2i varnames_inv;
+    c11_smallmap_n2d varnames_inv;
+    c11_smallmap_n2d names_inv;
 
     c11_vector /*T=CodeBlock*/ blocks;
     c11_vector /*T=FuncDecl_*/ func_decls;
@@ -1557,11 +1980,12 @@ typedef struct CodeObject {
 void CodeObject__ctor(CodeObject* self, SourceData_ src, c11_sv name);
 void CodeObject__dtor(CodeObject* self);
 int CodeObject__add_varname(CodeObject* self, py_Name name);
-void CodeObject__gc_mark(const CodeObject* self);
+int CodeObject__add_name(CodeObject* self, py_Name name);
+void CodeObject__gc_mark(const CodeObject* self, c11_vector* p_stack);
 
 typedef struct FuncDeclKwArg {
     int index;        // index in co->varnames
-    uint16_t key;     // name of this argument
+    py_Name key;      // name of this argument
     py_TValue value;  // default value
 } FuncDeclKwArg;
 
@@ -1579,7 +2003,7 @@ typedef struct FuncDecl {
     const char* docstring;  // docstring of this function (weak ref)
 
     FuncType type;
-    c11_smallmap_n2i kw_to_index;
+    c11_smallmap_n2d kw_to_index;
 } FuncDecl;
 
 typedef FuncDecl* FuncDecl_;
@@ -1590,7 +2014,7 @@ void FuncDecl__add_arg(FuncDecl* self, py_Name name);
 void FuncDecl__add_kwarg(FuncDecl* self, py_Name name, const py_TValue* value);
 void FuncDecl__add_starred_arg(FuncDecl* self, py_Name name);
 void FuncDecl__add_starred_kwarg(FuncDecl* self, py_Name name);
-void FuncDecl__gc_mark(const FuncDecl* self);
+void FuncDecl__gc_mark(const FuncDecl* self, c11_vector* p_stack);
 
 // runtime function
 typedef struct Function {
@@ -1670,7 +2094,7 @@ int Frame__prepare_jump_exception_handler(py_Frame* self, ValueStack*);
 UnwindTarget* Frame__find_unwind_target(py_Frame* self, int iblock);
 void Frame__set_unwind_target(py_Frame* self, py_TValue* sp);
 
-void Frame__gc_mark(py_Frame* self);
+void Frame__gc_mark(py_Frame* self, c11_vector* p_stack);
 SourceLocation Frame__source_location(py_Frame* self);
 // interpreter/generator.h
 
@@ -1683,8 +2107,43 @@ typedef struct Generator{
 void pk_newgenerator(py_Ref out, py_Frame* frame, py_TValue* begin, py_TValue* end);
 
 void Generator__dtor(Generator* ud);
+// interpreter/line_profiler.h
+
+
+#include <time.h>
+
+typedef struct LineRecord {
+    py_i64 hits;
+    clock_t time;
+} LineRecord;
+
+typedef struct FrameRecord {
+    py_Frame* frame;
+    clock_t prev_time;
+    LineRecord* prev_line;
+    bool is_lambda;
+} FrameRecord;
+
+typedef struct LineProfiler {
+    c11_smallmap_p2i records;  // SourceData* -> LineRecord[]
+    c11_vector /*T=FrameRecord*/ frame_records;  // FrameRecord[]
+    bool enabled;
+} LineProfiler;
+
+void LineProfiler__ctor(LineProfiler* self);
+void LineProfiler__dtor(LineProfiler* self);
+LineRecord* LineProfiler__get_record(LineProfiler* self, SourceLocation loc);
+void LineProfiler__begin(LineProfiler* self);
+void LineProfiler__tracefunc_internal(LineProfiler* self, py_Frame* frame, enum py_TraceEvent event);
+void LineProfiler__end(LineProfiler* self);
+void LineProfiler__reset(LineProfiler* self);
+c11_string* LineProfiler__get_report(LineProfiler* self);
+
+void LineProfiler_tracefunc(py_Frame* frame, enum py_TraceEvent event);
 // interpreter/vm.h
 
+
+#include <time.h>
 
 // TODO:
 // 1. __eq__ and __ne__ fallbacks
@@ -1699,36 +2158,54 @@ typedef struct TraceInfo {
     py_TraceFunc func;
 } TraceInfo;
 
+typedef struct WatchdogInfo {
+    clock_t max_reset_time;
+} WatchdogInfo;
+
+typedef struct TypePointer {
+    py_TypeInfo* ti;
+    py_Dtor dtor;
+} TypePointer;
+
+typedef struct py_ModuleInfo {
+    c11_string* name;
+    c11_string* package;
+    c11_string* path;
+    py_GlobalRef self;  // weakref to the original module object
+} py_ModuleInfo;
+
 typedef struct VM {
     py_Frame* top_frame;
 
-    ModuleDict modules;
-    TypeList types;
+    BinTree modules;
+    c11_vector /*TypePointer*/ types;
 
-    py_TValue builtins;  // builtins module
-    py_TValue main;      // __main__ module
+    py_GlobalRef builtins;  // builtins module
+    py_GlobalRef main;      // __main__ module
 
     py_Callbacks callbacks;
-
-    py_TValue ascii_literals[128+1];
 
     py_TValue last_retval;
     py_TValue curr_exception;
 
     int recursion_depth;
     int max_recursion_depth;
-    
+
     bool is_curr_exc_handled;  // handled by try-except block but not cleared yet
 
     py_TValue reg[8];  // users' registers
     void* ctx;         // user-defined context
 
+    CachedNames cached_names;
+    NameDict compile_time_funcs;
+
     py_StackRef curr_class;
-    py_StackRef curr_decl_based_function;
+    py_StackRef curr_decl_based_function;   // this is for get current function without frame
     TraceInfo trace_info;
+    WatchdogInfo watchdog_info;
+    LineProfiler line_profiler;
     py_TValue vectorcall_buffer[PK_MAX_CO_VARNAMES];
 
-    InternedNames names;
     FixedMemoryPool pool_frame;
     ManagedHeap heap;
     ValueStack stack;  // put `stack` at the end for better cache locality
@@ -1740,13 +2217,14 @@ void VM__dtor(VM* self);
 void VM__push_frame(VM* self, py_Frame* frame);
 void VM__pop_frame(VM* self);
 
-bool pk__parse_int_slice(py_Ref slice, int length, int* restrict start, int* restrict stop, int* restrict step);
+bool pk__parse_int_slice(py_Ref slice,
+                         int length,
+                         int* restrict start,
+                         int* restrict stop,
+                         int* restrict step);
 bool pk__normalize_index(int* index, int length);
 
-#define pk__mark_value(val) if((val)->is_ptr && !(val)->_obj->gc_marked) PyObject__mark((val)->_obj)
-
 bool pk__object_new(int argc, py_Ref argv);
-py_TypeInfo* pk__type_info(py_Type type);
 
 bool pk_wrapper__self(int argc, py_Ref argv);
 
@@ -1761,20 +2239,12 @@ typedef enum FrameResult {
 
 FrameResult VM__run_top_frame(VM* self);
 
-py_Type pk_newtype(const char* name,
-                   py_Type base,
-                   const py_GlobalRef module,
-                   void (*dtor)(void*),
-                   bool is_python,
-                   bool is_sealed);
-
 FrameResult VM__vectorcall(VM* self, uint16_t argc, uint16_t kwargc, bool opcall);
 
 const char* pk_opname(Opcode op);
 
 int pk_arrayview(py_Ref self, py_TValue** p);
 bool pk_wrapper__arrayequal(py_Type type, int argc, py_Ref argv);
-bool pk_arrayiter(py_Ref val);
 bool pk_arraycontains(py_Ref self, py_Ref val);
 
 bool pk_loadmethod(py_StackRef self, py_Name name);
@@ -1800,13 +2270,15 @@ py_Type pk_dict__register();
 py_Type pk_dict_items__register();
 py_Type pk_list__register();
 py_Type pk_tuple__register();
-py_Type pk_array_iterator__register();
+py_Type pk_list_iterator__register();
+py_Type pk_tuple_iterator__register();
 py_Type pk_slice__register();
 py_Type pk_function__register();
 py_Type pk_nativefunc__register();
 py_Type pk_boundmethod__register();
 py_Type pk_range__register();
 py_Type pk_range_iterator__register();
+py_Type pk_module__register();
 py_Type pk_BaseException__register();
 py_Type pk_Exception__register();
 py_Type pk_StopIteration__register();
@@ -1818,7 +2290,7 @@ py_Type pk_generator__register();
 py_Type pk_namedict__register();
 py_Type pk_code__register();
 
-py_TValue pk_builtins__register();
+py_GlobalRef pk_builtins__register();
 
 /* mappingproxy */
 void pk_mappingproxy__namedict(py_Ref out, py_Ref object);
@@ -1828,11 +2300,57 @@ void pk_mappingproxy__namedict(py_Ref out, py_Ref object);
 typedef struct{
     SourceData_ src;
     int lineno;
-    char msg[100];
+    char msg[512];
 } Error;
 
-void py_BaseException__stpush(py_Ref, SourceData_ src, int lineno, const char* func_name);
+void py_BaseException__stpush(py_Frame* frame, py_Ref, SourceData_ src, int lineno, const char* func_name);
 
+// objects/exception.h
+
+
+typedef struct BaseExceptionFrame {
+    SourceData_ src;
+    int lineno;
+    c11_string* name;
+    py_TValue locals;   // for debugger only
+    py_TValue globals;  // for debugger only
+} BaseExceptionFrame;
+
+typedef struct BaseException {
+    py_TValue args;
+    py_TValue inner_exc;
+    c11_vector /*T=BaseExceptionFrame*/ stacktrace;
+} BaseException;
+
+
+// debugger/core.h
+
+
+#if PK_ENABLE_OS
+
+typedef enum { C11_STEP_IN, C11_STEP_OVER, C11_STEP_OUT, C11_STEP_CONTINUE } C11_STEP_MODE;
+typedef enum { C11_DEBUGGER_NOSTOP, C11_DEBUGGER_STEP, C11_DEBUGGER_EXCEPTION, C11_DEBUGGER_BP} C11_STOP_REASON;
+typedef enum {
+    C11_DEBUGGER_SUCCESS = 0,
+    C11_DEBUGGER_EXIT = 1,
+    C11_DEBUGGER_UNKNOW_ERROR = 3,
+    C11_DEBUGGER_FILEPATH_ERROR = 7
+} C11_DEBUGGER_STATUS;
+
+void c11_debugger_init(void);
+void c11_debugger_set_step_mode(C11_STEP_MODE mode);
+void c11_debugger_exception_on_trace(py_Ref exc);
+C11_DEBUGGER_STATUS c11_debugger_on_trace(py_Frame* frame, enum py_TraceEvent event);
+const char* c11_debugger_excinfo(const char ** message);
+void c11_debugger_frames(c11_sbuf* buffer);
+void c11_debugger_scopes(int frameid, c11_sbuf* buffer);
+bool c11_debugger_unfold_var(int var_id, c11_sbuf* buffer);
+int c11_debugger_setbreakpoint(const char* filename, int lineno);
+int c11_debugger_reset_breakpoints_by_source(const char* sourcesname);
+C11_STOP_REASON c11_debugger_should_pause(void);
+int c11_debugger_should_keep_pause(void);
+
+#endif // PK_ENABLE_OS
 // compiler/lexer.h
 
 
@@ -1840,32 +2358,112 @@ void py_BaseException__stpush(py_Ref, SourceData_ src, int lineno, const char* f
 
 extern const char* TokenSymbols[];
 
-typedef enum TokenIndex{
-    TK_EOF, TK_EOL, TK_SOF,
-    TK_ID, TK_NUM, TK_STR, TK_FSTR_BEGIN, TK_FSTR_CPNT, TK_FSTR_SPEC, TK_FSTR_END, TK_BYTES, TK_IMAG,
-    TK_INDENT, TK_DEDENT,
+typedef enum TokenIndex {
+    TK_EOF,
+    TK_EOL,
+    TK_SOF,
+    TK_ID,
+    TK_NUM,
+    TK_STR,
+    TK_FSTR_BEGIN,
+    TK_FSTR_CPNT,
+    TK_FSTR_SPEC,
+    TK_FSTR_END,
+    TK_BYTES,
+    TK_IMAG,
+    TK_INDENT,
+    TK_DEDENT,
     /***************/
-    TK_IS_NOT, TK_NOT_IN, TK_YIELD_FROM,
+    TK_IS_NOT,
+    TK_NOT_IN,
+    TK_YIELD_FROM,
     /***************/
-    TK_ADD, TK_IADD, TK_SUB, TK_ISUB,
-    TK_MUL, TK_IMUL, TK_DIV, TK_IDIV, TK_FLOORDIV, TK_IFLOORDIV, TK_MOD, TK_IMOD,
-    TK_AND, TK_IAND, TK_OR, TK_IOR, TK_XOR, TK_IXOR,
-    TK_LSHIFT, TK_ILSHIFT, TK_RSHIFT, TK_IRSHIFT,
+    TK_ADD,
+    TK_IADD,
+    TK_SUB,
+    TK_ISUB,
+    TK_MUL,
+    TK_IMUL,
+    TK_DIV,
+    TK_IDIV,
+    TK_FLOORDIV,
+    TK_IFLOORDIV,
+    TK_MOD,
+    TK_IMOD,
+    TK_AND,
+    TK_IAND,
+    TK_OR,
+    TK_IOR,
+    TK_XOR,
+    TK_IXOR,
+    TK_LSHIFT,
+    TK_ILSHIFT,
+    TK_RSHIFT,
+    TK_IRSHIFT,
     /***************/
-    TK_LPAREN, TK_RPAREN, TK_LBRACKET, TK_RBRACKET, TK_LBRACE, TK_RBRACE,
-    TK_DOT, TK_DOTDOT, TK_DOTDOTDOT, TK_COMMA, TK_COLON, TK_SEMICOLON,
-    TK_POW, TK_ARROW, TK_HASH, TK_DECORATOR,
-    TK_GT, TK_LT, TK_ASSIGN, TK_EQ, TK_NE, TK_GE, TK_LE, TK_INVERT,
+    TK_LPAREN,
+    TK_RPAREN,
+    TK_LBRACKET,
+    TK_RBRACKET,
+    TK_LBRACE,
+    TK_RBRACE,
+    TK_DOT,
+    TK_DOTDOT,
+    TK_DOTDOTDOT,
+    TK_COMMA,
+    TK_COLON,
+    TK_SEMICOLON,
+    TK_POW,
+    TK_ARROW,
+    TK_HASH,
+    TK_DECORATOR,
+    TK_GT,
+    TK_LT,
+    TK_ASSIGN,
+    TK_EQ,
+    TK_NE,
+    TK_GE,
+    TK_LE,
+    TK_INVERT,
     /***************/
-    TK_FALSE, TK_NONE, TK_TRUE, TK_AND_KW, TK_AS, TK_ASSERT, TK_BREAK, TK_CLASS, TK_CONTINUE,
-    TK_DEF, TK_DEL, TK_ELIF, TK_ELSE, TK_EXCEPT, TK_FINALLY, TK_FOR, TK_FROM, TK_GLOBAL,
-    TK_IF, TK_IMPORT, TK_IN, TK_IS, TK_LAMBDA, TK_NOT_KW, TK_OR_KW, TK_PASS, TK_RAISE, TK_RETURN,
-    TK_TRY, TK_WHILE, TK_WITH, TK_YIELD,
+    TK_FALSE,
+    TK_NONE,
+    TK_TRUE,
+    TK_AND_KW,
+    TK_AS,
+    TK_ASSERT,
+    TK_BREAK,
+    TK_CLASS,
+    TK_CONTINUE,
+    TK_DEF,
+    TK_DEL,
+    TK_ELIF,
+    TK_ELSE,
+    TK_EXCEPT,
+    TK_FINALLY,
+    TK_FOR,
+    TK_FROM,
+    TK_GLOBAL,
+    TK_IF,
+    TK_IMPORT,
+    TK_IN,
+    TK_IS,
+    TK_LAMBDA,
+    TK_MATCH,
+    TK_NOT_KW,
+    TK_OR_KW,
+    TK_PASS,
+    TK_RAISE,
+    TK_RETURN,
+    TK_TRY,
+    TK_WHILE,
+    TK_WITH,
+    TK_YIELD,
     /***************/
     TK__COUNT__
 } TokenIndex;
 
-enum TokenValueIndex{
+enum TokenValueIndex {
     TokenValue_EMPTY = 0,
     TokenValue_I64 = 1,
     TokenValue_F64 = 2,
@@ -1874,10 +2472,11 @@ enum TokenValueIndex{
 
 typedef struct TokenValue {
     enum TokenValueIndex index;  // 0: empty
+
     union {
-        int64_t _i64;       // 1
-        double _f64;        // 2
-        c11_string* _str;   // 3
+        int64_t _i64;      // 1
+        double _f64;       // 2
+        c11_string* _str;  // 3
     };
 } TokenValue;
 
@@ -1901,7 +2500,8 @@ enum Precedence {
     /* https://docs.python.org/3/reference/expressions.html#comparisons
      * Unlike C, all comparison operations in Python have the same priority,
      * which is lower than that of any arithmetic, shifting or bitwise operation.
-     * Also unlike C, expressions like a < b < c have the interpretation that is conventional in mathematics.
+     * Also unlike C, expressions like a < b < c have the interpretation that is conventional in
+     * mathematics.
      */
     PREC_COMPARISION,    // < > <= >= != ==, in / is / is not / not in
     PREC_BITWISE_OR,     // |
@@ -1918,7 +2518,8 @@ enum Precedence {
 
 Error* Lexer__process(SourceData_ src, Token** out_tokens, int* out_length);
 
-#define Token__sv(self) (c11_sv){(self)->start, (self)->length}
+#define Token__sv(self)                                                                            \
+    (c11_sv) { (self)->start, (self)->length }
 
 // compiler/compiler.h
 
@@ -1928,7 +2529,6 @@ Error* pk_compile(SourceData_ src, CodeObject* out);
 // src/interpreter/objectpool.c
 #include <assert.h>
 #include <stdbool.h>
-#include <stdlib.h>
 #include <string.h>
 
 static PoolArena* PoolArena__new(int block_size) {
@@ -1938,7 +2538,6 @@ static PoolArena* PoolArena__new(int block_size) {
     self->block_size = block_size;
     self->block_count = block_count;
     self->unused_length = block_count;
-    self->unused = PK_MALLOC(sizeof(int) * block_count);
     for(int i = 0; i < block_count; i++) {
         self->unused[i] = i;
     }
@@ -1951,7 +2550,6 @@ static void PoolArena__delete(PoolArena* self) {
         PyObject* obj = (PyObject*)(self->data + i * self->block_size);
         if(obj->type != 0) PyObject__dtor(obj);
     }
-    PK_FREE(self->unused);
     PK_FREE(self);
 }
 
@@ -2129,9 +2727,12 @@ c11_string* MultiPool__summary(MultiPool* self) {
 }
 
 // src/interpreter/heap.c
+#include <assert.h>
+
 void ManagedHeap__ctor(ManagedHeap* self) {
     MultiPool__ctor(&self->small_objects);
     c11_vector__ctor(&self->large_objects, sizeof(PyObject*));
+    c11_vector__ctor(&self->gc_roots, sizeof(PyObject*));
 
     for(int i = 0; i < c11__count_array(self->freed_ma); i++) {
         self->freed_ma[i] = PK_GC_MIN_THRESHOLD;
@@ -2151,29 +2752,32 @@ void ManagedHeap__dtor(ManagedHeap* self) {
         PK_FREE(obj);
     }
     c11_vector__dtor(&self->large_objects);
+    c11_vector__dtor(&self->gc_roots);
 }
 
 void ManagedHeap__collect_if_needed(ManagedHeap* self) {
     if(!self->gc_enabled) return;
     if(self->gc_counter < self->gc_threshold) return;
-    self->gc_counter = 0;
     int freed = ManagedHeap__collect(self);
     // adjust `gc_threshold` based on `freed_ma`
     self->freed_ma[0] = self->freed_ma[1];
     self->freed_ma[1] = self->freed_ma[2];
     self->freed_ma[2] = freed;
     int avg_freed = (self->freed_ma[0] + self->freed_ma[1] + self->freed_ma[2]) / 3;
-    const int upper = PK_GC_MIN_THRESHOLD * 2;
+    const int upper = PK_GC_MIN_THRESHOLD * 16;
     const int lower = PK_GC_MIN_THRESHOLD / 2;
-    float free_ratio = (float)avg_freed / PK_GC_MIN_THRESHOLD;
-    int new_threshold = self->gc_threshold * (1 / free_ratio);
-    // printf("gc_threshold=%d, avg_freed=%d, new_threshold=%d\n", self->gc_threshold, avg_freed, new_threshold);
+    float free_ratio = (float)avg_freed / self->gc_threshold;
+    int new_threshold = self->gc_threshold * (1.5f / free_ratio);
+    // printf("gc_threshold=%d, avg_freed=%d, new_threshold=%d\n", self->gc_threshold, avg_freed,
+    // new_threshold);
     self->gc_threshold = c11__min(c11__max(new_threshold, lower), upper);
 }
 
 int ManagedHeap__collect(ManagedHeap* self) {
+    self->gc_counter = 0;
     ManagedHeap__mark(self);
     int freed = ManagedHeap__sweep(self);
+    // printf("GC: collected %d objects\n", freed);
     return freed;
 }
 
@@ -2206,7 +2810,7 @@ PyObject* ManagedHeap__gcnew(ManagedHeap* self, py_Type type, int slots, int uds
     PyObject* obj;
     // header + slots + udsize
     int size = sizeof(PyObject) + PK_OBJ_SLOTS_SIZE(slots) + udsize;
-    if(!PK_LOW_MEMORY_MODE && size <= kPoolMaxBlockSize) {
+    if(size <= kPoolMaxBlockSize) {
         obj = MultiPool__alloc(&self->small_objects, size);
         assert(obj != NULL);
     } else {
@@ -2221,7 +2825,9 @@ PyObject* ManagedHeap__gcnew(ManagedHeap* self, py_Type type, int slots, int uds
     if(slots >= 0) {
         memset(obj->flex, 0, slots * sizeof(py_TValue));
     } else {
-        NameDict__ctor((void*)obj->flex);
+        float load_factor = (type == tp_type || type == tp_module) ? PK_TYPE_ATTR_LOAD_FACTOR
+                                                                   : PK_INST_ATTR_LOAD_FACTOR;
+        NameDict__ctor((void*)obj->flex, load_factor);
     }
 
     self->gc_counter++;
@@ -2229,6 +2835,7 @@ PyObject* ManagedHeap__gcnew(ManagedHeap* self, py_Type type, int slots, int uds
 }
 // src/interpreter/vm.c
 #include <stdbool.h>
+#include <assert.h>
 
 static char* pk_default_importfile(const char* path) {
 #if PK_ENABLE_OS
@@ -2249,45 +2856,66 @@ static char* pk_default_importfile(const char* path) {
 
 static void pk_default_print(const char* data) { printf("%s", data); }
 
-static void py_TypeInfo__ctor(py_TypeInfo* self,
-                              py_Name name,
-                              py_Type index,
-                              py_Type base,
-                              py_TypeInfo* base_ti,
-                              py_TValue module) {
-    memset(self, 0, sizeof(py_TypeInfo));
+static void pk_default_flush() { fflush(stdout); }
 
-    self->name = name;
-    self->base = base;
-    self->base_ti = base_ti;
+static int pk_default_getchr() { return getchar(); }
 
-    // create type object with __dict__
-    ManagedHeap* heap = &pk_current_vm->heap;
-    PyObject* typeobj = ManagedHeap__new(heap, tp_type, -1, sizeof(py_Type));
-    *(py_Type*)PyObject__userdata(typeobj) = index;
-    self->self = (py_TValue){
-        .type = typeobj->type,
-        .is_ptr = true,
-        ._obj = typeobj,
-    };
+void py_profiler_begin() {
+    LineProfiler* lp = &pk_current_vm->line_profiler;
+    TraceInfo* trace_info = &pk_current_vm->trace_info;
+    if(trace_info->func == NULL) py_sys_settrace(LineProfiler_tracefunc, true);
+    c11__rtassert(trace_info->func == LineProfiler_tracefunc);
+    LineProfiler__begin(lp);
+}
 
-    self->module = module;
-    self->annotations = *py_NIL();
+void py_profiler_end() {
+    LineProfiler* lp = &pk_current_vm->line_profiler;
+    LineProfiler__end(lp);
+}
+
+void py_profiler_reset() {
+    LineProfiler* lp = &pk_current_vm->line_profiler;
+    LineProfiler__reset(lp);
+}
+
+char* py_profiler_report() {
+    LineProfiler* lp = &pk_current_vm->line_profiler;
+    if(lp->enabled) LineProfiler__end(lp);
+    c11_string* s = LineProfiler__get_report(lp);
+    char* s_dup = c11_strdup(s->data);
+    c11_string__delete(s);
+    return s_dup;
+}
+
+void LineProfiler_tracefunc(py_Frame* frame, enum py_TraceEvent event) {
+    LineProfiler* lp = &pk_current_vm->line_profiler;
+    if(lp->enabled) LineProfiler__tracefunc_internal(lp, frame, event);
+}
+
+static int BinTree__cmp_cstr(void* lhs, void* rhs) {
+    const char* l = (const char*)lhs;
+    const char* r = (const char*)rhs;
+    return strcmp(l, r);
 }
 
 void VM__ctor(VM* self) {
     self->top_frame = NULL;
-    InternedNames__ctor(&self->names);
 
-    ModuleDict__ctor(&self->modules, NULL, *py_NIL());
-    TypeList__ctor(&self->types);
+    const static BinTreeConfig modules_config = {
+        .f_cmp = BinTree__cmp_cstr,
+        .need_free_key = false,
+    };
+    BinTree__ctor(&self->modules, "", py_NIL(), &modules_config);
+    c11_vector__ctor(&self->types, sizeof(TypePointer));
 
-    self->builtins = *py_NIL();
-    self->main = *py_NIL();
+    self->builtins = NULL;
+    self->main = NULL;
 
     self->callbacks.importfile = pk_default_importfile;
+    self->callbacks.lazyimport = NULL;
     self->callbacks.print = pk_default_print;
-    self->callbacks.getchar = getchar;
+    self->callbacks.flush = pk_default_flush;
+    self->callbacks.getchr = pk_default_getchr;
 
     self->last_retval = *py_NIL();
     self->curr_exception = *py_NIL();
@@ -2301,28 +2929,28 @@ void VM__ctor(VM* self) {
     self->curr_class = NULL;
     self->curr_decl_based_function = NULL;
     memset(&self->trace_info, 0, sizeof(TraceInfo));
+    memset(&self->watchdog_info, 0, sizeof(WatchdogInfo));
+    LineProfiler__ctor(&self->line_profiler);
 
     FixedMemoryPool__ctor(&self->pool_frame, sizeof(py_Frame), 32);
 
     ManagedHeap__ctor(&self->heap);
     ValueStack__ctor(&self->stack);
 
-    /* Init Builtin Types */
-    for(int i = 0; i < 128; i++) {
-        char* p = py_newstrn(&self->ascii_literals[i], 1);
-        *p = i;
-    }
-    py_newstrn(&self->ascii_literals[128], 0);  // empty string
+    CachedNames__ctor(&self->cached_names);
+    NameDict__ctor(&self->compile_time_funcs, PK_TYPE_ATTR_LOAD_FACTOR);
 
+    /* Init Builtin Types */
     // 0: unused
-    void* placeholder = TypeList__emplace(&self->types);
-    memset(placeholder, 0, sizeof(py_TypeInfo));
+    TypePointer* placeholder = c11_vector__emplace(&self->types);
+    placeholder->ti = NULL;
+    placeholder->dtor = NULL;
 
 #define validate(t, expr)                                                                          \
     if(t != (expr)) abort()
 
-    validate(tp_object, pk_newtype("object", 0, NULL, NULL, true, false));
-    validate(tp_type, pk_newtype("type", 1, NULL, NULL, false, true));
+    validate(tp_object, pk_newtype("object", tp_nil, NULL, NULL, true, false));
+    validate(tp_type, pk_newtype("type", tp_object, NULL, NULL, false, true));
     pk_object__register();
 
     validate(tp_int, pk_newtype("int", tp_object, NULL, NULL, false, true));
@@ -2335,12 +2963,13 @@ void VM__ctor(VM* self) {
 
     validate(tp_list, pk_list__register());
     validate(tp_tuple, pk_tuple__register());
-    validate(tp_array_iterator, pk_array_iterator__register());
+    validate(tp_list_iterator, pk_list_iterator__register());
+    validate(tp_tuple_iterator, pk_tuple_iterator__register());
 
     validate(tp_slice, pk_slice__register());
     validate(tp_range, pk_range__register());
     validate(tp_range_iterator, pk_range_iterator__register());
-    validate(tp_module, pk_newtype("module", tp_object, NULL, NULL, false, true));
+    validate(tp_module, pk_module__register());
 
     validate(tp_function, pk_function__register());
     validate(tp_nativefunc, pk_nativefunc__register());
@@ -2355,7 +2984,7 @@ void VM__ctor(VM* self) {
     validate(tp_code, pk_code__register());
 
     validate(tp_dict, pk_dict__register());
-    validate(tp_dict_items, pk_dict_items__register());
+    validate(tp_dict_iterator, pk_dict_items__register());
 
     validate(tp_property, pk_property__register());
     validate(tp_star_wrapper, pk_newtype("star_wrapper", tp_object, NULL, NULL, false, true));
@@ -2374,8 +3003,8 @@ void VM__ctor(VM* self) {
     // inject some builtin exceptions
 #define INJECT_BUILTIN_EXC(name, TBase)                                                            \
     do {                                                                                           \
-        py_Type type = pk_newtype(#name, TBase, &self->builtins, NULL, false, true);               \
-        py_setdict(&self->builtins, py_name(#name), py_tpobject(type));                            \
+        py_Type type = pk_newtype(#name, TBase, self->builtins, NULL, false, true);                \
+        py_setdict(self->builtins, py_name(#name), py_tpobject(type));                             \
         validate(tp_##name, type);                                                                 \
     } while(0)
 
@@ -2383,7 +3012,7 @@ void VM__ctor(VM* self) {
     INJECT_BUILTIN_EXC(KeyboardInterrupt, tp_BaseException);
 
     validate(tp_StopIteration, pk_StopIteration__register());
-    py_setdict(&self->builtins, py_name("StopIteration"), py_tpobject(tp_StopIteration));
+    py_setdict(self->builtins, py_name("StopIteration"), py_tpobject(tp_StopIteration));
 
     INJECT_BUILTIN_EXC(SyntaxError, tp_Exception);
     INJECT_BUILTIN_EXC(RecursionError, tp_Exception);
@@ -2393,6 +3022,7 @@ void VM__ctor(VM* self) {
     INJECT_BUILTIN_EXC(IndexError, tp_Exception);
     INJECT_BUILTIN_EXC(ValueError, tp_Exception);
     INJECT_BUILTIN_EXC(RuntimeError, tp_Exception);
+    INJECT_BUILTIN_EXC(TimeoutError, tp_Exception);
     INJECT_BUILTIN_EXC(ZeroDivisionError, tp_Exception);
     INJECT_BUILTIN_EXC(NameError, tp_Exception);
     INJECT_BUILTIN_EXC(UnboundLocalError, tp_Exception);
@@ -2427,13 +3057,13 @@ void VM__ctor(VM* self) {
     };
 
     for(int i = 0; i < c11__count_array(public_types); i++) {
-        py_TypeInfo* ti = pk__type_info(public_types[i]);
-        py_setdict(&self->builtins, ti->name, &ti->self);
+        py_TypeInfo* ti = pk_typeinfo(public_types[i]);
+        py_setdict(self->builtins, ti->name, &ti->self);
     }
 
-    py_newnotimplemented(py_emplacedict(&self->builtins, py_name("NotImplemented")));
+    py_newnotimplemented(py_emplacedict(self->builtins, py_name("NotImplemented")));
 
-    pk__add_module_linalg();
+    pk__add_module_vmath();
     pk__add_module_array2d();
     pk__add_module_colorcvt();
 
@@ -2454,16 +3084,18 @@ void VM__ctor(VM* self) {
     pk__add_module_pickle();
     pk__add_module_base64();
     pk__add_module_importlib();
+    pk__add_module_unicodedata();
 
     pk__add_module_conio();
-    pk__add_module_lz4();    // optional
-    pk__add_module_libhv();  // optional
+    pk__add_module_lz4();       // optional
+    pk__add_module_libhv();     // optional
+    pk__add_module_cute_png();  // optional
     pk__add_module_pkpy();
 
     // add python builtins
     do {
         bool ok;
-        ok = py_exec(kPythonLibs_builtins, "<builtins>", EXEC_MODE, &self->builtins);
+        ok = py_exec(kPythonLibs_builtins, "<builtins>", EXEC_MODE, self->builtins);
         if(!ok) goto __ABORT;
         break;
     __ABORT:
@@ -2471,20 +3103,24 @@ void VM__ctor(VM* self) {
         c11__abort("failed to load python builtins!");
     } while(0);
 
-    self->main = *py_newmodule("__main__");
+    self->main = py_newmodule("__main__");
 }
 
 void VM__dtor(VM* self) {
+    // reset traceinfo
+    py_sys_settrace(NULL, true);
+    LineProfiler__dtor(&self->line_profiler);
     // destroy all objects
     ManagedHeap__dtor(&self->heap);
     // clear frames
     while(self->top_frame)
         VM__pop_frame(self);
-    ModuleDict__dtor(&self->modules);
-    TypeList__dtor(&self->types);
+    BinTree__dtor(&self->modules);
     FixedMemoryPool__dtor(&self->pool_frame);
     ValueStack__dtor(&self->stack);
-    InternedNames__dtor(&self->names);
+    CachedNames__dtor(&self->cached_names);
+    NameDict__dtor(&self->compile_time_funcs);
+    c11_vector__dtor(&self->types);
 }
 
 void VM__push_frame(VM* self, py_Frame* frame) {
@@ -2584,32 +3220,6 @@ bool pk__normalize_index(int* index, int length) {
     return true;
 }
 
-py_Type pk_newtype(const char* name,
-                   py_Type base,
-                   const py_GlobalRef module,
-                   void (*dtor)(void*),
-                   bool is_python,
-                   bool is_sealed) {
-    py_Type index = pk_current_vm->types.length;
-    py_TypeInfo* ti = TypeList__emplace(&pk_current_vm->types);
-    py_TypeInfo* base_ti = base ? pk__type_info(base) : NULL;
-    if(base_ti && base_ti->is_sealed) {
-        c11__abort("type '%s' is not an acceptable base type", py_name2str(base_ti->name));
-    }
-    py_TypeInfo__ctor(ti, py_name(name), index, base, base_ti, module ? *module : *py_NIL());
-    if(!dtor && base) dtor = base_ti->dtor;
-    ti->dtor = dtor;
-    ti->is_python = is_python;
-    ti->is_sealed = is_sealed;
-    return index;
-}
-
-py_Type py_newtype(const char* name, py_Type base, const py_GlobalRef module, void (*dtor)(void*)) {
-    py_Type type = pk_newtype(name, base, module, dtor, false, false);
-    if(module) py_setdict(module, py_name(name), py_tpobject(type));
-    return type;
-}
-
 static bool
     prepare_py_call(py_TValue* buffer, py_Ref argv, py_Ref p1, int kwargc, const FuncDecl* decl) {
     const CodeObject* co = &decl->code;
@@ -2652,8 +3262,8 @@ static bool
     if(decl->starred_kwarg != -1) py_newdict(&buffer[decl->starred_kwarg]);
 
     for(int j = 0; j < kwargc; j++) {
-        py_Name key = py_toint(&p1[2 * j]);
-        int index = c11_smallmap_n2i__get(&decl->kw_to_index, key, -1);
+        py_Name key = (py_Name)py_toint(&p1[2 * j]);
+        int index = c11_smallmap_n2d__get(&decl->kw_to_index, key, -1);
         // if key is an explicit key, set as local variable
         if(index >= 0) {
             buffer[index] = p1[2 * j + 1];
@@ -2820,127 +3430,64 @@ FrameResult VM__vectorcall(VM* self, uint16_t argc, uint16_t kwargc, bool opcall
 }
 
 /****************************************/
-void PyObject__dtor(PyObject* self) {
-    py_TypeInfo* ti = pk__type_info(self->type);
-    if(ti->dtor) ti->dtor(PyObject__userdata(self));
-    if(self->slots == -1) NameDict__dtor(PyObject__dict(self));
-}
-
-void PyObject__mark(PyObject* obj) {
-    assert(!obj->gc_marked);
-
-    obj->gc_marked = true;
-
-    if(obj->slots > 0) {
-        py_TValue* p = PyObject__slots(obj);
-        for(int i = 0; i < obj->slots; i++)
-            pk__mark_value(p + i);
-    } else if(obj->slots == -1) {
-        NameDict* namedict = PyObject__dict(obj);
-        for(int i = 0; i < namedict->length; i++) {
-            NameDict_KV* kv = c11__at(NameDict_KV, namedict, i);
-            pk__mark_value(&kv->value);
-        }
-    }
-
-    void* ud = PyObject__userdata(obj);
-    switch(obj->type) {
-        case tp_list: {
-            List* self = ud;
-            for(int i = 0; i < self->length; i++) {
-                pk__mark_value(c11__at(py_TValue, self, i));
-            }
-            break;
-        }
-        case tp_dict: {
-            Dict* self = ud;
-            for(int i = 0; i < self->entries.length; i++) {
-                DictEntry* entry = c11__at(DictEntry, &self->entries, i);
-                if(py_isnil(&entry->key)) continue;
-                pk__mark_value(&entry->key);
-                pk__mark_value(&entry->val);
-            }
-            break;
-        }
-        case tp_generator: {
-            Generator* self = ud;
-            if(self->frame) Frame__gc_mark(self->frame);
-            break;
-        }
-        case tp_function: {
-            function__gc_mark(ud);
-            break;
-        }
-        case tp_code: {
-            CodeObject* self = ud;
-            CodeObject__gc_mark(self);
-            break;
-        }
-        case tp_chunked_array2d: {
-            c11_chunked_array2d__mark(ud);
-        }
-        default: return;
-    }
-}
-
-void FuncDecl__gc_mark(const FuncDecl* self) {
-    CodeObject__gc_mark(&self->code);
+void FuncDecl__gc_mark(const FuncDecl* self, c11_vector* p_stack) {
+    CodeObject__gc_mark(&self->code, p_stack);
     for(int j = 0; j < self->kwargs.length; j++) {
         FuncDeclKwArg* kw = c11__at(FuncDeclKwArg, &self->kwargs, j);
         pk__mark_value(&kw->value);
     }
 }
 
-void CodeObject__gc_mark(const CodeObject* self) {
+void CodeObject__gc_mark(const CodeObject* self, c11_vector* p_stack) {
     for(int i = 0; i < self->consts.length; i++) {
         py_TValue* p = c11__at(py_TValue, &self->consts, i);
         pk__mark_value(p);
     }
     for(int i = 0; i < self->func_decls.length; i++) {
         FuncDecl_ decl = c11__getitem(FuncDecl_, &self->func_decls, i);
-        FuncDecl__gc_mark(decl);
+        FuncDecl__gc_mark(decl, p_stack);
     }
+}
+
+static void pk__mark_value_func(py_Ref val, void* ctx) {
+    c11_vector* p_stack = ctx;
+    pk__mark_value(val);
 }
 
 void ManagedHeap__mark(ManagedHeap* self) {
     VM* vm = pk_current_vm;
+    c11_vector* p_stack = &self->gc_roots;
+    assert(p_stack->length == 0);
+
     // mark value stack
-    for(py_TValue* p = vm->stack.begin; p != vm->stack.end; p++) {
+    for(py_TValue* p = vm->stack.begin; p < vm->stack.sp; p++) {
+        // assert(p->type != tp_nil);
         pk__mark_value(p);
     }
-    // mark ascii literals
-    for(int i = 0; i < c11__count_array(vm->ascii_literals); i++) {
-        pk__mark_value(&vm->ascii_literals[i]);
-    }
     // mark modules
-    ModuleDict__apply_mark(&vm->modules);
+    BinTree__apply_mark(&vm->modules, p_stack);
+    // mark cached names
+    for(int i = 0; i < vm->cached_names.entries.length; i++) {
+        CachedNames_KV* kv = c11_chunkedvector__at(&vm->cached_names.entries, i);
+        pk__mark_value(&kv->val);
+    }
+    // mark compile time functions
+    for(int i = 0; i < vm->compile_time_funcs.capacity; i++) {
+        NameDict_KV* kv = &vm->compile_time_funcs.items[i];
+        if(kv->key == NULL) continue;
+        pk__mark_value(&kv->value);
+    }
     // mark types
     int types_length = vm->types.length;
     // 0-th type is placeholder
     for(py_Type i = 1; i < types_length; i++) {
-        py_TypeInfo* ti = TypeList__get(&vm->types, i);
-        // mark type object
+        py_TypeInfo* ti = c11__getitem(TypePointer, &vm->types, i).ti;
         pk__mark_value(&ti->self);
-        // mark common magic slots
-        for(int j = 0; j < PK_MAGIC_SLOTS_COMMON_LENGTH; j++) {
-            py_TValue* slot = ti->magic_0 + j;
-            if(py_isnil(slot)) continue;
-            pk__mark_value(slot);
-        }
-        // mark uncommon magic slots
-        if(ti->magic_1) {
-            for(int j = 0; j < PK_MAGIC_SLOTS_UNCOMMON_LENGTH; j++) {
-                py_TValue* slot = ti->magic_1 + j;
-                if(py_isnil(slot)) continue;
-                pk__mark_value(slot);
-            }
-        }
-        // mark type annotations
         pk__mark_value(&ti->annotations);
     }
     // mark frame
     for(py_Frame* frame = vm->top_frame; frame; frame = frame->f_back) {
-        Frame__gc_mark(frame);
+        Frame__gc_mark(frame, p_stack);
     }
     // mark vm's registers
     pk__mark_value(&vm->last_retval);
@@ -2948,16 +3495,86 @@ void ManagedHeap__mark(ManagedHeap* self) {
     for(int i = 0; i < c11__count_array(vm->reg); i++) {
         pk__mark_value(&vm->reg[i]);
     }
-    // mark interned names
-    for(int i = 0; i < vm->names.r_interned.length; i++) {
-        RInternedEntry* entry = c11__at(RInternedEntry, &vm->names.r_interned, i);
-        pk__mark_value(&entry->obj);
+    // mark user func
+    if(vm->callbacks.gc_mark) vm->callbacks.gc_mark(pk__mark_value_func, p_stack);
+    /*****************************/
+    while(p_stack->length > 0) {
+        PyObject* obj = c11_vector__back(PyObject*, p_stack);
+        c11_vector__pop(p_stack);
+
+        assert(obj->gc_marked);
+
+        if(obj->slots > 0) {
+            py_TValue* p = PyObject__slots(obj);
+            for(int i = 0; i < obj->slots; i++)
+                pk__mark_value(p + i);
+        } else if(obj->slots == -1) {
+            NameDict* dict = PyObject__dict(obj);
+            for(int i = 0; i < dict->capacity; i++) {
+                NameDict_KV* kv = &dict->items[i];
+                if(kv->key == NULL) continue;
+                pk__mark_value(&kv->value);
+            }
+        }
+
+        void* ud = PyObject__userdata(obj);
+        switch(obj->type) {
+            case tp_list: {
+                List* self = ud;
+                for(int i = 0; i < self->length; i++) {
+                    py_TValue* val = c11__at(py_TValue, self, i);
+                    pk__mark_value(val);
+                }
+                break;
+            }
+            case tp_dict: {
+                Dict* self = ud;
+                for(int i = 0; i < self->entries.length; i++) {
+                    DictEntry* entry = c11__at(DictEntry, &self->entries, i);
+                    if(py_isnil(&entry->key)) continue;
+                    pk__mark_value(&entry->key);
+                    pk__mark_value(&entry->val);
+                }
+                break;
+            }
+            case tp_generator: {
+                Generator* self = ud;
+                if(self->frame) Frame__gc_mark(self->frame, p_stack);
+                break;
+            }
+            case tp_function: {
+                function__gc_mark(ud, p_stack);
+                break;
+            }
+            case tp_BaseException: {
+                BaseException* self = ud;
+                pk__mark_value(&self->args);
+                pk__mark_value(&self->inner_exc);
+                c11__foreach(BaseExceptionFrame, &self->stacktrace, frame) {
+                    pk__mark_value(&frame->locals);
+                    pk__mark_value(&frame->globals);
+                }
+                break;
+            }
+            case tp_code: {
+                CodeObject* self = ud;
+                CodeObject__gc_mark(self, p_stack);
+                break;
+            }
+            case tp_chunked_array2d: {
+                c11_chunked_array2d__mark(ud, p_stack);
+                break;
+            }
+        }
     }
 }
 
+// src/interpreter/vmx.c
+#include <assert.h>
+
 void pk_print_stack(VM* self, py_Frame* frame, Bytecode byte) {
     return;
-    if(frame == NULL || py_isnil(&self->main)) return;
+    if(frame == NULL || !self->main || py_isnil(self->main)) return;
 
     py_TValue* sp = self->stack.sp;
     c11_sbuf buf;
@@ -2992,8 +3609,8 @@ void pk_print_stack(VM* self, py_Frame* frame, Bytecode byte) {
                 break;
             }
             case tp_module: {
-                py_Ref path = py_getdict(p, __path__);
-                pk_sprintf(&buf, "<module '%v'>", py_tosv(path));
+                py_ModuleInfo* mi = py_touserdata(p);
+                pk_sprintf(&buf, "<module '%v'>", c11_string__sv(mi->path));
                 break;
             }
             default: {
@@ -3020,8 +3637,6 @@ bool pk_wrapper__self(int argc, py_Ref argv) {
     return true;
 }
 
-py_TypeInfo* pk__type_info(py_Type type) { return TypeList__get(&pk_current_vm->types, type); }
-
 int py_replinput(char* buf, int max_size) {
     buf[0] = '\0';  // reset first char because we check '@' at the beginning
 
@@ -3030,7 +3645,7 @@ int py_replinput(char* buf, int max_size) {
     printf(">>> ");
 
     while(true) {
-        int c = pk_current_vm->callbacks.getchar();
+        int c = pk_current_vm->callbacks.getchr();
         if(c == EOF) return -1;
 
         if(c == '\n') {
@@ -3063,80 +3678,209 @@ int py_replinput(char* buf, int max_size) {
     buf[size] = '\0';
     return size;
 }
+
+py_Ref py_name2ref(py_Name name) {
+    assert(name != NULL);
+    CachedNames* d = &pk_current_vm->cached_names;
+    py_Ref res = CachedNames__try_get(d, name);
+    if(res != NULL) return res;
+    // not found, create a new one
+    py_StackRef tmp = py_pushtmp();
+    py_newstrv(tmp, py_name2sv(name));
+    CachedNames__set(d, name, tmp);
+    py_pop();
+    return CachedNames__try_get(d, name);
+}
+
+void PyObject__dtor(PyObject* self) {
+    py_Dtor dtor = c11__getitem(TypePointer, &pk_current_vm->types, self->type).dtor;
+    if(dtor) dtor(PyObject__userdata(self));
+    if(self->slots == -1) {
+        NameDict* dict = PyObject__dict(self);
+        NameDict__dtor(dict);
+    }
+}
 // src/interpreter/typeinfo.c
-#define CHUNK_SIZE 128
-#define LOG2_CHUNK_SIZE 7
+#include <assert.h>
 
-void TypeList__ctor(TypeList* self) {
-    self->length = 0;
-    memset(self->chunks, 0, sizeof(self->chunks));
+py_ItemRef pk_tpfindname(py_TypeInfo* ti, py_Name name) {
+    assert(ti != NULL);
+    do {
+        py_Ref res = py_getdict(&ti->self, name);
+        if(res) return res;
+        ti = ti->base_ti;
+    } while(ti);
+    return NULL;
 }
 
-void TypeList__dtor(TypeList* self) {
-    for(py_Type t = 0; t < self->length; t++) {
-        py_TypeInfo* info = TypeList__get(self, t);
-        if(info->magic_1) PK_FREE(info->magic_1);
+PK_INLINE py_ItemRef py_tpfindname(py_Type type, py_Name name) {
+    py_TypeInfo* ti = pk_typeinfo(type);
+    return pk_tpfindname(ti, name);
+}
+
+PK_INLINE py_Ref py_tpfindmagic(py_Type t, py_Name name) {
+    // assert(py_ismagicname(name));
+    return py_tpfindname(t, name);
+}
+
+PK_INLINE py_Type py_tpbase(py_Type t) {
+    assert(t);
+    py_TypeInfo* ti = pk_typeinfo(t);
+    return ti->base;
+}
+
+PK_DEPRECATED py_Ref py_tpgetmagic(py_Type type, py_Name name) {
+    // assert(py_ismagicname(name));
+    py_TypeInfo* ti = pk_typeinfo(type);
+    py_Ref retval = py_getdict(&ti->self, name);
+    return retval != NULL ? retval : py_NIL();
+}
+
+py_Ref py_tpobject(py_Type type) {
+    assert(type);
+    return &pk_typeinfo(type)->self;
+}
+
+const char* py_tpname(py_Type type) {
+    if(!type) return "nil";
+    py_Name name = pk_typeinfo(type)->name;
+    return py_name2str(name);
+}
+
+PK_INLINE py_TypeInfo* pk_typeinfo(py_Type type) {
+#ifndef NDEBUG
+    int length = pk_current_vm->types.length;
+    if(type < 0 || type >= length) {
+        c11__abort("type index %d is out of bounds [0, %d)", type, length);
     }
-    for(int i = 0; i < PK_MAX_CHUNK_LENGTH; i++) {
-        if(self->chunks[i]) PK_FREE(self->chunks[i]);
+#endif
+    return c11__getitem(TypePointer, &pk_current_vm->types, type).ti;
+}
+
+static void py_TypeInfo__common_init(py_Name name,
+                                     py_Type base,
+                                     py_Type index,
+                                     const py_GlobalRef module,
+                                     void (*dtor)(void*),
+                                     bool is_python,
+                                     bool is_final,
+                                     py_TypeInfo* self,
+                                     py_TValue* typeobject) {
+    py_TypeInfo* base_ti = base ? pk_typeinfo(base) : NULL;
+    if(base_ti && base_ti->is_final) {
+        c11__abort("type '%s' is not an acceptable base type", py_name2str(base_ti->name));
     }
+
+    self->name = name;
+    self->index = index;
+    self->base = base;
+    self->base_ti = base_ti;
+
+    py_assign(&self->self, typeobject);
+    self->module = module ? module : py_NIL();
+
+    if(!dtor && base) dtor = base_ti->dtor;
+    self->is_python = is_python;
+    self->is_final = is_final;
+
+    self->getattribute = NULL;
+    self->setattribute = NULL;
+    self->delattribute = NULL;
+    self->getunboundmethod = NULL;
+
+    self->annotations = *py_NIL();
+    self->dtor = dtor;
+    self->on_end_subclass = NULL;
 }
 
-py_TypeInfo* TypeList__get(TypeList* self, py_Type index) {
-    assert(index < self->length);
-    int chunk = index >> LOG2_CHUNK_SIZE;
-    int offset = index & (CHUNK_SIZE - 1);
-    return self->chunks[chunk] + offset;
+py_Type pk_newtype(const char* name,
+                   py_Type base,
+                   const py_GlobalRef module,
+                   void (*dtor)(void*),
+                   bool is_python,
+                   bool is_final) {
+    py_Type index = pk_current_vm->types.length;
+    py_TypeInfo* self = py_newobject(py_retval(), tp_type, -1, sizeof(py_TypeInfo));
+    py_TypeInfo__common_init(py_name(name),
+                             base,
+                             index,
+                             module,
+                             dtor,
+                             is_python,
+                             is_final,
+                             self,
+                             py_retval());
+    TypePointer* pointer = c11_vector__emplace(&pk_current_vm->types);
+    pointer->ti = self;
+    pointer->dtor = self->dtor;
+    return index;
 }
 
-py_TypeInfo* TypeList__emplace(TypeList* self) {
-    int chunk = self->length >> LOG2_CHUNK_SIZE;
-    int offset = self->length & (CHUNK_SIZE - 1);
-    if(self->chunks[chunk] == NULL) {
-        if(chunk >= PK_MAX_CHUNK_LENGTH) {
-            c11__abort("TypeList__emplace(): max chunk length exceeded");
+py_Type pk_newtypewithmode(py_Name name,
+                           py_Type base,
+                           const py_GlobalRef module,
+                           void (*dtor)(void*),
+                           bool is_python,
+                           bool is_final,
+                           enum py_CompileMode mode) {
+    if(mode == RELOAD_MODE && module != NULL) {
+        py_ItemRef old_class = py_getdict(module, name);
+        if(old_class != NULL && py_istype(old_class, tp_type)) {
+#ifndef NDEBUG
+            const char* name_cstr = py_name2str(name);
+            (void)name_cstr;  // avoid unused warning
+#endif
+            py_cleardict(old_class);
+            py_TypeInfo* self = py_touserdata(old_class);
+            py_Type index = self->index;
+            py_TypeInfo__common_init(name,
+                                     base,
+                                     index,
+                                     module,
+                                     dtor,
+                                     is_python,
+                                     is_final,
+                                     self,
+                                     &self->self);
+            TypePointer* pointer = c11__at(TypePointer, &pk_current_vm->types, index);
+            pointer->ti = self;
+            pointer->dtor = self->dtor;
+            return index;
         }
-        self->chunks[chunk] = PK_MALLOC(sizeof(py_TypeInfo) * CHUNK_SIZE);
-        memset(self->chunks[chunk], 0, sizeof(py_TypeInfo) * CHUNK_SIZE);
     }
-    self->length++;
-    return self->chunks[chunk] + offset;
+
+    return pk_newtype(py_name2str(name), base, module, dtor, is_python, is_final);
 }
 
-void TypeList__apply(TypeList* self, void (*f)(py_TypeInfo*, void*), void* ctx) {
-    for(int i = 0; i < self->length; i++) {
-        py_TypeInfo* info = TypeList__get(self, i);
-        f(info, ctx);
-    }
+py_Type py_newtype(const char* name, py_Type base, const py_GlobalRef module, void (*dtor)(void*)) {
+    if(strlen(name) == 0) c11__abort("type name cannot be empty");
+    py_Type type = pk_newtype(name, base, module, dtor, false, false);
+    if(module) py_setdict(module, py_name(name), py_tpobject(type));
+    return type;
 }
 
-py_TValue* TypeList__magic(py_TypeInfo* self, unsigned index) {
-    if(index > __xor__) {
-        // common magic slots
-        return TypeList__magic_common(self, index);
-    }
-    // uncommon magic slots
-    if(self->magic_1 == NULL) {
-        self->magic_1 = PK_MALLOC(sizeof(py_TValue) * PK_MAGIC_SLOTS_UNCOMMON_LENGTH);
-        memset(self->magic_1, 0, sizeof(py_TValue) * PK_MAGIC_SLOTS_UNCOMMON_LENGTH);
-    }
-    return self->magic_1 + index;
+void py_tpsetfinal(py_Type type) {
+    assert(type);
+    py_TypeInfo* ti = pk_typeinfo(type);
+    ti->is_final = true;
 }
 
-py_TValue* TypeList__magic_readonly(py_TypeInfo* self, unsigned index) {
-    if(index > __xor__) {
-        // common magic slots
-        return TypeList__magic_common(self, index);
-    }
-    // uncommon magic slots
-    if(self->magic_1 == NULL) return py_NIL();
-    return self->magic_1 + index;
+void py_tphookattributes(py_Type type,
+                         bool (*getattribute)(py_Ref self, py_Name name),
+                         bool (*setattribute)(py_Ref self, py_Name name, py_Ref val),
+                         bool (*delattribute)(py_Ref self, py_Name name),
+                         bool (*getunboundmethod)(py_Ref self, py_Name name)) {
+    assert(type);
+    py_TypeInfo* ti = pk_typeinfo(type);
+    ti->getattribute = getattribute;
+    ti->setattribute = setattribute;
+    ti->delattribute = delattribute;
+    ti->getunboundmethod = getunboundmethod;
 }
 
-#undef CHUNK_SIZE
-#undef LOG2_CHUNK_SIZE
 // src/interpreter/generator.c
 #include <stdbool.h>
+#include <assert.h>
 
 void pk_newgenerator(py_Ref out, py_Frame* frame, py_TValue* begin, py_TValue* end) {
     Generator* ud = py_newobject(out, tp_generator, 1, sizeof(Generator));
@@ -3153,7 +3897,7 @@ void Generator__dtor(Generator* ud) {
     if(ud->frame) Frame__delete(ud->frame);
 }
 
-static bool generator__next__(int argc, py_Ref argv) {
+bool generator__next__(int argc, py_Ref argv) {
     PY_CHECK_ARGC(1);
     Generator* ud = py_touserdata(argv);
     py_StackRef p0 = py_peek(0);
@@ -3219,6 +3963,8 @@ py_Type pk_generator__register() {
 
 // src/interpreter/ceval.c
 #include <stdbool.h>
+#include <assert.h>
+#include <time.h>
 
 static bool stack_format_object(VM* self, c11_sv spec);
 
@@ -3239,6 +3985,12 @@ static bool stack_format_object(VM* self, c11_sv spec);
     do {                                                                                           \
         frame->ip = __target;                                                                      \
         goto __NEXT_STEP;                                                                          \
+    } while(0)
+
+#define RESET_CO_CACHE()                                                                           \
+    do {                                                                                           \
+        co_codes = frame->co->codes.data;                                                          \
+        co_names = frame->co->names.data;                                                          \
     } while(0)
 
 /* Stack manipulation macros */
@@ -3281,7 +4033,7 @@ static bool unpack_dict_to_buffer(py_Ref key, py_Ref val, void* ctx) {
     py_TValue** p = ctx;
     if(py_isstr(key)) {
         py_Name name = py_namev(py_tosv(key));
-        py_newint(*p, name);
+        py_newint(*p, (uintptr_t)name);
         py_assign(*p + 1, val);
         (*p) += 2;
         return true;
@@ -3291,24 +4043,26 @@ static bool unpack_dict_to_buffer(py_Ref key, py_Ref val, void* ctx) {
 
 FrameResult VM__run_top_frame(VM* self) {
     py_Frame* frame = self->top_frame;
-    Bytecode* codes;
+    Bytecode* co_codes;
+    py_Name* co_names;
+    Bytecode byte;
 
     const py_Frame* base_frame = frame;
 
-    while(true) {
-        Bytecode byte;
-    __NEXT_FRAME:
-        if(self->recursion_depth >= self->max_recursion_depth) {
-            py_exception(tp_RecursionError, "maximum recursion depth exceeded");
-            goto __ERROR;
-        }
-        codes = frame->co->codes.data;
-        frame->ip++;
+__NEXT_FRAME:
+    if(self->recursion_depth >= self->max_recursion_depth) {
+        py_exception(tp_RecursionError, "maximum recursion depth exceeded");
+        goto __ERROR;
+    }
+    RESET_CO_CACHE();
+    frame->ip++;
 
-    __NEXT_STEP:
-        byte = codes[frame->ip];
+__NEXT_STEP:
+    byte = co_codes[frame->ip];
 
-        if(self->trace_info.func) {
+    if(self->trace_info.func) {
+        bool is_virtual = byte.op == OP_RETURN_VALUE && byte.arg == BC_RETURN_VIRTUAL;
+        if(!is_virtual) {
             SourceLocation loc = Frame__source_location(frame);
             SourceLocation prev_loc = self->trace_info.prev_loc;
             if(loc.lineno != prev_loc.lineno || loc.src != prev_loc.src) {
@@ -3318,1125 +4072,1165 @@ FrameResult VM__run_top_frame(VM* self) {
                 self->trace_info.func(frame, TRACE_EVENT_LINE);
             }
         }
+    }
 
-#ifndef NDEBUG
-        pk_print_stack(self, frame, byte);
-#endif
-
-        switch((Opcode)byte.op) {
-            case OP_NO_OP: DISPATCH();
-            /*****************************************/
-            case OP_POP_TOP: POP(); DISPATCH();
-            case OP_DUP_TOP: PUSH(TOP()); DISPATCH();
-            case OP_DUP_TOP_TWO:
-                // [a, b]
-                PUSH(SECOND());  // [a, b, a]
-                PUSH(SECOND());  // [a, b, a, b]
-                DISPATCH();
-            case OP_ROT_TWO: {
-                py_TValue tmp = *TOP();
-                *TOP() = *SECOND();
-                *SECOND() = tmp;
-                DISPATCH();
-            }
-            case OP_ROT_THREE: {
-                // [a, b, c] -> [c, a, b]
-                py_TValue tmp = *TOP();
-                *TOP() = *SECOND();
-                *SECOND() = *THIRD();
-                *THIRD() = tmp;
-                DISPATCH();
-            }
-            case OP_PRINT_EXPR:
-                if(TOP()->type != tp_NoneType) {
-                    bool ok = py_repr(TOP());
-                    if(!ok) goto __ERROR;
-                    self->callbacks.print(py_tostr(&self->last_retval));
-                    self->callbacks.print("\n");
-                }
-                POP();
-                DISPATCH();
-            /*****************************************/
-            case OP_LOAD_CONST: {
-                PUSH(c11__at(py_TValue, &frame->co->consts, byte.arg));
-                DISPATCH();
-            }
-            case OP_LOAD_NONE: {
-                py_newnone(SP()++);
-                DISPATCH();
-            }
-            case OP_LOAD_TRUE: {
-                py_newbool(SP()++, true);
-                DISPATCH();
-            }
-            case OP_LOAD_FALSE: {
-                py_newbool(SP()++, false);
-                DISPATCH();
-            }
-            /*****************************************/
-            case OP_LOAD_SMALL_INT: {
-                py_newint(SP()++, (int16_t)byte.arg);
-                DISPATCH();
-            }
-            /*****************************************/
-            case OP_LOAD_ELLIPSIS: {
-                py_newellipsis(SP()++);
-                DISPATCH();
-            }
-            case OP_LOAD_FUNCTION: {
-                FuncDecl_ decl = c11__getitem(FuncDecl_, &frame->co->func_decls, byte.arg);
-                Function* ud = py_newobject(SP(), tp_function, 0, sizeof(Function));
-                Function__ctor(ud, decl, frame->module, frame->globals);
-                if(decl->nested) {
-                    if(frame->is_locals_special) {
-                        RuntimeError("cannot create closure from special locals");
-                        goto __ERROR;
-                    }
-                    ud->closure = FastLocals__to_namedict(frame->locals, frame->co);
-                    py_Name name = py_name(decl->code.name->data);
-                    // capture itself to allow recursion
-                    NameDict__set(ud->closure, name, *SP());
-                }
-                SP()++;
-                DISPATCH();
-            }
-            case OP_LOAD_NULL:
-                py_newnil(SP()++);
-                DISPATCH();
-                /*****************************************/
-            case OP_LOAD_FAST: {
-                assert(!frame->is_locals_special);
-                py_Ref val = &frame->locals[byte.arg];
-                if(!py_isnil(val)) {
-                    PUSH(val);
-                    DISPATCH();
-                }
-                py_Name name = c11__getitem(uint16_t, &frame->co->varnames, byte.arg);
-                UnboundLocalError(name);
-                goto __ERROR;
-            }
-            case OP_LOAD_NAME: {
-                assert(frame->is_locals_special);
-                py_Name name = byte.arg;
-                // locals
-                switch(frame->locals->type) {
-                    case tp_locals: {
-                        py_Frame* noproxy = frame->locals->_ptr;
-                        py_Ref slot = Frame__getlocal_noproxy(noproxy, name);
-                        if(slot == NULL) break;
-                        if(py_isnil(slot)) {
-                            UnboundLocalError(name);
-                            goto __ERROR;
-                        }
-                        PUSH(slot);
-                        DISPATCH();
-                    }
-                    case tp_dict: {
-                        int res = py_dict_getitem(frame->locals, py_name2ref(name));
-                        if(res == 1) {
-                            PUSH(&self->last_retval);
-                            DISPATCH();
-                        }
-                        if(res == 0) break;
-                        assert(res == -1);
-                        goto __ERROR;
-                    }
-                    case tp_nil: break;
-                    default: c11__unreachable();
-                }
-                // globals
-                int res = Frame__getglobal(frame, name);
-                if(res == 1) {
-                    PUSH(&self->last_retval);
-                    DISPATCH();
-                }
-                if(res == -1) goto __ERROR;
-                // builtins
-                py_Ref tmp = py_getdict(&self->builtins, name);
-                if(tmp != NULL) {
-                    PUSH(tmp);
-                    DISPATCH();
-                }
-                NameError(name);
-                goto __ERROR;
-            }
-            case OP_LOAD_NONLOCAL: {
-                py_Name name = byte.arg;
-                py_Ref tmp = Frame__getclosure(frame, name);
-                if(tmp != NULL) {
-                    PUSH(tmp);
-                    DISPATCH();
-                }
-                int res = Frame__getglobal(frame, name);
-                if(res == 1) {
-                    PUSH(&self->last_retval);
-                    DISPATCH();
-                }
-                if(res == -1) goto __ERROR;
-
-                tmp = py_getdict(&self->builtins, name);
-                if(tmp != NULL) {
-                    PUSH(tmp);
-                    DISPATCH();
-                }
-                NameError(name);
-                goto __ERROR;
-            }
-            case OP_LOAD_GLOBAL: {
-                py_Name name = byte.arg;
-                int res = Frame__getglobal(frame, name);
-                if(res == 1) {
-                    PUSH(&self->last_retval);
-                    DISPATCH();
-                }
-                if(res == -1) goto __ERROR;
-                py_Ref tmp = py_getdict(&self->builtins, name);
-                if(tmp != NULL) {
-                    PUSH(tmp);
-                    DISPATCH();
-                }
-                NameError(name);
-                goto __ERROR;
-            }
-            case OP_LOAD_ATTR: {
-                if(py_getattr(TOP(), byte.arg)) {
-                    py_assign(TOP(), py_retval());
-                } else {
-                    goto __ERROR;
-                }
-                DISPATCH();
-            }
-            case OP_LOAD_CLASS_GLOBAL: {
-                assert(self->curr_class);
-                py_Name name = byte.arg;
-                py_Ref tmp = py_getdict(self->curr_class, name);
-                if(tmp) {
-                    PUSH(tmp);
-                    DISPATCH();
-                }
-                // load global if attribute not found
-                int res = Frame__getglobal(frame, name);
-                if(res == 1) {
-                    PUSH(&self->last_retval);
-                    DISPATCH();
-                }
-                if(res == -1) goto __ERROR;
-                tmp = py_getdict(&self->builtins, name);
-                if(tmp) {
-                    PUSH(tmp);
-                    DISPATCH();
-                }
-                NameError(name);
-                goto __ERROR;
-            }
-            case OP_LOAD_METHOD: {
-                // [self] -> [unbound, self]
-                bool ok = py_pushmethod(byte.arg);
-                if(!ok) {
-                    // fallback to getattr
-                    if(py_getattr(TOP(), byte.arg)) {
-                        py_assign(TOP(), py_retval());
-                        py_newnil(SP()++);
-                    } else {
-                        goto __ERROR;
-                    }
-                }
-                DISPATCH();
-            }
-            case OP_LOAD_SUBSCR: {
-                // [a, b] -> a[b]
-                py_Ref magic = py_tpfindmagic(SECOND()->type, __getitem__);
-                if(magic) {
-                    if(magic->type == tp_nativefunc) {
-                        if(!py_callcfunc(magic->_cfunc, 2, SECOND())) goto __ERROR;
-                        POP();
-                        py_assign(TOP(), py_retval());
-                    } else {
-                        INSERT_THIRD();     // [?, a, b]
-                        *THIRD() = *magic;  // [__getitem__, a, b]
-                        vectorcall_opcall(1, 0);
-                    }
-                    DISPATCH();
-                }
-                TypeError("'%t' object is not subscriptable", SECOND()->type);
-                goto __ERROR;
-            }
-            case OP_STORE_FAST: {
-                assert(!frame->is_locals_special);
-                frame->locals[byte.arg] = POPX();
-                DISPATCH();
-            }
-            case OP_STORE_NAME: {
-                assert(frame->is_locals_special);
-                py_Name name = byte.arg;
-                switch(frame->locals->type) {
-                    case tp_locals: {
-                        py_Frame* noproxy = frame->locals->_ptr;
-                        py_Ref slot = Frame__getlocal_noproxy(noproxy, name);
-                        if(slot == NULL) {
-                            UnboundLocalError(name);
-                            goto __ERROR;
-                        }
-                        *slot = POPX();
-                        DISPATCH();
-                    }
-                    case tp_dict: {
-                        if(!py_dict_setitem(frame->locals, py_name2ref(name), TOP())) goto __ERROR;
-                        POP();
-                        DISPATCH();
-                    }
-                    case tp_nil: {
-                        // globals
-                        if(!Frame__setglobal(frame, name, TOP())) goto __ERROR;
-                        POP();
-                        DISPATCH();
-                    }
-                    default: c11__unreachable();
-                }
-            }
-            case OP_STORE_GLOBAL: {
-                if(!Frame__setglobal(frame, byte.arg, TOP())) goto __ERROR;
-                POP();
-                DISPATCH();
-            }
-            case OP_STORE_ATTR: {
-                // [val, a] -> a.b = val
-                if(!py_setattr(TOP(), byte.arg, SECOND())) goto __ERROR;
-                STACK_SHRINK(2);
-                DISPATCH();
-            }
-            case OP_STORE_SUBSCR: {
-                // [val, a, b] -> a[b] = val
-                py_Ref magic = py_tpfindmagic(SECOND()->type, __setitem__);
-                if(magic) {
-                    PUSH(THIRD());  // [val, a, b, val]
-                    if(magic->type == tp_nativefunc) {
-                        if(!py_callcfunc(magic->_cfunc, 3, THIRD())) goto __ERROR;
-                        STACK_SHRINK(4);
-                    } else {
-                        *FOURTH() = *magic;  // [__setitem__, a, b, val]
-                        if(!py_vectorcall(2, 0)) goto __ERROR;
-                    }
-                    DISPATCH();
-                }
-                TypeError("'%t' object does not support item assignment", SECOND()->type);
-                goto __ERROR;
-            }
-            case OP_DELETE_FAST: {
-                assert(!frame->is_locals_special);
-                py_Ref tmp = &frame->locals[byte.arg];
-                if(py_isnil(tmp)) {
-                    py_Name name = c11__getitem(py_Name, &frame->co->varnames, byte.arg);
-                    UnboundLocalError(name);
-                    goto __ERROR;
-                }
-                py_newnil(tmp);
-                DISPATCH();
-            }
-            case OP_DELETE_NAME: {
-                assert(frame->is_locals_special);
-                py_Name name = byte.arg;
-                switch(frame->locals->type) {
-                    case tp_locals: {
-                        py_Frame* noproxy = frame->locals->_ptr;
-                        py_Ref slot = Frame__getlocal_noproxy(noproxy, name);
-                        if(slot == NULL || py_isnil(slot)) {
-                            UnboundLocalError(name);
-                            goto __ERROR;
-                        }
-                        py_newnil(slot);
-                        DISPATCH();
-                    }
-                    case tp_dict: {
-                        int res = py_dict_delitem(frame->locals, py_name2ref(name));
-                        if(res == 1) DISPATCH();
-                        if(res == 0) UnboundLocalError(name);
-                        goto __ERROR;
-                    }
-                    case tp_nil: {
-                        // globals
-                        int res = Frame__delglobal(frame, name);
-                        if(res == 1) DISPATCH();
-                        if(res == 0) NameError(name);
-                        goto __ERROR;
-                    }
-                    default: c11__unreachable();
-                }
-            }
-            case OP_DELETE_GLOBAL: {
-                py_Name name = byte.arg;
-                int res = Frame__delglobal(frame, name);
-                if(res == 1) DISPATCH();
-                if(res == -1) goto __ERROR;
-                NameError(name);
-                goto __ERROR;
-            }
-
-            case OP_DELETE_ATTR: {
-                if(!py_delattr(TOP(), byte.arg)) goto __ERROR;
-                DISPATCH();
-            }
-
-            case OP_DELETE_SUBSCR: {
-                // [a, b] -> del a[b]
-                py_Ref magic = py_tpfindmagic(SECOND()->type, __delitem__);
-                if(magic) {
-                    if(magic->type == tp_nativefunc) {
-                        if(!py_callcfunc(magic->_cfunc, 2, SECOND())) goto __ERROR;
-                        STACK_SHRINK(2);
-                    } else {
-                        INSERT_THIRD();     // [?, a, b]
-                        *THIRD() = *magic;  // [__delitem__, a, b]
-                        if(!py_vectorcall(1, 0)) goto __ERROR;
-                    }
-                    DISPATCH();
-                }
-                TypeError("'%t' object does not support item deletion", SECOND()->type);
-                goto __ERROR;
-            }
-            /*****************************************/
-            case OP_BUILD_IMAG: {
-                // [x]
-                py_Ref f = py_getdict(&self->builtins, py_name("complex"));
-                assert(f != NULL);
-                py_TValue tmp = *TOP();
-                *TOP() = *f;           // [complex]
-                py_newnil(SP()++);     // [complex, NULL]
-                py_newint(SP()++, 0);  // [complex, NULL, 0]
-                *SP()++ = tmp;         // [complex, NULL, 0, x]
-                vectorcall_opcall(2, 0);
-                DISPATCH();
-            }
-            case OP_BUILD_BYTES: {
-                int size;
-                py_Ref string = c11__at(py_TValue, &frame->co->consts, byte.arg);
-                const char* data = py_tostrn(string, &size);
-                unsigned char* p = py_newbytes(SP()++, size);
-                memcpy(p, data, size);
-                DISPATCH();
-            }
-            case OP_BUILD_TUPLE: {
-                py_TValue tmp;
-                py_Ref p = py_newtuple(&tmp, byte.arg);
-                py_TValue* begin = SP() - byte.arg;
-                for(int i = 0; i < byte.arg; i++)
-                    p[i] = begin[i];
-                SP() = begin;
-                PUSH(&tmp);
-                DISPATCH();
-            }
-            case OP_BUILD_LIST: {
-                py_TValue tmp;
-                py_newlistn(&tmp, byte.arg);
-                py_TValue* begin = SP() - byte.arg;
-                for(int i = 0; i < byte.arg; i++) {
-                    py_list_setitem(&tmp, i, begin + i);
-                }
-                SP() = begin;
-                PUSH(&tmp);
-                DISPATCH();
-            }
-            case OP_BUILD_DICT: {
-                py_TValue* begin = SP() - byte.arg * 2;
-                py_Ref tmp = py_pushtmp();
-                py_newdict(tmp);
-                for(int i = 0; i < byte.arg * 2; i += 2) {
-                    bool ok = py_dict_setitem(tmp, begin + i, begin + i + 1);
-                    if(!ok) goto __ERROR;
-                }
-                SP() = begin;
-                PUSH(tmp);
-                DISPATCH();
-            }
-            case OP_BUILD_SET: {
-                py_TValue* begin = SP() - byte.arg;
-                py_Ref typeobject_set = py_getdict(&self->builtins, py_name("set"));
-                assert(typeobject_set != NULL);
-                py_push(typeobject_set);
-                py_pushnil();
-                if(!py_vectorcall(0, 0)) goto __ERROR;
-                py_push(py_retval());  // empty set
-                py_Name id_add = py_name("add");
-                for(int i = 0; i < byte.arg; i++) {
-                    py_push(TOP());
-                    if(!py_pushmethod(id_add)) {
-                        c11__abort("OP_BUILD_SET: failed to load method 'add'");
-                    }
-                    py_push(begin + i);
-                    if(!py_vectorcall(1, 0)) goto __ERROR;
-                }
-                py_TValue tmp = *TOP();
-                SP() = begin;
-                PUSH(&tmp);
-                DISPATCH();
-            }
-            case OP_BUILD_SLICE: {
-                // [start, stop, step]
-                py_TValue tmp;
-                py_newslice(&tmp);
-                py_setslot(&tmp, 0, THIRD());
-                py_setslot(&tmp, 1, SECOND());
-                py_setslot(&tmp, 2, TOP());
-                STACK_SHRINK(3);
-                PUSH(&tmp);
-                DISPATCH();
-            }
-            case OP_BUILD_STRING: {
-                py_TValue* begin = SP() - byte.arg;
-                c11_sbuf ss;
-                c11_sbuf__ctor(&ss);
-                for(int i = 0; i < byte.arg; i++) {
-                    if(!py_str(begin + i)) goto __ERROR;
-                    c11_sbuf__write_sv(&ss, py_tosv(&self->last_retval));
-                }
-                SP() = begin;
-                c11_sbuf__py_submit(&ss, SP()++);
-                DISPATCH();
-            }
-            /*****************************/
-            case OP_BINARY_OP: {
-                py_Name op = byte.arg & 0xFF;
-                py_Name rop = byte.arg >> 8;
-                if(!pk_stack_binaryop(self, op, rop)) goto __ERROR;
-                POP();
-                *TOP() = self->last_retval;
-                DISPATCH();
-            }
-            case OP_IS_OP: {
-                bool res = py_isidentical(SECOND(), TOP());
-                POP();
-                if(byte.arg) res = !res;
-                py_newbool(TOP(), res);
-                DISPATCH();
-            }
-            case OP_CONTAINS_OP: {
-                // [b, a] -> b __contains__ a (a in b) -> [retval]
-                py_Ref magic = py_tpfindmagic(SECOND()->type, __contains__);
-                if(magic) {
-                    if(magic->type == tp_nativefunc) {
-                        if(!py_callcfunc(magic->_cfunc, 2, SECOND())) goto __ERROR;
-                        STACK_SHRINK(2);
-                    } else {
-                        INSERT_THIRD();     // [?, b, a]
-                        *THIRD() = *magic;  // [__contains__, a, b]
-                        if(!py_vectorcall(1, 0)) goto __ERROR;
-                    }
-                    bool res = py_tobool(py_retval());
-                    if(byte.arg) res = !res;
-                    py_newbool(SP()++, res);
-                    DISPATCH();
-                }
-                TypeError("'%t' type does not support '__contains__'", SECOND()->type);
-                goto __ERROR;
-            }
-                /*****************************************/
-            case OP_JUMP_FORWARD: DISPATCH_JUMP((int16_t)byte.arg);
-            case OP_POP_JUMP_IF_FALSE: {
-                int res = py_bool(TOP());
-                if(res < 0) goto __ERROR;
-                POP();
-                if(!res) DISPATCH_JUMP((int16_t)byte.arg);
-                DISPATCH();
-            }
-            case OP_POP_JUMP_IF_TRUE: {
-                int res = py_bool(TOP());
-                if(res < 0) goto __ERROR;
-                POP();
-                if(res) DISPATCH_JUMP((int16_t)byte.arg);
-                DISPATCH();
-            }
-            case OP_JUMP_IF_TRUE_OR_POP: {
-                int res = py_bool(TOP());
-                if(res < 0) goto __ERROR;
-                if(res) {
-                    DISPATCH_JUMP((int16_t)byte.arg);
-                } else {
-                    POP();
-                    DISPATCH();
-                }
-            }
-            case OP_JUMP_IF_FALSE_OR_POP: {
-                int res = py_bool(TOP());
-                if(res < 0) goto __ERROR;
-                if(!res) {
-                    DISPATCH_JUMP((int16_t)byte.arg);
-                } else {
-                    POP();
-                    DISPATCH();
-                }
-            }
-            case OP_SHORTCUT_IF_FALSE_OR_POP: {
-                int res = py_bool(TOP());
-                if(res < 0) goto __ERROR;
-                if(!res) {                      // [b, False]
-                    STACK_SHRINK(2);            // []
-                    py_newbool(SP()++, false);  // [False]
-                    DISPATCH_JUMP((int16_t)byte.arg);
-                } else {
-                    POP();  // [b]
-                    DISPATCH();
-                }
-            }
-            case OP_LOOP_CONTINUE: {
-                DISPATCH_JUMP((int16_t)byte.arg);
-            }
-            case OP_LOOP_BREAK: {
-                DISPATCH_JUMP((int16_t)byte.arg);
-            }
-            /*****************************************/
-            case OP_CALL: {
-                ManagedHeap__collect_if_needed(&self->heap);
-                vectorcall_opcall(byte.arg & 0xFF, byte.arg >> 8);
-                DISPATCH();
-            }
-            case OP_CALL_VARGS: {
-                // [_0, _1, _2 | k1, v1, k2, v2]
-                uint16_t argc = byte.arg & 0xFF;
-                uint16_t kwargc = byte.arg >> 8;
-
-                int n = 0;
-                py_TValue* sp = SP();
-                py_TValue* p1 = sp - kwargc * 2;
-                py_TValue* base = p1 - argc;
-                py_TValue* buf = self->vectorcall_buffer;
-
-                for(py_TValue* curr = base; curr != p1; curr++) {
-                    if(curr->type != tp_star_wrapper) {
-                        buf[n++] = *curr;
-                    } else {
-                        py_TValue* args = py_getslot(curr, 0);
-                        py_TValue* p;
-                        int length = pk_arrayview(args, &p);
-                        if(length != -1) {
-                            for(int j = 0; j < length; j++) {
-                                buf[n++] = p[j];
-                            }
-                            argc += length - 1;
-                        } else {
-                            TypeError("*args must be a list or tuple, got '%t'", args->type);
-                            goto __ERROR;
-                        }
-                    }
-                }
-
-                for(py_TValue* curr = p1; curr != sp; curr += 2) {
-                    if(curr[1].type != tp_star_wrapper) {
-                        buf[n++] = curr[0];
-                        buf[n++] = curr[1];
-                    } else {
-                        assert(py_toint(&curr[0]) == 0);
-                        py_TValue* kwargs = py_getslot(&curr[1], 0);
-                        if(kwargs->type == tp_dict) {
-                            py_TValue* p = buf + n;
-                            if(!py_dict_apply(kwargs, unpack_dict_to_buffer, &p)) goto __ERROR;
-                            n = p - buf;
-                            kwargc += py_dict_len(kwargs) - 1;
-                        } else {
-                            TypeError("**kwargs must be a dict, got '%t'", kwargs->type);
-                            goto __ERROR;
-                        }
-                    }
-                }
-
-                memcpy(base, buf, n * sizeof(py_TValue));
-                SP() = base + n;
-
-                vectorcall_opcall(argc, kwargc);
-                DISPATCH();
-            }
-            case OP_RETURN_VALUE: {
-                CHECK_RETURN_FROM_EXCEPT_OR_FINALLY();
-                if(byte.arg == BC_NOARG) {
-                    self->last_retval = POPX();
-                } else {
-                    py_newnone(&self->last_retval);
-                }
-                VM__pop_frame(self);
-                if(frame == base_frame) {  // [ frameBase<- ]
-                    return RES_RETURN;
-                } else {
-                    frame = self->top_frame;
-                    PUSH(&self->last_retval);
-                    goto __NEXT_FRAME;
-                }
-                DISPATCH();
-            }
-            case OP_YIELD_VALUE: {
-                CHECK_RETURN_FROM_EXCEPT_OR_FINALLY();
-                if(byte.arg == 1) {
-                    py_newnone(py_retval());
-                } else {
-                    py_assign(py_retval(), TOP());
-                    POP();
-                }
-                return RES_YIELD;
-            }
-            case OP_FOR_ITER_YIELD_VALUE: {
-                CHECK_RETURN_FROM_EXCEPT_OR_FINALLY();
-                int res = py_next(TOP());
-                if(res == -1) goto __ERROR;
-                if(res) {
-                    return RES_YIELD;
-                } else {
-                    assert(self->last_retval.type == tp_StopIteration);
-                    py_ObjectRef value = py_getslot(&self->last_retval, 0);
-                    if(py_isnil(value)) value = py_None();
-                    *TOP() = *value;  // [iter] -> [retval]
-                    DISPATCH_JUMP((int16_t)byte.arg);
-                }
-            }
-            /////////
-            case OP_LIST_APPEND: {
-                // [list, iter, value]
-                py_list_append(THIRD(), TOP());
-                POP();
-                DISPATCH();
-            }
-            case OP_DICT_ADD: {
-                // [dict, iter, key, value]
-                bool ok = py_dict_setitem(FOURTH(), SECOND(), TOP());
-                if(!ok) goto __ERROR;
-                STACK_SHRINK(2);
-                DISPATCH();
-            }
-            case OP_SET_ADD: {
-                // [set, iter, value]
-                py_push(THIRD());  // [| set]
-                if(!py_pushmethod(py_name("add"))) {
-                    c11__abort("OP_SET_ADD: failed to load method 'add'");
-                }  // [|add() set]
-                py_push(THIRD());
-                if(!py_vectorcall(1, 0)) goto __ERROR;
-                POP();
-                DISPATCH();
-            }
-            /////////
-            case OP_UNARY_NEGATIVE: {
-                if(!pk_callmagic(__neg__, 1, TOP())) goto __ERROR;
-                *TOP() = self->last_retval;
-                DISPATCH();
-            }
-            case OP_UNARY_NOT: {
-                int res = py_bool(TOP());
-                if(res < 0) goto __ERROR;
-                py_newbool(TOP(), !res);
-                DISPATCH();
-            }
-            case OP_UNARY_STAR: {
-                py_TValue value = POPX();
-                int* level = py_newobject(SP()++, tp_star_wrapper, 1, sizeof(int));
-                *level = byte.arg;
-                py_setslot(TOP(), 0, &value);
-                DISPATCH();
-            }
-            case OP_UNARY_INVERT: {
-                if(!pk_callmagic(__invert__, 1, TOP())) goto __ERROR;
-                *TOP() = self->last_retval;
-                DISPATCH();
-            }
-            ////////////////
-            case OP_GET_ITER: {
-                if(!py_iter(TOP())) goto __ERROR;
-                *TOP() = *py_retval();
-                DISPATCH();
-            }
-            case OP_FOR_ITER: {
-                int res = py_next(TOP());
-                if(res == -1) goto __ERROR;
-                if(res) {
-                    PUSH(py_retval());
-                    DISPATCH();
-                } else {
-                    assert(self->last_retval.type == tp_StopIteration);
-                    POP();  // [iter] -> []
-                    DISPATCH_JUMP((int16_t)byte.arg);
-                }
-            }
-            ////////
-            case OP_IMPORT_PATH: {
-                py_Ref path_object = c11__at(py_TValue, &frame->co->consts, byte.arg);
-                const char* path = py_tostr(path_object);
-                int res = py_import(path);
-                if(res == -1) goto __ERROR;
-                if(res == 0) {
-                    ImportError("No module named '%s'", path);
-                    goto __ERROR;
-                }
-                PUSH(py_retval());
-                DISPATCH();
-            }
-            case OP_POP_IMPORT_STAR: {
-                // [module]
-                NameDict* dict = PyObject__dict(TOP()->_obj);
-                py_Ref all = NameDict__try_get(dict, __all__);
-                if(all) {
-                    py_TValue* p;
-                    int length = pk_arrayview(all, &p);
-                    if(length == -1) {
-                        TypeError("'__all__' must be a list or tuple, got '%t'", all->type);
-                        goto __ERROR;
-                    }
-                    for(int i = 0; i < length; i++) {
-                        py_Name name = py_namev(py_tosv(p + i));
-                        py_Ref value = NameDict__try_get(dict, name);
-                        if(value == NULL) {
-                            ImportError("cannot import name '%n'", name);
-                            goto __ERROR;
-                        } else {
-                            if(!Frame__setglobal(frame, name, value)) goto __ERROR;
-                        }
-                    }
-                } else {
-                    for(int i = 0; i < dict->length; i++) {
-                        NameDict_KV* kv = c11__at(NameDict_KV, dict, i);
-                        if(!kv->key) continue;
-                        c11_sv name = py_name2sv(kv->key);
-                        if(name.size == 0 || name.data[0] == '_') continue;
-                        if(!Frame__setglobal(frame, kv->key, &kv->value)) goto __ERROR;
-                    }
-                }
-                POP();
-                DISPATCH();
-            }
-            ////////
-            case OP_UNPACK_SEQUENCE: {
-                py_TValue* p;
-                int length;
-
-                switch(TOP()->type) {
-                    case tp_tuple: {
-                        length = py_tuple_len(TOP());
-                        p = py_tuple_data(TOP());
-                        break;
-                    }
-                    case tp_list: {
-                        length = py_list_len(TOP());
-                        p = py_list_data(TOP());
-                        break;
-                    }
-                    case tp_vec2i: {
-                        length = 2;
-                        if(byte.arg != length) break;
-                        c11_vec2i val = py_tovec2i(TOP());
-                        POP();
-                        py_newint(SP()++, val.x);
-                        py_newint(SP()++, val.y);
-                        DISPATCH();
-                    }
-                    case tp_vec2: {
-                        length = 2;
-                        if(byte.arg != length) break;
-                        c11_vec2 val = py_tovec2(TOP());
-                        POP();
-                        py_newfloat(SP()++, val.x);
-                        py_newfloat(SP()++, val.y);
-                        DISPATCH();
-                    }
-                    case tp_vec3i: {
-                        length = 3;
-                        if(byte.arg != length) break;
-                        c11_vec3i val = py_tovec3i(TOP());
-                        POP();
-                        py_newint(SP()++, val.x);
-                        py_newint(SP()++, val.y);
-                        py_newint(SP()++, val.z);
-                        DISPATCH();
-                    }
-                    case tp_vec3: {
-                        length = 3;
-                        if(byte.arg != length) break;
-                        c11_vec3 val = py_tovec3(TOP());
-                        POP();
-                        py_newfloat(SP()++, val.x);
-                        py_newfloat(SP()++, val.y);
-                        py_newfloat(SP()++, val.z);
-                        DISPATCH();
-                    }
-                    default: {
-                        TypeError("expected list or tuple to unpack, got %t", TOP()->type);
-                        goto __ERROR;
-                    }
-                }
-                if(length != byte.arg) {
-                    ValueError("expected %d values to unpack, got %d", byte.arg, length);
-                    goto __ERROR;
-                }
-                POP();
-                for(int i = 0; i < length; i++) {
-                    PUSH(p + i);
-                }
-                DISPATCH();
-            }
-            case OP_UNPACK_EX: {
-                py_TValue* p;
-                int length = pk_arrayview(TOP(), &p);
-                if(length == -1) {
-                    TypeError("expected list or tuple to unpack, got %t", TOP()->type);
-                    goto __ERROR;
-                }
-                int exceed = length - byte.arg;
-                if(exceed < 0) {
-                    ValueError("not enough values to unpack");
-                    goto __ERROR;
-                }
-                POP();
-                for(int i = 0; i < byte.arg; i++) {
-                    PUSH(p + i);
-                }
-                py_newlistn(SP()++, exceed);
-                for(int i = 0; i < exceed; i++) {
-                    py_list_setitem(TOP(), i, p + byte.arg + i);
-                }
-                DISPATCH();
-            }
-            ///////////
-            case OP_BEGIN_CLASS: {
-                // [base]
-                py_Name name = byte.arg;
-                py_Type base;
-                if(py_isnone(TOP())) {
-                    base = tp_object;
-                } else {
-                    if(!py_checktype(TOP(), tp_type)) goto __ERROR;
-                    base = py_totype(TOP());
-                }
-                POP();
-
-                py_TypeInfo* base_ti = TypeList__get(&self->types, base);
-                if(base_ti->is_sealed) {
-                    TypeError("type '%t' is not an acceptable base type", base);
-                    goto __ERROR;
-                }
-
-                py_Type type = pk_newtype(py_name2str(name),
-                                          base,
-                                          frame->module,
-                                          NULL,
-                                          base_ti->is_python,
-                                          false);
-                PUSH(py_tpobject(type));
-                self->curr_class = TOP();
-                DISPATCH();
-            }
-            case OP_END_CLASS: {
-                // [cls or decorated]
-                py_Name name = byte.arg;
-                if(!Frame__setglobal(frame, name, TOP())) goto __ERROR;
-
-                if(py_istype(TOP(), tp_type)) {
-                    // call on_end_subclass
-                    py_TypeInfo* ti = TypeList__get(&self->types, py_totype(TOP()));
-                    if(ti->base != tp_object) {
-                        py_TypeInfo* base_ti = ti->base_ti;
-                        if(base_ti->on_end_subclass) base_ti->on_end_subclass(ti);
-                    }
-                    py_TValue* slot_eq = TypeList__magic_common(ti, __eq__);
-                    py_TValue* slot_ne = TypeList__magic_common(ti, __ne__);
-                    if(!py_isnil(slot_eq) && py_isnil(slot_ne)) {
-                        TypeError("'%n' implements '__eq__' but not '__ne__'", ti->name);
-                        goto __ERROR;
-                    }
-                }
-                // class with decorator is unsafe currently
-                // it skips the above check
-                POP();
-                self->curr_class = NULL;
-                DISPATCH();
-            }
-            case OP_STORE_CLASS_ATTR: {
-                assert(self->curr_class);
-                py_Name name = byte.arg;
-                // TOP() can be a function, classmethod or custom decorator
-                py_Ref actual_func = TOP();
-                if(actual_func->type == tp_classmethod) {
-                    actual_func = py_getslot(actual_func, 0);
-                }
-                if(actual_func->type == tp_function) {
-                    Function* ud = py_touserdata(actual_func);
-                    ud->clazz = self->curr_class->_obj;
-                }
-                py_setdict(self->curr_class, name, TOP());
-                POP();
-                DISPATCH();
-            }
-            case OP_ADD_CLASS_ANNOTATION: {
-                assert(self->curr_class);
-                // [type_hint string]
-                py_Type type = py_totype(self->curr_class);
-                py_TypeInfo* ti = TypeList__get(&self->types, type);
-                if(py_isnil(&ti->annotations)) py_newdict(&ti->annotations);
-                bool ok = py_dict_setitem_by_str(&ti->annotations, py_name2str(byte.arg), TOP());
-                if(!ok) goto __ERROR;
-                POP();
-                DISPATCH();
-            }
-            ///////////
-            case OP_WITH_ENTER: {
-                // [expr]
-                py_push(TOP());
-                if(!py_pushmethod(__enter__)) {
-                    TypeError("'%t' object does not support the context manager protocol",
-                              TOP()->type);
-                    goto __ERROR;
-                }
-                vectorcall_opcall(0, 0);
-                DISPATCH();
-            }
-            case OP_WITH_EXIT: {
-                // [expr]
-                py_push(TOP());
-                if(!py_pushmethod(__exit__)) {
-                    TypeError("'%t' object does not support the context manager protocol",
-                              TOP()->type);
-                    goto __ERROR;
-                }
-                if(!py_vectorcall(0, 0)) goto __ERROR;
-                POP();
-                DISPATCH();
-            }
-            ///////////
-            case OP_TRY_ENTER: {
-                Frame__set_unwind_target(frame, SP());
-                DISPATCH();
-            }
-            case OP_EXCEPTION_MATCH: {
-                if(!py_checktype(TOP(), tp_type)) goto __ERROR;
-                bool ok = py_isinstance(&self->curr_exception, py_totype(TOP()));
-                py_newbool(TOP(), ok);
-                DISPATCH();
-            }
-            case OP_RAISE: {
-                // [exception]
-                if(py_istype(TOP(), tp_type)) {
-                    if(!py_tpcall(py_totype(TOP()), 0, NULL)) goto __ERROR;
-                    py_assign(TOP(), py_retval());
-                }
-                if(!py_isinstance(TOP(), tp_BaseException)) {
-                    TypeError("exceptions must derive from BaseException");
-                    goto __ERROR;
-                }
-                py_raise(TOP());
-                goto __ERROR;
-            }
-            case OP_RAISE_ASSERT: {
-                if(byte.arg) {
-                    if(!py_str(TOP())) goto __ERROR;
-                    POP();
-                    py_exception(tp_AssertionError, "%s", py_tostr(py_retval()));
-                } else {
-                    py_exception(tp_AssertionError, "");
-                }
-                goto __ERROR;
-            }
-            case OP_RE_RAISE: {
-                if(self->curr_exception.type) {
-                    assert(!self->is_curr_exc_handled);
-                    goto __ERROR_RE_RAISE;
-                }
-                DISPATCH();
-            }
-            case OP_PUSH_EXCEPTION: {
-                assert(self->curr_exception.type);
-                PUSH(&self->curr_exception);
-                DISPATCH();
-            }
-            case OP_BEGIN_EXC_HANDLING: {
-                assert(self->curr_exception.type);
-                self->is_curr_exc_handled = true;
-                DISPATCH();
-            }
-            case OP_END_EXC_HANDLING: {
-                assert(self->curr_exception.type);
-                py_clearexc(NULL);
-                DISPATCH();
-            }
-            case OP_BEGIN_FINALLY: {
-                if(self->curr_exception.type) {
-                    assert(!self->is_curr_exc_handled);
-                    // temporarily handle the exception if any
-                    self->is_curr_exc_handled = true;
-                }
-                DISPATCH();
-            }
-            case OP_END_FINALLY: {
-                if(byte.arg == BC_NOARG) {
-                    if(self->curr_exception.type) {
-                        assert(self->is_curr_exc_handled);
-                        // revert the exception handling if needed
-                        self->is_curr_exc_handled = false;
-                    }
-                } else {
-                    // break or continue inside finally block
-                    py_clearexc(NULL);
-                }
-                DISPATCH();
-            }
-            //////////////////
-            case OP_FORMAT_STRING: {
-                py_Ref spec = c11__at(py_TValue, &frame->co->consts, byte.arg);
-                bool ok = stack_format_object(self, py_tosv(spec));
-                if(!ok) goto __ERROR;
-                DISPATCH();
-            }
-            default: c11__unreachable();
-        }
-
-        c11__unreachable();
-
-    __ERROR:
-        py_BaseException__stpush(&self->curr_exception,
-                                 frame->co->src,
-                                 Frame__lineno(frame),
-                                 !frame->is_locals_special ? frame->co->name->data : NULL);
-    __ERROR_RE_RAISE:
-        do {
-        } while(0);
-        int target = Frame__prepare_jump_exception_handler(frame, &self->stack);
-        if(target >= 0) {
-            // 1. Exception can be handled inside the current frame
-            DISPATCH_JUMP_ABSOLUTE(target);
-        } else {
-            // 2. Exception need to be propagated to the upper frame
-            bool is_base_frame_to_be_popped = frame == base_frame;
-            VM__pop_frame(self);
-            if(self->top_frame == NULL || is_base_frame_to_be_popped) {
-                // propagate to the top level
-                return RES_ERROR;
-            }
-            frame = self->top_frame;
-            codes = frame->co->codes.data;
+#if PK_ENABLE_WATCHDOG
+    if(self->watchdog_info.max_reset_time > 0) {
+        clock_t now = clock();
+        if(now > self->watchdog_info.max_reset_time) {
+            self->watchdog_info.max_reset_time = 0;
+            TimeoutError("watchdog timeout");
             goto __ERROR;
         }
     }
+#endif
 
-    return RES_RETURN;
+#ifndef NDEBUG
+    pk_print_stack(self, frame, byte);
+#endif
+
+    switch((Opcode)byte.op) {
+        case OP_NO_OP: DISPATCH();
+        /*****************************************/
+        case OP_POP_TOP: POP(); DISPATCH();
+        case OP_DUP_TOP: PUSH(TOP()); DISPATCH();
+        case OP_DUP_TOP_TWO:
+            // [a, b]
+            PUSH(SECOND());  // [a, b, a]
+            PUSH(SECOND());  // [a, b, a, b]
+            DISPATCH();
+        case OP_ROT_TWO: {
+            py_TValue tmp = *TOP();
+            *TOP() = *SECOND();
+            *SECOND() = tmp;
+            DISPATCH();
+        }
+        case OP_ROT_THREE: {
+            // [a, b, c] -> [c, a, b]
+            py_TValue tmp = *TOP();
+            *TOP() = *SECOND();
+            *SECOND() = *THIRD();
+            *THIRD() = tmp;
+            DISPATCH();
+        }
+        case OP_PRINT_EXPR:
+            if(TOP()->type != tp_NoneType) {
+                bool ok = py_repr(TOP());
+                if(!ok) goto __ERROR;
+                self->callbacks.print(py_tostr(&self->last_retval));
+                self->callbacks.print("\n");
+            }
+            POP();
+            DISPATCH();
+        /*****************************************/
+        case OP_LOAD_CONST: {
+            PUSH(c11__at(py_TValue, &frame->co->consts, byte.arg));
+            DISPATCH();
+        }
+        case OP_LOAD_NONE: {
+            py_newnone(SP()++);
+            DISPATCH();
+        }
+        case OP_LOAD_TRUE: {
+            py_newbool(SP()++, true);
+            DISPATCH();
+        }
+        case OP_LOAD_FALSE: {
+            py_newbool(SP()++, false);
+            DISPATCH();
+        }
+        /*****************************************/
+        case OP_LOAD_SMALL_INT: {
+            py_newint(SP()++, (int16_t)byte.arg);
+            DISPATCH();
+        }
+        /*****************************************/
+        case OP_LOAD_ELLIPSIS: {
+            py_newellipsis(SP()++);
+            DISPATCH();
+        }
+        case OP_LOAD_FUNCTION: {
+            FuncDecl_ decl = c11__getitem(FuncDecl_, &frame->co->func_decls, byte.arg);
+            Function* ud = py_newobject(SP(), tp_function, 0, sizeof(Function));
+            Function__ctor(ud, decl, frame->module, frame->globals);
+            if(decl->nested) {
+                if(frame->is_locals_special) {
+                    RuntimeError("cannot create closure from special locals");
+                    goto __ERROR;
+                }
+                ud->closure = FastLocals__to_namedict(frame->locals, frame->co);
+                py_Name name = py_name(decl->code.name->data);
+                // capture itself to allow recursion
+                NameDict__set(ud->closure, name, SP());
+            }
+            SP()++;
+            DISPATCH();
+        }
+        case OP_LOAD_NULL:
+            py_newnil(SP()++);
+            DISPATCH();
+            /*****************************************/
+        case OP_LOAD_FAST: {
+            assert(!frame->is_locals_special);
+            py_Ref val = &frame->locals[byte.arg];
+            if(!py_isnil(val)) {
+                PUSH(val);
+                DISPATCH();
+            }
+            py_Name name = c11__getitem(py_Name, &frame->co->varnames, byte.arg);
+            UnboundLocalError(name);
+            goto __ERROR;
+        }
+        case OP_LOAD_NAME: {
+            assert(frame->is_locals_special);
+            py_Name name = co_names[byte.arg];
+            // locals
+            switch(frame->locals->type) {
+                case tp_locals: {
+                    py_Frame* noproxy = frame->locals->_ptr;
+                    py_Ref slot = Frame__getlocal_noproxy(noproxy, name);
+                    if(slot == NULL) break;
+                    if(py_isnil(slot)) {
+                        UnboundLocalError(name);
+                        goto __ERROR;
+                    }
+                    PUSH(slot);
+                    DISPATCH();
+                }
+                case tp_dict: {
+                    int res = py_dict_getitem(frame->locals, py_name2ref(name));
+                    if(res == 1) {
+                        PUSH(&self->last_retval);
+                        DISPATCH();
+                    }
+                    if(res == 0) break;
+                    assert(res == -1);
+                    goto __ERROR;
+                }
+                case tp_nil: break;
+                default: c11__unreachable();
+            }
+            // globals
+            int res = Frame__getglobal(frame, name);
+            if(res == 1) {
+                PUSH(&self->last_retval);
+                DISPATCH();
+            }
+            if(res == -1) goto __ERROR;
+            // builtins
+            py_Ref tmp = py_getdict(self->builtins, name);
+            if(tmp != NULL) {
+                PUSH(tmp);
+                DISPATCH();
+            }
+            NameError(name);
+            goto __ERROR;
+        }
+        case OP_LOAD_NONLOCAL: {
+            py_Name name = co_names[byte.arg];
+            py_Ref tmp = Frame__getclosure(frame, name);
+            if(tmp != NULL) {
+                PUSH(tmp);
+                DISPATCH();
+            }
+            int res = Frame__getglobal(frame, name);
+            if(res == 1) {
+                PUSH(&self->last_retval);
+                DISPATCH();
+            }
+            if(res == -1) goto __ERROR;
+
+            tmp = py_getdict(self->builtins, name);
+            if(tmp != NULL) {
+                PUSH(tmp);
+                DISPATCH();
+            }
+            NameError(name);
+            goto __ERROR;
+        }
+        case OP_LOAD_GLOBAL: {
+            py_Name name = co_names[byte.arg];
+            int res = Frame__getglobal(frame, name);
+            if(res == 1) {
+                PUSH(&self->last_retval);
+                DISPATCH();
+            }
+            if(res == -1) goto __ERROR;
+            py_Ref tmp = py_getdict(self->builtins, name);
+            if(tmp != NULL) {
+                PUSH(tmp);
+                DISPATCH();
+            }
+            NameError(name);
+            goto __ERROR;
+        }
+        case OP_LOAD_ATTR: {
+            py_Name name = co_names[byte.arg];
+            if(py_getattr(TOP(), name)) {
+                py_assign(TOP(), py_retval());
+            } else {
+                goto __ERROR;
+            }
+            DISPATCH();
+        }
+        case OP_LOAD_CLASS_GLOBAL: {
+            assert(self->curr_class);
+            py_Name name = co_names[byte.arg];
+            py_Ref tmp = py_getdict(self->curr_class, name);
+            if(tmp) {
+                PUSH(tmp);
+                DISPATCH();
+            }
+            // load global if attribute not found
+            int res = Frame__getglobal(frame, name);
+            if(res == 1) {
+                PUSH(&self->last_retval);
+                DISPATCH();
+            }
+            if(res == -1) goto __ERROR;
+            tmp = py_getdict(self->builtins, name);
+            if(tmp) {
+                PUSH(tmp);
+                DISPATCH();
+            }
+            NameError(name);
+            goto __ERROR;
+        }
+        case OP_LOAD_METHOD: {
+            // [self] -> [unbound, self]
+            py_Name name = co_names[byte.arg];
+            bool ok = py_pushmethod(name);
+            if(!ok) {
+                // fallback to getattr
+                if(py_getattr(TOP(), name)) {
+                    py_assign(TOP(), py_retval());
+                    py_newnil(SP()++);
+                } else {
+                    goto __ERROR;
+                }
+            }
+            DISPATCH();
+        }
+        case OP_LOAD_SUBSCR: {
+            // [a, b] -> a[b]
+            py_Ref magic = py_tpfindmagic(SECOND()->type, __getitem__);
+            if(magic) {
+                if(magic->type == tp_nativefunc) {
+                    if(!py_callcfunc(magic->_cfunc, 2, SECOND())) goto __ERROR;
+                    POP();
+                    py_assign(TOP(), py_retval());
+                } else {
+                    INSERT_THIRD();     // [?, a, b]
+                    *THIRD() = *magic;  // [__getitem__, a, b]
+                    vectorcall_opcall(1, 0);
+                }
+                DISPATCH();
+            }
+            TypeError("'%t' object is not subscriptable", SECOND()->type);
+            goto __ERROR;
+        }
+        case OP_STORE_FAST: {
+            assert(!frame->is_locals_special);
+            frame->locals[byte.arg] = POPX();
+            DISPATCH();
+        }
+        case OP_STORE_NAME: {
+            assert(frame->is_locals_special);
+            py_Name name = co_names[byte.arg];
+            switch(frame->locals->type) {
+                case tp_locals: {
+                    py_Frame* noproxy = frame->locals->_ptr;
+                    py_Ref slot = Frame__getlocal_noproxy(noproxy, name);
+                    if(slot == NULL) {
+                        UnboundLocalError(name);
+                        goto __ERROR;
+                    }
+                    *slot = POPX();
+                    DISPATCH();
+                }
+                case tp_dict: {
+                    if(!py_dict_setitem(frame->locals, py_name2ref(name), TOP())) goto __ERROR;
+                    POP();
+                    DISPATCH();
+                }
+                case tp_nil: {
+                    // globals
+                    if(!Frame__setglobal(frame, name, TOP())) goto __ERROR;
+                    POP();
+                    DISPATCH();
+                }
+                default: c11__unreachable();
+            }
+        }
+        case OP_STORE_GLOBAL: {
+            py_Name name = co_names[byte.arg];
+            if(!Frame__setglobal(frame, name, TOP())) goto __ERROR;
+            POP();
+            DISPATCH();
+        }
+        case OP_STORE_ATTR: {
+            // [val, a] -> a.b = val
+            py_Name name = co_names[byte.arg];
+            if(!py_setattr(TOP(), name, SECOND())) goto __ERROR;
+            STACK_SHRINK(2);
+            DISPATCH();
+        }
+        case OP_STORE_SUBSCR: {
+            // [val, a, b] -> a[b] = val
+            py_Ref magic = py_tpfindmagic(SECOND()->type, __setitem__);
+            if(magic) {
+                PUSH(THIRD());  // [val, a, b, val]
+                if(magic->type == tp_nativefunc) {
+                    if(!py_callcfunc(magic->_cfunc, 3, THIRD())) goto __ERROR;
+                    STACK_SHRINK(4);
+                } else {
+                    *FOURTH() = *magic;  // [__setitem__, a, b, val]
+                    if(!py_vectorcall(2, 0)) goto __ERROR;
+                }
+                DISPATCH();
+            }
+            TypeError("'%t' object does not support item assignment", SECOND()->type);
+            goto __ERROR;
+        }
+        case OP_DELETE_FAST: {
+            assert(!frame->is_locals_special);
+            py_Ref tmp = &frame->locals[byte.arg];
+            if(py_isnil(tmp)) {
+                py_Name name = c11__getitem(py_Name, &frame->co->varnames, byte.arg);
+                UnboundLocalError(name);
+                goto __ERROR;
+            }
+            py_newnil(tmp);
+            DISPATCH();
+        }
+        case OP_DELETE_NAME: {
+            assert(frame->is_locals_special);
+            py_Name name = co_names[byte.arg];
+            switch(frame->locals->type) {
+                case tp_locals: {
+                    py_Frame* noproxy = frame->locals->_ptr;
+                    py_Ref slot = Frame__getlocal_noproxy(noproxy, name);
+                    if(slot == NULL || py_isnil(slot)) {
+                        UnboundLocalError(name);
+                        goto __ERROR;
+                    }
+                    py_newnil(slot);
+                    DISPATCH();
+                }
+                case tp_dict: {
+                    int res = py_dict_delitem(frame->locals, py_name2ref(name));
+                    if(res == 1) DISPATCH();
+                    if(res == 0) UnboundLocalError(name);
+                    goto __ERROR;
+                }
+                case tp_nil: {
+                    // globals
+                    int res = Frame__delglobal(frame, name);
+                    if(res == 1) DISPATCH();
+                    if(res == 0) NameError(name);
+                    goto __ERROR;
+                }
+                default: c11__unreachable();
+            }
+        }
+        case OP_DELETE_GLOBAL: {
+            py_Name name = co_names[byte.arg];
+            int res = Frame__delglobal(frame, name);
+            if(res == 1) DISPATCH();
+            if(res == -1) goto __ERROR;
+            NameError(name);
+            goto __ERROR;
+        }
+
+        case OP_DELETE_ATTR: {
+            py_Name name = co_names[byte.arg];
+            if(!py_delattr(TOP(), name)) goto __ERROR;
+            DISPATCH();
+        }
+
+        case OP_DELETE_SUBSCR: {
+            // [a, b] -> del a[b]
+            py_Ref magic = py_tpfindmagic(SECOND()->type, __delitem__);
+            if(magic) {
+                if(magic->type == tp_nativefunc) {
+                    if(!py_callcfunc(magic->_cfunc, 2, SECOND())) goto __ERROR;
+                    STACK_SHRINK(2);
+                } else {
+                    INSERT_THIRD();     // [?, a, b]
+                    *THIRD() = *magic;  // [__delitem__, a, b]
+                    if(!py_vectorcall(1, 0)) goto __ERROR;
+                }
+                DISPATCH();
+            }
+            TypeError("'%t' object does not support item deletion", SECOND()->type);
+            goto __ERROR;
+        }
+        /*****************************************/
+        case OP_BUILD_IMAG: {
+            // [x]
+            py_Ref f = py_getdict(self->builtins, py_name("complex"));
+            assert(f != NULL);
+            py_TValue tmp = *TOP();
+            *TOP() = *f;           // [complex]
+            py_newnil(SP()++);     // [complex, NULL]
+            py_newint(SP()++, 0);  // [complex, NULL, 0]
+            *SP()++ = tmp;         // [complex, NULL, 0, x]
+            vectorcall_opcall(2, 0);
+            DISPATCH();
+        }
+        case OP_BUILD_BYTES: {
+            int size;
+            py_Ref string = c11__at(py_TValue, &frame->co->consts, byte.arg);
+            const char* data = py_tostrn(string, &size);
+            unsigned char* p = py_newbytes(SP()++, size);
+            memcpy(p, data, size);
+            DISPATCH();
+        }
+        case OP_BUILD_TUPLE: {
+            py_TValue tmp;
+            py_Ref p = py_newtuple(&tmp, byte.arg);
+            py_TValue* begin = SP() - byte.arg;
+            for(int i = 0; i < byte.arg; i++)
+                p[i] = begin[i];
+            SP() = begin;
+            PUSH(&tmp);
+            DISPATCH();
+        }
+        case OP_BUILD_LIST: {
+            py_TValue tmp;
+            py_newlistn(&tmp, byte.arg);
+            py_TValue* begin = SP() - byte.arg;
+            for(int i = 0; i < byte.arg; i++) {
+                py_list_setitem(&tmp, i, begin + i);
+            }
+            SP() = begin;
+            PUSH(&tmp);
+            DISPATCH();
+        }
+        case OP_BUILD_DICT: {
+            py_TValue* begin = SP() - byte.arg * 2;
+            py_Ref tmp = py_pushtmp();
+            py_newdict(tmp);
+            for(int i = 0; i < byte.arg * 2; i += 2) {
+                bool ok = py_dict_setitem(tmp, begin + i, begin + i + 1);
+                if(!ok) goto __ERROR;
+            }
+            SP() = begin;
+            PUSH(tmp);
+            DISPATCH();
+        }
+        case OP_BUILD_SET: {
+            py_TValue* begin = SP() - byte.arg;
+            py_Ref typeobject_set = py_getdict(self->builtins, py_name("set"));
+            assert(typeobject_set != NULL);
+            py_push(typeobject_set);
+            py_pushnil();
+            if(!py_vectorcall(0, 0)) goto __ERROR;
+            py_push(py_retval());  // empty set
+            py_Name id_add = py_name("add");
+            for(int i = 0; i < byte.arg; i++) {
+                py_push(TOP());
+                if(!py_pushmethod(id_add)) {
+                    c11__abort("OP_BUILD_SET: failed to load method 'add'");
+                }
+                py_push(begin + i);
+                if(!py_vectorcall(1, 0)) goto __ERROR;
+            }
+            py_TValue tmp = *TOP();
+            SP() = begin;
+            PUSH(&tmp);
+            DISPATCH();
+        }
+        case OP_BUILD_SLICE: {
+            // [start, stop, step]
+            py_TValue tmp;
+            py_newslice(&tmp);
+            py_setslot(&tmp, 0, THIRD());
+            py_setslot(&tmp, 1, SECOND());
+            py_setslot(&tmp, 2, TOP());
+            STACK_SHRINK(3);
+            PUSH(&tmp);
+            DISPATCH();
+        }
+        case OP_BUILD_STRING: {
+            py_TValue* begin = SP() - byte.arg;
+            c11_sbuf ss;
+            c11_sbuf__ctor(&ss);
+            for(int i = 0; i < byte.arg; i++) {
+                if(!py_str(begin + i)) goto __ERROR;
+                c11_sbuf__write_sv(&ss, py_tosv(&self->last_retval));
+            }
+            SP() = begin;
+            c11_sbuf__py_submit(&ss, SP()++);
+            DISPATCH();
+        }
+        /*****************************/
+#define CASE_BINARY_OP(label, op, rop)                                                             \
+    case label: {                                                                                  \
+        if(!pk_stack_binaryop(self, op, rop)) goto __ERROR;                                        \
+        POP();                                                                                     \
+        *TOP() = self->last_retval;                                                                \
+        DISPATCH();                                                                                \
+    }
+            CASE_BINARY_OP(OP_BINARY_ADD, __add__, __radd__)
+            CASE_BINARY_OP(OP_BINARY_SUB, __sub__, __rsub__)
+            CASE_BINARY_OP(OP_BINARY_MUL, __mul__, __rmul__)
+            CASE_BINARY_OP(OP_BINARY_TRUEDIV, __truediv__, __rtruediv__)
+            CASE_BINARY_OP(OP_BINARY_FLOORDIV, __floordiv__, __rfloordiv__)
+            CASE_BINARY_OP(OP_BINARY_MOD, __mod__, __rmod__)
+            CASE_BINARY_OP(OP_BINARY_POW, __pow__, __rpow__)
+            CASE_BINARY_OP(OP_BINARY_LSHIFT, __lshift__, 0)
+            CASE_BINARY_OP(OP_BINARY_RSHIFT, __rshift__, 0)
+            CASE_BINARY_OP(OP_BINARY_AND, __and__, 0)
+            CASE_BINARY_OP(OP_BINARY_OR, __or__, 0)
+            CASE_BINARY_OP(OP_BINARY_XOR, __xor__, 0)
+            CASE_BINARY_OP(OP_BINARY_MATMUL, __matmul__, 0)
+            CASE_BINARY_OP(OP_COMPARE_LT, __lt__, __gt__)
+            CASE_BINARY_OP(OP_COMPARE_LE, __le__, __ge__)
+            CASE_BINARY_OP(OP_COMPARE_EQ, __eq__, __eq__)
+            CASE_BINARY_OP(OP_COMPARE_NE, __ne__, __ne__)
+            CASE_BINARY_OP(OP_COMPARE_GT, __gt__, __lt__)
+            CASE_BINARY_OP(OP_COMPARE_GE, __ge__, __le__)
+#undef CASE_BINARY_OP
+        case OP_IS_OP: {
+            bool res = py_isidentical(SECOND(), TOP());
+            POP();
+            if(byte.arg) res = !res;
+            py_newbool(TOP(), res);
+            DISPATCH();
+        }
+        case OP_CONTAINS_OP: {
+            // [b, a] -> b __contains__ a (a in b) -> [retval]
+            py_Ref magic = py_tpfindmagic(SECOND()->type, __contains__);
+            if(magic) {
+                if(magic->type == tp_nativefunc) {
+                    if(!py_callcfunc(magic->_cfunc, 2, SECOND())) goto __ERROR;
+                    STACK_SHRINK(2);
+                } else {
+                    INSERT_THIRD();     // [?, b, a]
+                    *THIRD() = *magic;  // [__contains__, a, b]
+                    if(!py_vectorcall(1, 0)) goto __ERROR;
+                }
+                bool res = py_tobool(py_retval());
+                if(byte.arg) res = !res;
+                py_newbool(SP()++, res);
+                DISPATCH();
+            }
+            TypeError("'%t' type does not support '__contains__'", SECOND()->type);
+            goto __ERROR;
+        }
+            /*****************************************/
+        case OP_JUMP_FORWARD: DISPATCH_JUMP((int16_t)byte.arg);
+        case OP_POP_JUMP_IF_NOT_MATCH: {
+            int res = py_equal(SECOND(), TOP());
+            if(res < 0) goto __ERROR;
+            STACK_SHRINK(2);
+            if(!res) DISPATCH_JUMP((int16_t)byte.arg);
+            DISPATCH();
+        }
+        case OP_POP_JUMP_IF_FALSE: {
+            int res = py_bool(TOP());
+            if(res < 0) goto __ERROR;
+            POP();
+            if(!res) DISPATCH_JUMP((int16_t)byte.arg);
+            DISPATCH();
+        }
+        case OP_POP_JUMP_IF_TRUE: {
+            int res = py_bool(TOP());
+            if(res < 0) goto __ERROR;
+            POP();
+            if(res) DISPATCH_JUMP((int16_t)byte.arg);
+            DISPATCH();
+        }
+        case OP_JUMP_IF_TRUE_OR_POP: {
+            int res = py_bool(TOP());
+            if(res < 0) goto __ERROR;
+            if(res) {
+                DISPATCH_JUMP((int16_t)byte.arg);
+            } else {
+                POP();
+                DISPATCH();
+            }
+        }
+        case OP_JUMP_IF_FALSE_OR_POP: {
+            int res = py_bool(TOP());
+            if(res < 0) goto __ERROR;
+            if(!res) {
+                DISPATCH_JUMP((int16_t)byte.arg);
+            } else {
+                POP();
+                DISPATCH();
+            }
+        }
+        case OP_SHORTCUT_IF_FALSE_OR_POP: {
+            int res = py_bool(TOP());
+            if(res < 0) goto __ERROR;
+            if(!res) {                      // [b, False]
+                STACK_SHRINK(2);            // []
+                py_newbool(SP()++, false);  // [False]
+                DISPATCH_JUMP((int16_t)byte.arg);
+            } else {
+                POP();  // [b]
+                DISPATCH();
+            }
+        }
+        case OP_LOOP_CONTINUE: {
+            DISPATCH_JUMP((int16_t)byte.arg);
+        }
+        case OP_LOOP_BREAK: {
+            DISPATCH_JUMP((int16_t)byte.arg);
+        }
+        /*****************************************/
+        case OP_CALL: {
+            ManagedHeap__collect_if_needed(&self->heap);
+            vectorcall_opcall(byte.arg & 0xFF, byte.arg >> 8);
+            DISPATCH();
+        }
+        case OP_CALL_VARGS: {
+            // [_0, _1, _2 | k1, v1, k2, v2]
+            uint16_t argc = byte.arg & 0xFF;
+            uint16_t kwargc = byte.arg >> 8;
+
+            int n = 0;
+            py_TValue* sp = SP();
+            py_TValue* p1 = sp - kwargc * 2;
+            py_TValue* base = p1 - argc;
+            py_TValue* buf = self->vectorcall_buffer;
+
+            for(py_TValue* curr = base; curr != p1; curr++) {
+                if(curr->type != tp_star_wrapper) {
+                    buf[n++] = *curr;
+                } else {
+                    py_TValue* args = py_getslot(curr, 0);
+                    py_TValue* p;
+                    int length = pk_arrayview(args, &p);
+                    if(length != -1) {
+                        for(int j = 0; j < length; j++) {
+                            buf[n++] = p[j];
+                        }
+                        argc += length - 1;
+                    } else {
+                        TypeError("*args must be a list or tuple, got '%t'", args->type);
+                        goto __ERROR;
+                    }
+                }
+            }
+
+            for(py_TValue* curr = p1; curr != sp; curr += 2) {
+                if(curr[1].type != tp_star_wrapper) {
+                    buf[n++] = curr[0];
+                    buf[n++] = curr[1];
+                } else {
+                    assert(py_toint(&curr[0]) == 0);
+                    py_TValue* kwargs = py_getslot(&curr[1], 0);
+                    if(kwargs->type == tp_dict) {
+                        py_TValue* p = buf + n;
+                        if(!py_dict_apply(kwargs, unpack_dict_to_buffer, &p)) goto __ERROR;
+                        n = p - buf;
+                        kwargc += py_dict_len(kwargs) - 1;
+                    } else {
+                        TypeError("**kwargs must be a dict, got '%t'", kwargs->type);
+                        goto __ERROR;
+                    }
+                }
+            }
+
+            memcpy(base, buf, n * sizeof(py_TValue));
+            SP() = base + n;
+
+            vectorcall_opcall(argc, kwargc);
+            DISPATCH();
+        }
+        case OP_RETURN_VALUE: {
+            CHECK_RETURN_FROM_EXCEPT_OR_FINALLY();
+            if(byte.arg == BC_NOARG) {
+                self->last_retval = POPX();
+            } else {
+                py_newnone(&self->last_retval);
+            }
+            VM__pop_frame(self);
+            if(frame == base_frame) {  // [ frameBase<- ]
+                return RES_RETURN;
+            } else {
+                frame = self->top_frame;
+                PUSH(&self->last_retval);
+                goto __NEXT_FRAME;
+            }
+            DISPATCH();
+        }
+        case OP_YIELD_VALUE: {
+            CHECK_RETURN_FROM_EXCEPT_OR_FINALLY();
+            if(byte.arg == 1) {
+                py_newnone(py_retval());
+            } else {
+                py_assign(py_retval(), TOP());
+                POP();
+            }
+            return RES_YIELD;
+        }
+        case OP_FOR_ITER_YIELD_VALUE: {
+            CHECK_RETURN_FROM_EXCEPT_OR_FINALLY();
+            int res = py_next(TOP());
+            if(res == -1) goto __ERROR;
+            if(res) {
+                return RES_YIELD;
+            } else {
+                assert(self->last_retval.type == tp_StopIteration);
+                BaseException* ud = py_touserdata(py_retval());
+                py_ObjectRef value = &ud->args;
+                if(py_isnil(value)) value = py_None();
+                *TOP() = *value;  // [iter] -> [retval]
+                DISPATCH_JUMP((int16_t)byte.arg);
+            }
+        }
+        /////////
+        case OP_LIST_APPEND: {
+            // [list, iter, value]
+            py_list_append(THIRD(), TOP());
+            POP();
+            DISPATCH();
+        }
+        case OP_DICT_ADD: {
+            // [dict, iter, key, value]
+            bool ok = py_dict_setitem(FOURTH(), SECOND(), TOP());
+            if(!ok) goto __ERROR;
+            STACK_SHRINK(2);
+            DISPATCH();
+        }
+        case OP_SET_ADD: {
+            // [set, iter, value]
+            py_push(THIRD());  // [| set]
+            if(!py_pushmethod(py_name("add"))) {
+                c11__abort("OP_SET_ADD: failed to load method 'add'");
+            }  // [|add() set]
+            py_push(THIRD());
+            if(!py_vectorcall(1, 0)) goto __ERROR;
+            POP();
+            DISPATCH();
+        }
+        /////////
+        case OP_UNARY_NEGATIVE: {
+            if(!pk_callmagic(__neg__, 1, TOP())) goto __ERROR;
+            *TOP() = self->last_retval;
+            DISPATCH();
+        }
+        case OP_UNARY_NOT: {
+            int res = py_bool(TOP());
+            if(res < 0) goto __ERROR;
+            py_newbool(TOP(), !res);
+            DISPATCH();
+        }
+        case OP_UNARY_STAR: {
+            py_TValue value = POPX();
+            int* level = py_newobject(SP()++, tp_star_wrapper, 1, sizeof(int));
+            *level = byte.arg;
+            py_setslot(TOP(), 0, &value);
+            DISPATCH();
+        }
+        case OP_UNARY_INVERT: {
+            if(!pk_callmagic(__invert__, 1, TOP())) goto __ERROR;
+            *TOP() = self->last_retval;
+            DISPATCH();
+        }
+        ////////////////
+        case OP_GET_ITER: {
+            if(!py_iter(TOP())) goto __ERROR;
+            *TOP() = *py_retval();
+            DISPATCH();
+        }
+        case OP_FOR_ITER: {
+            int res = py_next(TOP());
+            if(res == -1) goto __ERROR;
+            if(res) {
+                PUSH(py_retval());
+                DISPATCH();
+            } else {
+                assert(self->last_retval.type == tp_StopIteration);
+                POP();  // [iter] -> []
+                DISPATCH_JUMP((int16_t)byte.arg);
+            }
+        }
+        ////////
+        case OP_IMPORT_PATH: {
+            py_Ref path_object = c11__at(py_TValue, &frame->co->consts, byte.arg);
+            const char* path = py_tostr(path_object);
+            int res = py_import(path);
+            if(res == -1) goto __ERROR;
+            if(res == 0) {
+                ImportError("No module named '%s'", path);
+                goto __ERROR;
+            }
+            PUSH(py_retval());
+            DISPATCH();
+        }
+        case OP_POP_IMPORT_STAR: {
+            // [module]
+            NameDict* dict = PyObject__dict(TOP()->_obj);
+            py_ItemRef all = NameDict__try_get(dict, __all__);
+            if(all) {
+                py_TValue* p;
+                int length = pk_arrayview(all, &p);
+                if(length == -1) {
+                    TypeError("'__all__' must be a list or tuple, got '%t'", all->type);
+                    goto __ERROR;
+                }
+                for(int i = 0; i < length; i++) {
+                    py_Name name = py_namev(py_tosv(p + i));
+                    py_ItemRef value = NameDict__try_get(dict, name);
+                    if(value == NULL) {
+                        ImportError("cannot import name '%n'", name);
+                        goto __ERROR;
+                    } else {
+                        if(!Frame__setglobal(frame, name, value)) goto __ERROR;
+                    }
+                }
+            } else {
+                for(int i = 0; i < dict->capacity; i++) {
+                    NameDict_KV* kv = &dict->items[i];
+                    if(kv->key == NULL) continue;
+                    c11_sv name = py_name2sv(kv->key);
+                    if(name.size == 0 || name.data[0] == '_') continue;
+                    if(!Frame__setglobal(frame, kv->key, &kv->value)) goto __ERROR;
+                }
+            }
+            POP();
+            DISPATCH();
+        }
+        ////////
+        case OP_UNPACK_SEQUENCE: {
+            py_TValue* p;
+            int length;
+
+            switch(TOP()->type) {
+                case tp_tuple: {
+                    length = py_tuple_len(TOP());
+                    p = py_tuple_data(TOP());
+                    break;
+                }
+                case tp_list: {
+                    length = py_list_len(TOP());
+                    p = py_list_data(TOP());
+                    break;
+                }
+                case tp_vec2i: {
+                    length = 2;
+                    if(byte.arg != length) break;
+                    c11_vec2i val = py_tovec2i(TOP());
+                    POP();
+                    py_newint(SP()++, val.x);
+                    py_newint(SP()++, val.y);
+                    DISPATCH();
+                }
+                case tp_vec2: {
+                    length = 2;
+                    if(byte.arg != length) break;
+                    c11_vec2 val = py_tovec2(TOP());
+                    POP();
+                    py_newfloat(SP()++, val.x);
+                    py_newfloat(SP()++, val.y);
+                    DISPATCH();
+                }
+                case tp_vec3i: {
+                    length = 3;
+                    if(byte.arg != length) break;
+                    c11_vec3i val = py_tovec3i(TOP());
+                    POP();
+                    py_newint(SP()++, val.x);
+                    py_newint(SP()++, val.y);
+                    py_newint(SP()++, val.z);
+                    DISPATCH();
+                }
+                case tp_vec3: {
+                    length = 3;
+                    if(byte.arg != length) break;
+                    c11_vec3 val = py_tovec3(TOP());
+                    POP();
+                    py_newfloat(SP()++, val.x);
+                    py_newfloat(SP()++, val.y);
+                    py_newfloat(SP()++, val.z);
+                    DISPATCH();
+                }
+                default: {
+                    TypeError("expected list or tuple to unpack, got %t", TOP()->type);
+                    goto __ERROR;
+                }
+            }
+            if(length != byte.arg) {
+                ValueError("expected %d values to unpack, got %d", byte.arg, length);
+                goto __ERROR;
+            }
+            POP();
+            for(int i = 0; i < length; i++) {
+                PUSH(p + i);
+            }
+            DISPATCH();
+        }
+        case OP_UNPACK_EX: {
+            py_TValue* p;
+            int length = pk_arrayview(TOP(), &p);
+            if(length == -1) {
+                TypeError("expected list or tuple to unpack, got %t", TOP()->type);
+                goto __ERROR;
+            }
+            int exceed = length - byte.arg;
+            if(exceed < 0) {
+                ValueError("not enough values to unpack");
+                goto __ERROR;
+            }
+            POP();
+            for(int i = 0; i < byte.arg; i++) {
+                PUSH(p + i);
+            }
+            py_newlistn(SP()++, exceed);
+            for(int i = 0; i < exceed; i++) {
+                py_list_setitem(TOP(), i, p + byte.arg + i);
+            }
+            DISPATCH();
+        }
+        ///////////
+        case OP_BEGIN_CLASS: {
+            // [base]
+            py_Name name = co_names[byte.arg];
+            py_Type base;
+            if(py_isnone(TOP())) {
+                base = tp_object;
+            } else {
+                if(!py_checktype(TOP(), tp_type)) goto __ERROR;
+                base = py_totype(TOP());
+            }
+            POP();
+
+            py_TypeInfo* base_ti = pk_typeinfo(base);
+            if(base_ti->is_final) {
+                TypeError("type '%t' is not an acceptable base type", base);
+                goto __ERROR;
+            }
+
+            py_Type type = pk_newtypewithmode(name,
+                                              base,
+                                              frame->module,
+                                              NULL,
+                                              base_ti->is_python,
+                                              false,
+                                              frame->co->src->mode);
+            PUSH(py_tpobject(type));
+            self->curr_class = TOP();
+            DISPATCH();
+        }
+        case OP_END_CLASS: {
+            // [cls or decorated]
+            py_Name name = co_names[byte.arg];
+            if(!Frame__setglobal(frame, name, TOP())) goto __ERROR;
+
+            if(py_istype(TOP(), tp_type)) {
+                // call on_end_subclass
+                py_TypeInfo* ti = py_touserdata(TOP());
+                if(ti->base != tp_object) {
+                    py_TypeInfo* base_ti = ti->base_ti;
+                    if(base_ti->on_end_subclass) base_ti->on_end_subclass(ti);
+                }
+                py_TValue* slot_eq = py_getdict(&ti->self, __eq__);
+                py_TValue* slot_ne = py_getdict(&ti->self, __ne__);
+                if(slot_eq && !slot_ne) {
+                    TypeError("'%n' implements '__eq__' but not '__ne__'", ti->name);
+                    goto __ERROR;
+                }
+            }
+            // class with decorator is unsafe currently
+            // it skips the above check
+            POP();
+            self->curr_class = NULL;
+            DISPATCH();
+        }
+        case OP_STORE_CLASS_ATTR: {
+            assert(self->curr_class);
+            py_Name name = co_names[byte.arg];
+            // TOP() can be a function, classmethod or custom decorator
+            py_Ref actual_func = TOP();
+            if(actual_func->type == tp_classmethod) { actual_func = py_getslot(actual_func, 0); }
+            if(actual_func->type == tp_function) {
+                Function* ud = py_touserdata(actual_func);
+                ud->clazz = self->curr_class->_obj;
+            }
+            py_setdict(self->curr_class, name, TOP());
+            POP();
+            DISPATCH();
+        }
+        case OP_ADD_CLASS_ANNOTATION: {
+            assert(self->curr_class);
+            // [type_hint string]
+            py_TypeInfo* ti = py_touserdata(self->curr_class);
+            if(py_isnil(&ti->annotations)) py_newdict(&ti->annotations);
+            py_Name name = co_names[byte.arg];
+            bool ok = py_dict_setitem_by_str(&ti->annotations, py_name2str(name), TOP());
+            if(!ok) goto __ERROR;
+            POP();
+            DISPATCH();
+        }
+        ///////////
+        case OP_WITH_ENTER: {
+            // [expr]
+            py_push(TOP());
+            if(!py_pushmethod(__enter__)) {
+                TypeError("'%t' object does not support the context manager protocol", TOP()->type);
+                goto __ERROR;
+            }
+            vectorcall_opcall(0, 0);
+            DISPATCH();
+        }
+        case OP_WITH_EXIT: {
+            // [expr]
+            py_push(TOP());
+            if(!py_pushmethod(__exit__)) {
+                TypeError("'%t' object does not support the context manager protocol", TOP()->type);
+                goto __ERROR;
+            }
+            if(!py_vectorcall(0, 0)) goto __ERROR;
+            POP();
+            DISPATCH();
+        }
+        ///////////
+        case OP_TRY_ENTER: {
+            Frame__set_unwind_target(frame, SP());
+            DISPATCH();
+        }
+        case OP_EXCEPTION_MATCH: {
+            if(!py_checktype(TOP(), tp_type)) goto __ERROR;
+            bool ok = py_isinstance(&self->curr_exception, py_totype(TOP()));
+            py_newbool(TOP(), ok);
+            DISPATCH();
+        }
+        case OP_RAISE: {
+            // [exception]
+            if(py_istype(TOP(), tp_type)) {
+                if(!py_tpcall(py_totype(TOP()), 0, NULL)) goto __ERROR;
+                py_assign(TOP(), py_retval());
+            }
+            if(!py_isinstance(TOP(), tp_BaseException)) {
+                TypeError("exceptions must derive from BaseException");
+                goto __ERROR;
+            }
+            py_raise(TOP());
+            goto __ERROR;
+        }
+        case OP_RAISE_ASSERT: {
+            if(byte.arg) {
+                if(!py_str(TOP())) goto __ERROR;
+                POP();
+                py_exception(tp_AssertionError, "%s", py_tostr(py_retval()));
+            } else {
+                py_exception(tp_AssertionError, "");
+            }
+            goto __ERROR;
+        }
+        case OP_RE_RAISE: {
+            if(self->curr_exception.type) {
+                assert(!self->is_curr_exc_handled);
+                goto __ERROR_RE_RAISE;
+            }
+            DISPATCH();
+        }
+        case OP_PUSH_EXCEPTION: {
+            assert(self->curr_exception.type);
+            PUSH(&self->curr_exception);
+            DISPATCH();
+        }
+        case OP_BEGIN_EXC_HANDLING: {
+            assert(self->curr_exception.type);
+            self->is_curr_exc_handled = true;
+            DISPATCH();
+        }
+        case OP_END_EXC_HANDLING: {
+            assert(self->curr_exception.type);
+            py_clearexc(NULL);
+            DISPATCH();
+        }
+        case OP_BEGIN_FINALLY: {
+            if(self->curr_exception.type) {
+                assert(!self->is_curr_exc_handled);
+                // temporarily handle the exception if any
+                self->is_curr_exc_handled = true;
+            }
+            DISPATCH();
+        }
+        case OP_END_FINALLY: {
+            if(byte.arg == BC_NOARG) {
+                if(self->curr_exception.type) {
+                    assert(self->is_curr_exc_handled);
+                    // revert the exception handling if needed
+                    self->is_curr_exc_handled = false;
+                }
+            } else {
+                // break or continue inside finally block
+                py_clearexc(NULL);
+            }
+            DISPATCH();
+        }
+        //////////////////
+        case OP_FORMAT_STRING: {
+            py_Ref spec = c11__at(py_TValue, &frame->co->consts, byte.arg);
+            bool ok = stack_format_object(self, py_tosv(spec));
+            if(!ok) goto __ERROR;
+            DISPATCH();
+        }
+        default: c11__unreachable();
+    }
+
+    c11__unreachable();
+
+__ERROR:
+    py_BaseException__stpush(frame,
+                             &self->curr_exception,
+                             frame->co->src,
+                             Frame__lineno(frame),
+                             !frame->is_locals_special ? frame->co->name->data : NULL);
+__ERROR_RE_RAISE:
+    do {
+    } while(0);
+
+    int target = Frame__prepare_jump_exception_handler(frame, &self->stack);
+    if(target >= 0) {
+        // 1. Exception can be handled inside the current frame
+        DISPATCH_JUMP_ABSOLUTE(target);
+    } else {
+        // 2. Exception need to be propagated to the upper frame
+        bool is_base_frame_to_be_popped = frame == base_frame;
+        VM__pop_frame(self);
+        if(self->top_frame == NULL || is_base_frame_to_be_popped) {
+            // propagate to the top level
+            return RES_ERROR;
+        }
+        frame = self->top_frame;
+        RESET_CO_CACHE();
+        goto __ERROR;
+    }
+
+    c11__unreachable();
 }
 
 const char* pk_op2str(py_Name op) {
-    switch(op) {
-        case __eq__: return "==";
-        case __ne__: return "!=";
-        case __lt__: return "<";
-        case __le__: return "<=";
-        case __gt__: return ">";
-        case __ge__: return ">=";
-        case __add__: return "+";
-        case __sub__: return "-";
-        case __mul__: return "*";
-        case __truediv__: return "/";
-        case __floordiv__: return "//";
-        case __mod__: return "%";
-        case __pow__: return "**";
-        case __lshift__: return "<<";
-        case __rshift__: return ">>";
-        case __and__: return "&";
-        case __or__: return "|";
-        case __xor__: return "^";
-        case __neg__: return "-";
-        case __invert__: return "~";
-        case __matmul__: return "@";
-        default: return py_name2str(op);
-    }
+    if(__eq__ == op) return "==";
+    if(__ne__ == op) return "!=";
+    if(__lt__ == op) return "<";
+    if(__le__ == op) return "<=";
+    if(__gt__ == op) return ">";
+    if(__ge__ == op) return ">=";
+    if(__add__ == op) return "+";
+    if(__sub__ == op) return "-";
+    if(__mul__ == op) return "*";
+    if(__truediv__ == op) return "/";
+    if(__floordiv__ == op) return "//";
+    if(__mod__ == op) return "%";
+    if(__pow__ == op) return "**";
+    if(__lshift__ == op) return "<<";
+    if(__rshift__ == op) return ">>";
+    if(__and__ == op) return "&";
+    if(__or__ == op) return "|";
+    if(__xor__ == op) return "^";
+    if(__neg__ == op) return "-";
+    if(__invert__ == op) return "~";
+    if(__matmul__ == op) return "@";
+    return py_name2str(op);
 }
 
 bool pk_stack_binaryop(VM* self, py_Name op, py_Name rop) {
@@ -4470,7 +5264,13 @@ bool pk_stack_binaryop(VM* self, py_Name op, py_Name rop) {
         py_newbool(py_retval(), !res);
         return true;
     }
-    return TypeError("unsupported operand type(s) for '%s'", pk_op2str(op));
+
+    py_Type lhs_t = rop ? TOP()->type : SECOND()->type;
+    py_Type rhs_t = rop ? SECOND()->type : TOP()->type;
+    return TypeError("unsupported operand type(s) for '%s': '%t' and '%t'",
+                     pk_op2str(op),
+                     lhs_t,
+                     rhs_t);
 }
 
 bool py_binaryop(py_Ref lhs, py_Ref rhs, py_Name op, py_Name rop) {
@@ -4481,6 +5281,48 @@ bool py_binaryop(py_Ref lhs, py_Ref rhs, py_Name op, py_Name rop) {
     STACK_SHRINK(2);
     return ok;
 }
+
+bool py_binaryadd(py_Ref lhs, py_Ref rhs) { return py_binaryop(lhs, rhs, __add__, __radd__); }
+
+bool py_binarysub(py_Ref lhs, py_Ref rhs) { return py_binaryop(lhs, rhs, __sub__, __rsub__); }
+
+bool py_binarymul(py_Ref lhs, py_Ref rhs) { return py_binaryop(lhs, rhs, __mul__, __rmul__); }
+
+bool py_binarytruediv(py_Ref lhs, py_Ref rhs) {
+    return py_binaryop(lhs, rhs, __truediv__, __rtruediv__);
+}
+
+bool py_binaryfloordiv(py_Ref lhs, py_Ref rhs) {
+    return py_binaryop(lhs, rhs, __floordiv__, __rfloordiv__);
+}
+
+bool py_binarymod(py_Ref lhs, py_Ref rhs) { return py_binaryop(lhs, rhs, __mod__, __rmod__); }
+
+bool py_binarypow(py_Ref lhs, py_Ref rhs) { return py_binaryop(lhs, rhs, __pow__, __rpow__); }
+
+bool py_binarylshift(py_Ref lhs, py_Ref rhs) { return py_binaryop(lhs, rhs, __lshift__, 0); }
+
+bool py_binaryrshift(py_Ref lhs, py_Ref rhs) { return py_binaryop(lhs, rhs, __rshift__, 0); }
+
+bool py_binaryand(py_Ref lhs, py_Ref rhs) { return py_binaryop(lhs, rhs, __and__, 0); }
+
+bool py_binaryor(py_Ref lhs, py_Ref rhs) { return py_binaryop(lhs, rhs, __or__, 0); }
+
+bool py_binaryxor(py_Ref lhs, py_Ref rhs) { return py_binaryop(lhs, rhs, __xor__, 0); }
+
+bool py_binarymatmul(py_Ref lhs, py_Ref rhs) { return py_binaryop(lhs, rhs, __matmul__, 0); }
+
+bool py_eq(py_Ref lhs, py_Ref rhs) { return py_binaryop(lhs, rhs, __eq__, __eq__); }
+
+bool py_ne(py_Ref lhs, py_Ref rhs) { return py_binaryop(lhs, rhs, __ne__, __ne__); }
+
+bool py_lt(py_Ref lhs, py_Ref rhs) { return py_binaryop(lhs, rhs, __lt__, __gt__); }
+
+bool py_le(py_Ref lhs, py_Ref rhs) { return py_binaryop(lhs, rhs, __le__, __ge__); }
+
+bool py_gt(py_Ref lhs, py_Ref rhs) { return py_binaryop(lhs, rhs, __gt__, __lt__); }
+
+bool py_ge(py_Ref lhs, py_Ref rhs) { return py_binaryop(lhs, rhs, __ge__, __le__); }
 
 static bool stack_format_object(VM* self, c11_sv spec) {
     // format TOS via `spec` inplace
@@ -4646,157 +5488,21 @@ static bool stack_format_object(VM* self, c11_sv spec) {
 #undef SP
 #undef INSERT_THIRD
 #undef vectorcall_opcall
+#undef RESET_CO_CACHE
 
-void py_sys_settrace(py_TraceFunc func) {
+void py_sys_settrace(py_TraceFunc func, bool reset) {
     TraceInfo* info = &pk_current_vm->trace_info;
     info->func = func;
+    if(!reset) return;
     if(info->prev_loc.src) {
         PK_DECREF(info->prev_loc.src);
         info->prev_loc.src = NULL;
     }
     info->prev_loc.lineno = -1;
 }
-// src/interpreter/name.c
-void InternedNames__ctor(InternedNames* self) {
-    c11_smallmap_s2n__ctor(&self->interned);
-    c11_vector__ctor(&self->r_interned, sizeof(RInternedEntry));
-
-    // initialize all magic names
-#define MAGIC_METHOD(x)                                                                            \
-    if(x != py_name(#x)) abort();
-#ifdef MAGIC_METHOD
-
-// math operators
-MAGIC_METHOD(__lt__)
-MAGIC_METHOD(__le__)
-MAGIC_METHOD(__gt__)
-MAGIC_METHOD(__ge__)
-/////////////////////////////
-MAGIC_METHOD(__neg__)
-MAGIC_METHOD(__abs__)
-MAGIC_METHOD(__round__)
-MAGIC_METHOD(__divmod__)
-/////////////////////////////
-MAGIC_METHOD(__add__)
-MAGIC_METHOD(__radd__)
-MAGIC_METHOD(__sub__)
-MAGIC_METHOD(__rsub__)
-MAGIC_METHOD(__mul__)
-MAGIC_METHOD(__rmul__)
-MAGIC_METHOD(__truediv__)
-MAGIC_METHOD(__rtruediv__)
-MAGIC_METHOD(__floordiv__)
-MAGIC_METHOD(__rfloordiv__)
-MAGIC_METHOD(__mod__)
-MAGIC_METHOD(__rmod__)
-MAGIC_METHOD(__pow__)
-MAGIC_METHOD(__rpow__)
-MAGIC_METHOD(__matmul__)
-MAGIC_METHOD(__lshift__)
-MAGIC_METHOD(__rshift__)
-MAGIC_METHOD(__and__)
-MAGIC_METHOD(__or__)
-MAGIC_METHOD(__xor__)
-/////////////////////////////
-MAGIC_METHOD(__repr__)
-MAGIC_METHOD(__str__)
-MAGIC_METHOD(__hash__)
-MAGIC_METHOD(__len__)
-MAGIC_METHOD(__iter__)
-MAGIC_METHOD(__next__)
-MAGIC_METHOD(__contains__)
-MAGIC_METHOD(__bool__)
-MAGIC_METHOD(__invert__)
-/////////////////////////////
-MAGIC_METHOD(__eq__)
-MAGIC_METHOD(__ne__)
-// indexer
-MAGIC_METHOD(__getitem__)
-MAGIC_METHOD(__setitem__)
-MAGIC_METHOD(__delitem__)
-// specials
-MAGIC_METHOD(__new__)
-MAGIC_METHOD(__init__)
-MAGIC_METHOD(__call__)
-MAGIC_METHOD(__enter__)
-MAGIC_METHOD(__exit__)
-MAGIC_METHOD(__name__)
-MAGIC_METHOD(__all__)
-MAGIC_METHOD(__package__)
-MAGIC_METHOD(__path__)
-MAGIC_METHOD(__class__)
-MAGIC_METHOD(__getattr__)
-MAGIC_METHOD(__reduce__)
-MAGIC_METHOD(__missing__)
-
-#endif
-#undef MAGIC_METHOD
-}
-
-void InternedNames__dtor(InternedNames* self) {
-    for(int i = 0; i < self->r_interned.length; i++) {
-        PK_FREE(c11__getitem(RInternedEntry, &self->r_interned, i).data);
-    }
-    c11_smallmap_s2n__dtor(&self->interned);
-    c11_vector__dtor(&self->r_interned);
-}
-
-py_Name py_name(const char* name) {
-    c11_sv sv;
-    sv.data = name;
-    sv.size = strlen(name);
-    return py_namev(sv);
-}
-
-py_Name py_namev(c11_sv name) {
-    InternedNames* self = &pk_current_vm->names;
-    uint16_t index = c11_smallmap_s2n__get(&self->interned, name, 0);
-    if(index != 0) return index;
-    // generate new index
-    if(self->interned.length > 65530) c11__abort("py_Name index overflow");
-    // NOTE: we must allocate the string in the heap so iterators are not invalidated
-    char* p = PK_MALLOC(name.size + 1);
-    memcpy(p, name.data, name.size);
-    p[name.size] = '\0';
-    RInternedEntry* entry = c11_vector__emplace(&self->r_interned);
-    entry->data = p;
-    entry->size = name.size;
-    memset(&entry->obj, 0, sizeof(py_TValue));
-    index = self->r_interned.length;  // 1-based
-    // save to _interned
-    c11_smallmap_s2n__set(&self->interned, (c11_sv){p, name.size}, index);
-    assert(self->interned.length == self->r_interned.length);
-    return index;
-}
-
-const char* py_name2str(py_Name index) {
-    InternedNames* self = &pk_current_vm->names;
-    assert(index > 0 && index <= self->interned.length);
-    return c11__getitem(RInternedEntry, &self->r_interned, index - 1).data;
-}
-
-c11_sv py_name2sv(py_Name index) {
-    InternedNames* self = &pk_current_vm->names;
-    assert(index > 0 && index <= self->interned.length);
-    RInternedEntry entry = c11__getitem(RInternedEntry, &self->r_interned, index - 1);
-    return (c11_sv){entry.data, entry.size};
-}
-
-py_GlobalRef py_name2ref(py_Name index) {
-    InternedNames* self = &pk_current_vm->names;
-    assert(index > 0 && index <= self->interned.length);
-    RInternedEntry* entry = c11__at(RInternedEntry, &self->r_interned, index - 1);
-    if(entry->obj.type == tp_nil) {
-        c11_sv sv;
-        sv.data = entry->data;
-        sv.size = entry->size;
-        py_newstrv(&entry->obj, sv);
-    }
-    return &entry->obj;
-}
-
 // src/interpreter/frame.c
 #include <stdbool.h>
+#include <assert.h>
 
 void ValueStack__ctor(ValueStack* self) {
     self->sp = self->begin;
@@ -4808,7 +5514,7 @@ void ValueStack__dtor(ValueStack* self) { self->sp = self->begin; }
 void FastLocals__to_dict(py_TValue* locals, const CodeObject* co) {
     py_StackRef dict = py_pushtmp();
     py_newdict(dict);
-    c11__foreach(c11_smallmap_n2i_KV, &co->varnames_inv, entry) {
+    c11__foreach(c11_smallmap_n2d_KV, &co->varnames_inv, entry) {
         py_TValue* value = &locals[entry->value];
         if(!py_isnil(value)) {
             bool ok = py_dict_setitem(dict, py_name2ref(entry->key), value);
@@ -4821,10 +5527,10 @@ void FastLocals__to_dict(py_TValue* locals, const CodeObject* co) {
 }
 
 NameDict* FastLocals__to_namedict(py_TValue* locals, const CodeObject* co) {
-    NameDict* dict = NameDict__new();
-    c11__foreach(c11_smallmap_n2i_KV, &co->varnames_inv, entry) {
-        py_TValue value = locals[entry->value];
-        if(!py_isnil(&value)) NameDict__set(dict, entry->key, value);
+    NameDict* dict = NameDict__new(PK_INST_ATTR_LOAD_FACTOR);
+    c11__foreach(c11_smallmap_n2d_KV, &co->varnames_inv, entry) {
+        py_Ref val = &locals[entry->value];
+        if(!py_isnil(val)) NameDict__set(dict, entry->key, val);
     }
     return dict;
 }
@@ -4906,15 +5612,18 @@ void Frame__set_unwind_target(py_Frame* self, py_TValue* sp) {
     }
 }
 
-void Frame__gc_mark(py_Frame* self) {
+void Frame__gc_mark(py_Frame* self, c11_vector* p_stack) {
     pk__mark_value(self->globals);
     if(self->is_locals_special) pk__mark_value(self->locals);
-    CodeObject__gc_mark(self->co);
+    CodeObject__gc_mark(self->co, p_stack);
 }
 
 int Frame__lineno(const py_Frame* self) {
     int ip = self->ip;
-    if(ip >= 0) return c11__getitem(BytecodeEx, &self->co->codes_ex, ip).lineno;
+    if(ip >= 0) {
+        BytecodeEx* ex = c11__at(BytecodeEx, &self->co->codes_ex, ip);
+        return ex->lineno;
+    }
     if(!self->is_locals_special) return self->co->start_line;
     return 0;
 }
@@ -4958,7 +5667,7 @@ int Frame__delglobal(py_Frame* self, py_Name name) {
 
 py_StackRef Frame__getlocal_noproxy(py_Frame* self, py_Name name) {
     assert(!self->is_locals_special);
-    int index = c11_smallmap_n2i__get(&self->co->varnames_inv, name, -1);
+    int index = c11_smallmap_n2d__get(&self->co->varnames_inv, name, -1);
     if(index == -1) return NULL;
     return &self->locals[index];
 }
@@ -4984,9 +5693,9 @@ const char* py_Frame_sourceloc(py_Frame* self, int* lineno) {
     return loc.src->filename->data;
 }
 
-void py_Frame_newglobals(py_Frame* frame, py_Ref out) {
+void py_Frame_newglobals(py_Frame* frame, py_OutRef out) {
     if(!frame) {
-        pk_mappingproxy__namedict(out, &pk_current_vm->main);
+        pk_mappingproxy__namedict(out, pk_current_vm->main);
         return;
     }
     if(frame->globals->type == tp_module) {
@@ -4996,7 +5705,7 @@ void py_Frame_newglobals(py_Frame* frame, py_Ref out) {
     }
 }
 
-void py_Frame_newlocals(py_Frame* frame, py_Ref out) {
+void py_Frame_newlocals(py_Frame* frame, py_OutRef out) {
     if(!frame) {
         py_newdict(out);
         return;
@@ -5059,22 +5768,159 @@ int load_module_from_dll_desktop_only(const char* path) PY_RAISE PY_RETURN {
 }
 
 #endif
+// src/interpreter/line_profiler.c
+#include <assert.h>
+
+void LineProfiler__ctor(LineProfiler* self) {
+    c11_smallmap_p2i__ctor(&self->records);
+    c11_vector__ctor(&self->frame_records, sizeof(FrameRecord));
+    self->enabled = false;
+}
+
+void LineProfiler__dtor(LineProfiler* self) {
+    for(int i = 0; i < self->records.length; i++) {
+        c11_smallmap_p2i_KV kv = c11__getitem(c11_smallmap_p2i_KV, &self->records, i);
+        SourceData_ src = (SourceData_)kv.key;
+        PK_DECREF(src);
+        PK_FREE((void*)kv.value);
+    }
+    c11_smallmap_p2i__dtor(&self->records);
+    c11_vector__dtor(&self->frame_records);
+}
+
+LineRecord* LineProfiler__get_record(LineProfiler* self, SourceLocation loc) {
+    LineRecord* lines = (LineRecord*)c11_smallmap_p2i__get(&self->records, loc.src, 0);
+    if(lines == NULL) {
+        int max_lineno = loc.src->line_starts.length;
+        lines = PK_MALLOC(sizeof(LineRecord) * (max_lineno + 1));
+        memset(lines, 0, sizeof(LineRecord) * (max_lineno + 1));
+        c11_smallmap_p2i__set(&self->records, loc.src, (py_i64)lines);
+        PK_INCREF(loc.src);
+    }
+    return &lines[loc.lineno];
+}
+
+void LineProfiler__begin(LineProfiler* self) {
+    assert(!self->enabled);
+    self->enabled = true;
+}
+
+static void LineProfiler__increment_now(LineProfiler* self, clock_t now, LineRecord* curr_line) {
+    FrameRecord* top_frame_record = &c11_vector__back(FrameRecord, &self->frame_records);
+    if(!top_frame_record->is_lambda) {
+        LineRecord* prev_line = top_frame_record->prev_line;
+        clock_t delta = now - top_frame_record->prev_time;
+        top_frame_record->prev_time = now;
+        prev_line->hits++;
+        prev_line->time += delta;
+        // printf("  ==> increment_now: delta: %ld, hits: %lld\n", delta, prev_line->hits);
+    }
+    top_frame_record->prev_line = curr_line;
+}
+
+void LineProfiler__tracefunc_internal(LineProfiler* self,
+                                      py_Frame* frame,
+                                      enum py_TraceEvent event) {
+    assert(self->enabled);
+    clock_t now = clock();
+
+    // SourceLocation curr_loc = Frame__source_location(frame);
+    // printf("==> frame: %p:%d, event: %d, now: %ld\n", frame, curr_loc.lineno, event, now);
+
+    SourceLocation curr_loc = Frame__source_location(frame);
+    LineRecord* curr_line = LineProfiler__get_record(self, curr_loc);
+
+    if(event == TRACE_EVENT_LINE) {
+        LineProfiler__increment_now(self, now, curr_line);
+    } else {
+        if(event == TRACE_EVENT_PUSH) {
+            FrameRecord f_record = {.frame = frame,
+                                    .prev_time = now,
+                                    .prev_line = curr_line,
+                                    .is_lambda = false};
+            if(!frame->is_locals_special && py_istype(frame->p0, tp_function)) {
+                Function* fn = py_touserdata(frame->p0);
+                c11_string* fn_name = fn->decl->code.name;
+                f_record.is_lambda = fn_name->size > 0 && fn_name->data[0] == '<';
+            }
+            c11_vector__push(FrameRecord, &self->frame_records, f_record);
+        } else if(event == TRACE_EVENT_POP) {
+            LineProfiler__increment_now(self, now, NULL);
+            assert(self->frame_records.length > 0);
+            c11_vector__pop(&self->frame_records);
+        }
+    }
+}
+
+void LineProfiler__end(LineProfiler* self) {
+    assert(self->enabled);
+    if(self->frame_records.length > 0) LineProfiler__increment_now(self, clock(), NULL);
+    self->enabled = false;
+}
+
+void LineProfiler__reset(LineProfiler* self) {
+    LineProfiler__dtor(self);
+    LineProfiler__ctor(self);
+}
+
+c11_string* LineProfiler__get_report(LineProfiler* self) {
+    c11_sbuf sbuf;
+    c11_sbuf__ctor(&sbuf);
+    c11_sbuf__write_char(&sbuf, '{');
+    c11_sbuf__write_cstr(&sbuf, "\"CLOCKS_PER_SEC\": ");
+    c11_sbuf__write_i64(&sbuf, CLOCKS_PER_SEC);
+    c11_sbuf__write_cstr(&sbuf, ", \"records\": ");
+
+    c11_sbuf__write_char(&sbuf, '{');
+    for(int i = 0; i < self->records.length; i++) {
+        c11_smallmap_p2i_KV kv = c11__getitem(c11_smallmap_p2i_KV, &self->records, i);
+        SourceData_ src = (SourceData_)kv.key;
+        int line_record_length = src->line_starts.length + 1;
+        c11_sv src_name = c11_string__sv(src->filename);
+        c11_sbuf__write_quoted(&sbuf, src_name, '"');
+        c11_sbuf__write_cstr(&sbuf, ": [");
+        LineRecord* lines = (LineRecord*)kv.value;
+        bool is_first = true;
+        for(int j = 1; j < line_record_length; j++) {
+            // [<j>, <hits>, <time>]
+            if(lines[j].hits == 0 && lines[j].time == 0) continue;
+            if(!is_first) c11_sbuf__write_cstr(&sbuf, ", ");
+            c11_sbuf__write_char(&sbuf, '[');
+            c11_sbuf__write_int(&sbuf, j);
+            c11_sbuf__write_cstr(&sbuf, ", ");
+            c11_sbuf__write_i64(&sbuf, lines[j].hits);
+            c11_sbuf__write_cstr(&sbuf, ", ");
+            c11_sbuf__write_i64(&sbuf, lines[j].time);
+            c11_sbuf__write_char(&sbuf, ']');
+            is_first = false;
+        }
+        c11_sbuf__write_cstr(&sbuf, "]");
+        if(i < self->records.length - 1) c11_sbuf__write_cstr(&sbuf, ", ");
+    }
+    c11_sbuf__write_char(&sbuf, '}');
+    c11_sbuf__write_char(&sbuf, '}');
+    return c11_sbuf__submit(&sbuf);
+}
+
 // src/objects/object.c
 #include <assert.h>
 
-void* PyObject__userdata(PyObject* self) { return self->flex + PK_OBJ_SLOTS_SIZE(self->slots); }
+PK_INLINE void* PyObject__userdata(PyObject* self) {
+    return self->flex + PK_OBJ_SLOTS_SIZE(self->slots);
+}
 
-NameDict* PyObject__dict(PyObject* self) {
+PK_INLINE NameDict* PyObject__dict(PyObject* self) {
     assert(self->slots == -1);
     return (NameDict*)(self->flex);
 }
 
-py_TValue* PyObject__slots(PyObject* self) {
+PK_INLINE py_TValue* PyObject__slots(PyObject* self) {
     assert(self->slots >= 0);
     return (py_TValue*)(self->flex);
 }
 // src/objects/codeobject.c
 #include <stdint.h>
+#include <assert.h>
 
 void Bytecode__set_signed_arg(Bytecode* self, int arg) {
     self->arg = (int16_t)arg;
@@ -5093,7 +5939,7 @@ static void FuncDecl__dtor(FuncDecl* self) {
     CodeObject__dtor(&self->code);
     c11_vector__dtor(&self->args);
     c11_vector__dtor(&self->kwargs);
-    c11_smallmap_n2i__dtor(&self->kw_to_index);
+    c11_smallmap_n2d__dtor(&self->kw_to_index);
 }
 
 FuncDecl_ FuncDecl__rcnew(SourceData_ src, c11_sv name) {
@@ -5112,14 +5958,14 @@ FuncDecl_ FuncDecl__rcnew(SourceData_ src, c11_sv name) {
     self->docstring = NULL;
     self->type = FuncType_UNSET;
 
-    c11_smallmap_n2i__ctor(&self->kw_to_index);
+    c11_smallmap_n2d__ctor(&self->kw_to_index);
     return self;
 }
 
 bool FuncDecl__is_duplicated_arg(const FuncDecl* decl, py_Name name) {
     py_Name tmp_name;
     c11__foreach(int, &decl->args, j) {
-        tmp_name = c11__getitem(py_Name, &decl->args, *j);
+        tmp_name = c11__getitem(py_Name, &decl->code.varnames, *j);
         if(tmp_name == name) return true;
     }
     c11__foreach(FuncDeclKwArg, &decl->kwargs, kv) {
@@ -5144,7 +5990,7 @@ void FuncDecl__add_arg(FuncDecl* self, py_Name name) {
 
 void FuncDecl__add_kwarg(FuncDecl* self, py_Name name, const py_TValue* value) {
     int index = CodeObject__add_varname(&self->code, name);
-    c11_smallmap_n2i__set(&self->kw_to_index, name, index);
+    c11_smallmap_n2d__set(&self->kw_to_index, name, index);
     FuncDeclKwArg* item = c11_vector__emplace(&self->kwargs);
     item->index = index;
     item->key = name;
@@ -5196,10 +6042,12 @@ void CodeObject__ctor(CodeObject* self, SourceData_ src, c11_sv name) {
     c11_vector__ctor(&self->codes_ex, sizeof(BytecodeEx));
 
     c11_vector__ctor(&self->consts, sizeof(py_TValue));
-    c11_vector__ctor(&self->varnames, sizeof(uint16_t));
+    c11_vector__ctor(&self->varnames, sizeof(py_Name));
+    c11_vector__ctor(&self->names, sizeof(py_Name));
     self->nlocals = 0;
 
-    c11_smallmap_n2i__ctor(&self->varnames_inv);
+    c11_smallmap_n2d__ctor(&self->varnames_inv);
+    c11_smallmap_n2d__ctor(&self->names_inv);
 
     c11_vector__ctor(&self->blocks, sizeof(CodeBlock));
     c11_vector__ctor(&self->func_decls, sizeof(FuncDecl_));
@@ -5220,8 +6068,10 @@ void CodeObject__dtor(CodeObject* self) {
 
     c11_vector__dtor(&self->consts);
     c11_vector__dtor(&self->varnames);
+    c11_vector__dtor(&self->names);
 
-    c11_smallmap_n2i__dtor(&self->varnames_inv);
+    c11_smallmap_n2d__dtor(&self->varnames_inv);
+    c11_smallmap_n2d__dtor(&self->names_inv);
 
     c11_vector__dtor(&self->blocks);
 
@@ -5243,12 +6093,21 @@ void Function__ctor(Function* self, FuncDecl_ decl, py_GlobalRef module, py_Ref 
 }
 
 int CodeObject__add_varname(CodeObject* self, py_Name name) {
-    int index = c11_smallmap_n2i__get(&self->varnames_inv, name, -1);
+    int index = c11_smallmap_n2d__get(&self->varnames_inv, name, -1);
     if(index >= 0) return index;
-    c11_vector__push(uint16_t, &self->varnames, name);
+    c11_vector__push(py_Name, &self->varnames, name);
     self->nlocals++;
     index = self->varnames.length - 1;
-    c11_smallmap_n2i__set(&self->varnames_inv, name, index);
+    c11_smallmap_n2d__set(&self->varnames_inv, name, index);
+    return index;
+}
+
+int CodeObject__add_name(CodeObject* self, py_Name name) {
+    int index = c11_smallmap_n2d__get(&self->names_inv, name, -1);
+    if(index >= 0) return index;
+    c11_vector__push(py_Name, &self->names, name);
+    index = self->names.length - 1;
+    c11_smallmap_n2d__set(&self->names_inv, name, index);
     return index;
 }
 
@@ -5257,26 +6116,30 @@ void Function__dtor(Function* self) {
     // self->decl->code.src->filename->data);
     PK_DECREF(self->decl);
     if(self->closure) NameDict__delete(self->closure);
+    memset(self, 0, sizeof(Function));
 }
-// src/objects/namedict.c
-#define SMALLMAP_T__SOURCE
-#define K uint16_t
+// src/objects/container.c
+#define FIXEDHASH_T__SOURCE
+#define K py_Name
 #define V py_TValue
-#define NAME NameDict
-#if !defined(SMALLMAP_T__HEADER) && !defined(SMALLMAP_T__SOURCE)
-#include "pocketpy/common/vector.h"
+#define NAME CachedNames
+#if !defined(FIXEDHASH_T__HEADER) && !defined(FIXEDHASH_T__SOURCE)
 
-#define SMALLMAP_T__HEADER
-#define SMALLMAP_T__SOURCE
+#include "pocketpy/common/chunkedvector.h"
+#include "pocketpy/config.h"
+#include <stdint.h>
+
+#define FIXEDHASH_T__HEADER
+#define FIXEDHASH_T__SOURCE
 /* Input */
 #define K int
 #define V float
-#define NAME c11_smallmap_i2f
+#define NAME c11_fixedhash_d2f
 #endif
 
 /* Optional Input */
-#ifndef less
-#define less(a, b) ((a) < (b))
+#ifndef hash
+#define hash(a) ((uint64_t)(a))
 #endif
 
 #ifndef equal
@@ -5284,44 +6147,46 @@ void Function__dtor(Function* self) {
 #endif
 
 /* Temporary macros */
-#define partial_less(a, b) less((a).key, (b))
 #define CONCAT(A, B) CONCAT_(A, B)
 #define CONCAT_(A, B) A##B
 
 #define KV CONCAT(NAME, _KV)
 #define METHOD(name) CONCAT(NAME, CONCAT(__, name))
 
-#ifdef SMALLMAP_T__HEADER
+#ifdef FIXEDHASH_T__HEADER
 /* Declaration */
 typedef struct {
+    uint64_t hash;
     K key;
-    V value;
+    V val;
 } KV;
 
-typedef c11_vector NAME;
+typedef struct {
+    int length;
+    uint16_t indices[0x10000];
+    c11_chunkedvector /*T=FixedHashEntry*/ entries;
+} NAME;
 
 void METHOD(ctor)(NAME* self);
 void METHOD(dtor)(NAME* self);
 NAME* METHOD(new)();
 void METHOD(delete)(NAME* self);
-void METHOD(set)(NAME* self, K key, V value);
-V* METHOD(try_get)(const NAME* self, K key);
-V METHOD(get)(const NAME* self, K key, V default_value);
-bool METHOD(contains)(const NAME* self, K key);
-bool METHOD(del)(NAME* self, K key);
-void METHOD(clear)(NAME* self);
+void METHOD(set)(NAME* self, K key, V* value);
+V* METHOD(try_get)(NAME* self, K key);
+bool METHOD(contains)(NAME* self, K key);
 
 #endif
 
-#ifdef SMALLMAP_T__SOURCE
+#ifdef FIXEDHASH_T__SOURCE
 /* Implementation */
 
 void METHOD(ctor)(NAME* self) {
-    c11_vector__ctor(self, sizeof(KV));
-    c11_vector__reserve(self, 4);
+    self->length = 0;
+    memset(self->indices, 0xFF, sizeof(self->indices));
+    c11_chunkedvector__ctor(&self->entries, sizeof(KV), 0);
 }
 
-void METHOD(dtor)(NAME* self) { c11_vector__dtor(self); }
+void METHOD(dtor)(NAME* self) { c11_chunkedvector__dtor(&self->entries); }
 
 NAME* METHOD(new)() {
     NAME* self = PK_MALLOC(sizeof(NAME));
@@ -5334,51 +6199,41 @@ void METHOD(delete)(NAME* self) {
     PK_FREE(self);
 }
 
-void METHOD(set)(NAME* self, K key, V value) {
-    int index;
-    c11__lower_bound(KV, self->data, self->length, key, partial_less, &index);
-    if(index != self->length) {
-        KV* it = c11__at(KV, self, index);
-        if(equal(it->key, key)) {
-            it->value = value;
+void METHOD(set)(NAME* self, K key, V* value) {
+    uint64_t hash_value = hash(key);
+    int index = (uint16_t)(hash_value & 0xFFFF);
+    while(self->indices[index] != 0xFFFF) {
+        KV* entry = c11_chunkedvector__at(&self->entries, self->indices[index]);
+        if(equal(entry->key, key)) {
+            entry->val = *value;
             return;
         }
+        index = ((5 * index) + 1) & 0xFFFF;
     }
-    KV kv = {key, value};
-    c11_vector__insert(KV, self, index, kv);
+    if(self->length >= 65000) abort();
+    KV* kv = c11_chunkedvector__emplace(&self->entries);
+    kv->hash = hash_value;
+    kv->key = key;
+    kv->val = *value;
+    self->indices[index] = self->entries.length - 1;
+    self->length++;
 }
 
-V* METHOD(try_get)(const NAME* self, K key) {
-    int index;
-    c11__lower_bound(KV, self->data, self->length, key, partial_less, &index);
-    if(index != self->length) {
-        KV* it = c11__at(KV, self, index);
-        if(equal(it->key, key)) return &it->value;
+V* METHOD(try_get)(NAME* self, K key) {
+    uint64_t hash_value = hash(key);
+    int index = (uint16_t)(hash_value & 0xFFFF);
+    while(self->indices[index] != 0xFFFF) {
+        KV* entry = c11_chunkedvector__at(&self->entries, self->indices[index]);
+        if(equal(entry->key, key)) return &entry->val;
+        index = ((5 * index) + 1) & 0xFFFF;
     }
     return NULL;
 }
 
-V METHOD(get)(const NAME* self, K key, V default_value) {
-    V* p = METHOD(try_get)(self, key);
-    return p ? *p : default_value;
+bool METHOD(contains)(NAME* self, K key) {
+    V* value = METHOD(try_get)(self, key);
+    return value != NULL;
 }
-
-bool METHOD(contains)(const NAME* self, K key) { return METHOD(try_get)(self, key) != NULL; }
-
-bool METHOD(del)(NAME* self, K key) {
-    int index;
-    c11__lower_bound(KV, self->data, self->length, key, partial_less, &index);
-    if(index != self->length) {
-        KV* it = c11__at(KV, self, index);
-        if(equal(it->key, key)) {
-            c11_vector__erase(KV, self, index);
-            return true;
-        }
-    }
-    return false;
-}
-
-void METHOD(clear)(NAME* self) { c11_vector__clear(self); }
 
 #endif
 
@@ -5394,82 +6249,224 @@ void METHOD(clear)(NAME* self) { c11_vector__clear(self); }
 #undef less
 #undef partial_less
 #undef equal
+#undef hash
 
-#undef SMALLMAP_T__SOURCE
+#undef FIXEDHASH_T__SOURCE
 
-void ModuleDict__ctor(ModuleDict* self, const char* path, py_TValue module) {
-    self->path = path;
-    self->module = module;
+// src/objects/bintree.c
+void BinTree__ctor(BinTree* self, void* key, py_Ref value, const BinTreeConfig* config) {
+    self->key = key;
+    self->value = *value;
+    self->config = config;
     self->left = NULL;
     self->right = NULL;
 }
 
-void ModuleDict__dtor(ModuleDict* self) {
+void BinTree__dtor(BinTree* self) {
+    if(self->config->need_free_key) PK_FREE(self->key);
     if(self->left) {
-        ModuleDict__dtor(self->left);
+        BinTree__dtor(self->left);
         PK_FREE(self->left);
     }
     if(self->right) {
-        ModuleDict__dtor(self->right);
+        BinTree__dtor(self->right);
         PK_FREE(self->right);
     }
 }
 
-void ModuleDict__set(ModuleDict* self, const char* key, py_TValue val) {
-    if(self->path == NULL) {
-        self->path = key;
-        self->module = val;
-    }
-    int cmp = strcmp(key, self->path);
+void BinTree__set(BinTree* self, void* key, py_Ref value) {
+    int cmp = self->config->f_cmp(key, self->key);
     if(cmp < 0) {
         if(self->left) {
-            ModuleDict__set(self->left, key, val);
+            BinTree__set(self->left, key, value);
         } else {
-            self->left = PK_MALLOC(sizeof(ModuleDict));
-            ModuleDict__ctor(self->left, key, val);
+            self->left = PK_MALLOC(sizeof(BinTree));
+            BinTree__ctor(self->left, key, value, self->config);
         }
     } else if(cmp > 0) {
         if(self->right) {
-            ModuleDict__set(self->right, key, val);
+            BinTree__set(self->right, key, value);
         } else {
-            self->right = PK_MALLOC(sizeof(ModuleDict));
-            ModuleDict__ctor(self->right, key, val);
+            self->right = PK_MALLOC(sizeof(BinTree));
+            BinTree__ctor(self->right, key, value, self->config);
         }
     } else {
-        self->module = val;
+        self->value = *value;
     }
 }
 
-py_TValue* ModuleDict__try_get(ModuleDict* self, const char* path) {
-    if(self->path == NULL) return NULL;
-    int cmp = strcmp(path, self->path);
+py_Ref BinTree__try_get(BinTree* self, void* key) {
+    int cmp = self->config->f_cmp(key, self->key);
     if(cmp < 0) {
         if(self->left) {
-            return ModuleDict__try_get(self->left, path);
+            return BinTree__try_get(self->left, key);
         } else {
             return NULL;
         }
     } else if(cmp > 0) {
         if(self->right) {
-            return ModuleDict__try_get(self->right, path);
+            return BinTree__try_get(self->right, key);
         } else {
             return NULL;
         }
     } else {
-        return &self->module;
+        return &self->value;
     }
 }
 
-bool ModuleDict__contains(ModuleDict* self, const char* path) {
-    return ModuleDict__try_get(self, path) != NULL;
+bool BinTree__contains(BinTree* self, void* key) { return BinTree__try_get(self, key) != NULL; }
+
+void BinTree__apply_mark(BinTree* self, c11_vector* p_stack) {
+    pk__mark_value(&self->value);
+    if(self->left) BinTree__apply_mark(self->left, p_stack);
+    if(self->right) BinTree__apply_mark(self->right, p_stack);
+}
+// src/objects/namedict.c
+#include <stdint.h>
+#include <string.h>
+#include <assert.h>
+
+#define HASH_KEY(__k) ((uintptr_t)(__k) >> 3U)
+
+#define HASH_PROBE_0(__k, ok, i)                                                                   \
+    ok = false;                                                                                    \
+    i = HASH_KEY(__k) & self->mask;                                                                \
+    do {                                                                                           \
+        if(self->items[i].key == (__k)) {                                                          \
+            ok = true;                                                                             \
+            break;                                                                                 \
+        }                                                                                          \
+        if(self->items[i].key == NULL) break;                                                      \
+        i = (i + 1) & self->mask;                                                                  \
+    } while(true);
+
+#define HASH_PROBE_1(__k, ok, i)                                                                   \
+    ok = false;                                                                                    \
+    i = HASH_KEY(__k) & self->mask;                                                                \
+    while(self->items[i].key != NULL) {                                                            \
+        if(self->items[i].key == (__k)) {                                                          \
+            ok = true;                                                                             \
+            break;                                                                                 \
+        }                                                                                          \
+        i = (i + 1) & self->mask;                                                                  \
+    }
+
+static void NameDict__set_capacity_and_alloc_items(NameDict* self, int val) {
+    self->capacity = val;
+    self->critical_size = val * self->load_factor;
+    self->mask = (uintptr_t)val - 1;
+
+    self->items = PK_MALLOC(self->capacity * sizeof(NameDict_KV));
+    memset(self->items, 0, self->capacity * sizeof(NameDict_KV));
 }
 
-void ModuleDict__apply_mark(ModuleDict *self) {
-    if(!self->module._obj->gc_marked) PyObject__mark(self->module._obj);
-    if(self->left) ModuleDict__apply_mark(self->left);
-    if(self->right) ModuleDict__apply_mark(self->right);
+static void NameDict__rehash_2x(NameDict* self) {
+    NameDict_KV* old_items = self->items;
+    int old_capacity = self->capacity;
+    NameDict__set_capacity_and_alloc_items(self, self->capacity * 2);
+    for(int i = 0; i < old_capacity; i++) {
+        if(old_items[i].key == NULL) continue;
+        bool ok;
+        uintptr_t j;
+        HASH_PROBE_1(old_items[i].key, ok, j);
+        c11__rtassert(!ok);
+        self->items[j] = old_items[i];
+    }
+    PK_FREE(old_items);
 }
 
+NameDict* NameDict__new(float load_factor) {
+    NameDict* p = PK_MALLOC(sizeof(NameDict));
+    NameDict__ctor(p, load_factor);
+    return p;
+}
+
+void NameDict__delete(NameDict* self) {
+    NameDict__dtor(self);
+    PK_FREE(self);
+}
+
+void NameDict__ctor(NameDict* self, float load_factor) {
+    assert(load_factor > 0.0f && load_factor < 1.0f);
+    self->length = 0;
+    self->load_factor = load_factor;
+    NameDict__set_capacity_and_alloc_items(self, 4);
+}
+
+void NameDict__dtor(NameDict* self) { PK_FREE(self->items); }
+
+py_TValue* NameDict__try_get(NameDict* self, py_Name key) {
+    bool ok;
+    uintptr_t i;
+    HASH_PROBE_0(key, ok, i);
+    if(!ok) return NULL;
+    return &self->items[i].value;
+}
+
+bool NameDict__contains(NameDict* self, py_Name key) {
+    bool ok;
+    uintptr_t i;
+    HASH_PROBE_0(key, ok, i);
+    return ok;
+}
+
+void NameDict__set(NameDict* self, py_Name key, py_TValue* val) {
+    bool ok;
+    uintptr_t i;
+    HASH_PROBE_1(key, ok, i);
+    if(!ok) {
+        self->length++;
+        if(self->length > self->critical_size) {
+            NameDict__rehash_2x(self);
+            HASH_PROBE_1(key, ok, i);
+        }
+        self->items[i].key = key;
+    }
+    self->items[i].value = *val;
+}
+
+bool NameDict__del(NameDict* self, py_Name key) {
+    bool ok;
+    uintptr_t i;
+    HASH_PROBE_0(key, ok, i);
+    if(!ok) return false;
+    self->items[i].key = NULL;
+    self->items[i].value = *py_NIL();
+    self->length--;
+    /* tidy */
+    uintptr_t posToRemove = i;
+    uintptr_t posToShift = posToRemove;
+    while(true) {
+        posToShift = (posToShift + 1) & self->mask;
+        if(self->items[posToShift].key == NULL) break;
+        uintptr_t hash_z = HASH_KEY(self->items[posToShift].key);
+        uintptr_t insertPos = hash_z & self->mask;
+        bool cond1 = insertPos <= posToRemove;
+        bool cond2 = posToRemove <= posToShift;
+        if((cond1 && cond2) ||
+           // chain wrapped around capacity
+           (posToShift < insertPos && (cond1 || cond2))) {
+            NameDict_KV tmp = self->items[posToRemove];
+            assert(tmp.key == NULL);
+            self->items[posToRemove] = self->items[posToShift];
+            self->items[posToShift] = tmp;
+            posToRemove = posToShift;
+        }
+    }
+    return true;
+}
+
+void NameDict__clear(NameDict* self) {
+    for(int i = 0; i < self->capacity; i++) {
+        self->items[i].key = NULL;
+        self->items[i].value = *py_NIL();
+    }
+    self->length = 0;
+}
+
+#undef HASH_PROBE_0
+#undef HASH_PROBE_1
+#undef HASH_KEY
 // src/common/_generated.c
 // generated by prebuild.py
 #include <string.h>
@@ -5479,10 +6476,11 @@ const char kPythonLibs_cmath[] = "import math\n\nclass complex:\n    def __init_
 const char kPythonLibs_collections[] = "from typing import TypeVar, Iterable\n\ndef Counter[T](iterable: Iterable[T]):\n    a: dict[T, int] = {}\n    for x in iterable:\n        if x in a:\n            a[x] += 1\n        else:\n            a[x] = 1\n    return a\n\n\nclass defaultdict(dict):\n    def __init__(self, default_factory, *args):\n        super().__init__(*args)\n        self.default_factory = default_factory\n\n    def __missing__(self, key):\n        self[key] = self.default_factory()\n        return self[key]\n\n    def __repr__(self) -> str:\n        return f\"defaultdict({self.default_factory}, {super().__repr__()})\"\n\n    def copy(self):\n        return defaultdict(self.default_factory, self)\n\n\nclass deque[T]:\n    _data: list[T]\n    _head: int\n    _tail: int\n    _capacity: int\n\n    def __init__(self, iterable: Iterable[T] = None):\n        self._data = [None] * 8 # type: ignore\n        self._head = 0\n        self._tail = 0\n        self._capacity = len(self._data)\n\n        if iterable is not None:\n            self.extend(iterable)\n\n    def __resize_2x(self):\n        backup = list(self)\n        self._capacity *= 2\n        self._head = 0\n        self._tail = len(backup)\n        self._data.clear()\n        self._data.extend(backup)\n        self._data.extend([None] * (self._capacity - len(backup)))\n\n    def append(self, x: T):\n        self._data[self._tail] = x\n        self._tail = (self._tail + 1) % self._capacity\n        if (self._tail + 1) % self._capacity == self._head:\n            self.__resize_2x()\n\n    def appendleft(self, x: T):\n        self._head = (self._head - 1) % self._capacity\n        self._data[self._head] = x\n        if (self._tail + 1) % self._capacity == self._head:\n            self.__resize_2x()\n\n    def copy(self):\n        return deque(self)\n    \n    def count(self, x: T) -> int:\n        n = 0\n        for item in self:\n            if item == x:\n                n += 1\n        return n\n    \n    def extend(self, iterable: Iterable[T]):\n        for x in iterable:\n            self.append(x)\n\n    def extendleft(self, iterable: Iterable[T]):\n        for x in iterable:\n            self.appendleft(x)\n    \n    def pop(self) -> T:\n        if self._head == self._tail:\n            raise IndexError(\"pop from an empty deque\")\n        self._tail = (self._tail - 1) % self._capacity\n        return self._data[self._tail]\n    \n    def popleft(self) -> T:\n        if self._head == self._tail:\n            raise IndexError(\"pop from an empty deque\")\n        x = self._data[self._head]\n        self._head = (self._head + 1) % self._capacity\n        return x\n    \n    def clear(self):\n        i = self._head\n        while i != self._tail:\n            self._data[i] = None # type: ignore\n            i = (i + 1) % self._capacity\n        self._head = 0\n        self._tail = 0\n\n    def rotate(self, n: int = 1):\n        if len(self) == 0:\n            return\n        if n > 0:\n            n = n % len(self)\n            for _ in range(n):\n                self.appendleft(self.pop())\n        elif n < 0:\n            n = -n % len(self)\n            for _ in range(n):\n                self.append(self.popleft())\n\n    def __len__(self) -> int:\n        return (self._tail - self._head) % self._capacity\n\n    def __contains__(self, x: object) -> bool:\n        for item in self:\n            if item == x:\n                return True\n        return False\n    \n    def __iter__(self):\n        i = self._head\n        while i != self._tail:\n            yield self._data[i]\n            i = (i + 1) % self._capacity\n\n    def __eq__(self, other: object) -> bool:\n        if not isinstance(other, deque):\n            return NotImplemented\n        if len(self) != len(other):\n            return False\n        for x, y in zip(self, other):\n            if x != y:\n                return False\n        return True\n    \n    def __ne__(self, other: object) -> bool:\n        if not isinstance(other, deque):\n            return NotImplemented\n        return not self == other\n    \n    def __repr__(self) -> str:\n        return f\"deque({list(self)!r})\"\n\n";
 const char kPythonLibs_dataclasses[] = "def _get_annotations(cls: type):\n    inherits = []\n    while cls is not object:\n        inherits.append(cls)\n        cls = cls.__base__\n    inherits.reverse()\n    res = {}\n    for cls in inherits:\n        res.update(cls.__annotations__)\n    return res.keys()\n\ndef _wrapped__init__(self, *args, **kwargs):\n    cls = type(self)\n    cls_d = cls.__dict__\n    fields = _get_annotations(cls)\n    i = 0   # index into args\n    for field in fields:\n        if field in kwargs:\n            setattr(self, field, kwargs.pop(field))\n        else:\n            if i < len(args):\n                setattr(self, field, args[i])\n                i += 1\n            elif field in cls_d:    # has default value\n                setattr(self, field, cls_d[field])\n            else:\n                raise TypeError(f\"{cls.__name__} missing required argument {field!r}\")\n    if len(args) > i:\n        raise TypeError(f\"{cls.__name__} takes {len(fields)} positional arguments but {len(args)} were given\")\n    if len(kwargs) > 0:\n        raise TypeError(f\"{cls.__name__} got an unexpected keyword argument {next(iter(kwargs))!r}\")\n\ndef _wrapped__repr__(self):\n    fields = _get_annotations(type(self))\n    obj_d = self.__dict__\n    args: list = [f\"{field}={obj_d[field]!r}\" for field in fields]\n    return f\"{type(self).__name__}({', '.join(args)})\"\n\ndef _wrapped__eq__(self, other):\n    if type(self) is not type(other):\n        return False\n    fields = _get_annotations(type(self))\n    for field in fields:\n        if getattr(self, field) != getattr(other, field):\n            return False\n    return True\n\ndef _wrapped__ne__(self, other):\n    return not self.__eq__(other)\n\ndef dataclass(cls: type):\n    assert type(cls) is type\n    cls_d = cls.__dict__\n    if '__init__' not in cls_d:\n        cls.__init__ = _wrapped__init__\n    if '__repr__' not in cls_d:\n        cls.__repr__ = _wrapped__repr__\n    if '__eq__' not in cls_d:\n        cls.__eq__ = _wrapped__eq__\n    if '__ne__' not in cls_d:\n        cls.__ne__ = _wrapped__ne__\n    fields = _get_annotations(cls)\n    has_default = False\n    for field in fields:\n        if field in cls_d:\n            has_default = True\n        else:\n            if has_default:\n                raise TypeError(f\"non-default argument {field!r} follows default argument\")\n    return cls\n\ndef asdict(obj) -> dict:\n    fields = _get_annotations(type(obj))\n    obj_d = obj.__dict__\n    return {field: obj_d[field] for field in fields}";
 const char kPythonLibs_datetime[] = "from time import localtime\nimport operator\n\nclass timedelta:\n    def __init__(self, days=0, seconds=0):\n        self.days = days\n        self.seconds = seconds\n\n    def __repr__(self):\n        return f\"datetime.timedelta(days={self.days}, seconds={self.seconds})\"\n\n    def __eq__(self, other) -> bool:\n        if not isinstance(other, timedelta):\n            return NotImplemented\n        return (self.days, self.seconds) == (other.days, other.seconds)\n\n    def __ne__(self, other) -> bool:\n        if not isinstance(other, timedelta):\n            return NotImplemented\n        return (self.days, self.seconds) != (other.days, other.seconds)\n\n\nclass date:\n    def __init__(self, year: int, month: int, day: int):\n        self.year = year\n        self.month = month\n        self.day = day\n\n    @staticmethod\n    def today():\n        t = localtime()\n        return date(t.tm_year, t.tm_mon, t.tm_mday)\n    \n    def __cmp(self, other, op):\n        if not isinstance(other, date):\n            return NotImplemented\n        if self.year != other.year:\n            return op(self.year, other.year)\n        if self.month != other.month:\n            return op(self.month, other.month)\n        return op(self.day, other.day)\n\n    def __eq__(self, other) -> bool:\n        return self.__cmp(other, operator.eq)\n    \n    def __ne__(self, other) -> bool:\n        return self.__cmp(other, operator.ne)\n\n    def __lt__(self, other: 'date') -> bool:\n        return self.__cmp(other, operator.lt)\n\n    def __le__(self, other: 'date') -> bool:\n        return self.__cmp(other, operator.le)\n\n    def __gt__(self, other: 'date') -> bool:\n        return self.__cmp(other, operator.gt)\n\n    def __ge__(self, other: 'date') -> bool:\n        return self.__cmp(other, operator.ge)\n\n    def __str__(self):\n        return f\"{self.year}-{self.month:02}-{self.day:02}\"\n\n    def __repr__(self):\n        return f\"datetime.date({self.year}, {self.month}, {self.day})\"\n\n\nclass datetime(date):\n    def __init__(self, year: int, month: int, day: int, hour: int, minute: int, second: int):\n        super().__init__(year, month, day)\n        # Validate and set hour, minute, and second\n        if not 0 <= hour <= 23:\n            raise ValueError(\"Hour must be between 0 and 23\")\n        self.hour = hour\n        if not 0 <= minute <= 59:\n            raise ValueError(\"Minute must be between 0 and 59\")\n        self.minute = minute\n        if not 0 <= second <= 59:\n            raise ValueError(\"Second must be between 0 and 59\")\n        self.second = second\n\n    def date(self) -> date:\n        return date(self.year, self.month, self.day)\n\n    @staticmethod\n    def now():\n        t = localtime()\n        tm_sec = t.tm_sec\n        if tm_sec == 60:\n            tm_sec = 59\n        return datetime(t.tm_year, t.tm_mon, t.tm_mday, t.tm_hour, t.tm_min, tm_sec)\n\n    def __str__(self):\n        return f\"{self.year}-{self.month:02}-{self.day:02} {self.hour:02}:{self.minute:02}:{self.second:02}\"\n\n    def __repr__(self):\n        return f\"datetime.datetime({self.year}, {self.month}, {self.day}, {self.hour}, {self.minute}, {self.second})\"\n\n    def __cmp(self, other, op):\n        if not isinstance(other, datetime):\n            return NotImplemented\n        if self.year != other.year:\n            return op(self.year, other.year)\n        if self.month != other.month:\n            return op(self.month, other.month)\n        if self.day != other.day:\n            return op(self.day, other.day)\n        if self.hour != other.hour:\n            return op(self.hour, other.hour)\n        if self.minute != other.minute:\n            return op(self.minute, other.minute)\n        return op(self.second, other.second)\n\n    def __eq__(self, other) -> bool:\n        return self.__cmp(other, operator.eq)\n    \n    def __ne__(self, other) -> bool:\n        return self.__cmp(other, operator.ne)\n    \n    def __lt__(self, other) -> bool:\n        return self.__cmp(other, operator.lt)\n    \n    def __le__(self, other) -> bool:\n        return self.__cmp(other, operator.le)\n    \n    def __gt__(self, other) -> bool:\n        return self.__cmp(other, operator.gt)\n    \n    def __ge__(self, other) -> bool:\n        return self.__cmp(other, operator.ge)\n\n\n";
-const char kPythonLibs_functools[] = "class cache:\n    def __init__(self, f):\n        self.f = f\n        self.cache = {}\n\n    def __call__(self, *args):\n        if args not in self.cache:\n            self.cache[args] = self.f(*args)\n        return self.cache[args]\n    \ndef reduce(function, sequence, initial=...):\n    it = iter(sequence)\n    if initial is ...:\n        try:\n            value = next(it)\n        except StopIteration:\n            raise TypeError(\"reduce() of empty sequence with no initial value\")\n    else:\n        value = initial\n    for element in it:\n        value = function(value, element)\n    return value\n\nclass partial:\n    def __init__(self, f, *args, **kwargs):\n        self.f = f\n        if not callable(f):\n            raise TypeError(\"the first argument must be callable\")\n        self.args = args\n        self.kwargs = kwargs\n\n    def __call__(self, *args, **kwargs):\n        kwargs.update(self.kwargs)\n        return self.f(*self.args, *args, **kwargs)\n\n";
+const char kPythonLibs_functools[] = "class cache:\n    def __init__(self, f):\n        self.f = f\n        self.cache = {}\n\n    def __call__(self, *args):\n        if args not in self.cache:\n            self.cache[args] = self.f(*args)\n        return self.cache[args]\n    \nclass lru_cache:\n    def __init__(self, maxsize=128):\n        self.maxsize = maxsize\n        self.cache = {}\n\n    def __call__(self, f):\n        def wrapped(*args):\n            if args in self.cache:\n                res = self.cache.pop(args)\n                self.cache[args] = res\n                return res\n            \n            res = f(*args)\n            if len(self.cache) >= self.maxsize:\n                first_key = next(iter(self.cache))\n                self.cache.pop(first_key)\n            self.cache[args] = res\n            return res\n        return wrapped\n    \ndef reduce(function, sequence, initial=...):\n    it = iter(sequence)\n    if initial is ...:\n        try:\n            value = next(it)\n        except StopIteration:\n            raise TypeError(\"reduce() of empty sequence with no initial value\")\n    else:\n        value = initial\n    for element in it:\n        value = function(value, element)\n    return value\n\nclass partial:\n    def __init__(self, f, *args, **kwargs):\n        self.f = f\n        if not callable(f):\n            raise TypeError(\"the first argument must be callable\")\n        self.args = args\n        self.kwargs = kwargs\n\n    def __call__(self, *args, **kwargs):\n        kwargs.update(self.kwargs)\n        return self.f(*self.args, *args, **kwargs)\n\n";
 const char kPythonLibs_heapq[] = "# Heap queue algorithm (a.k.a. priority queue)\ndef heappush(heap, item):\n    \"\"\"Push item onto heap, maintaining the heap invariant.\"\"\"\n    heap.append(item)\n    _siftdown(heap, 0, len(heap)-1)\n\ndef heappop(heap):\n    \"\"\"Pop the smallest item off the heap, maintaining the heap invariant.\"\"\"\n    lastelt = heap.pop()    # raises appropriate IndexError if heap is empty\n    if heap:\n        returnitem = heap[0]\n        heap[0] = lastelt\n        _siftup(heap, 0)\n        return returnitem\n    return lastelt\n\ndef heapreplace(heap, item):\n    \"\"\"Pop and return the current smallest value, and add the new item.\n\n    This is more efficient than heappop() followed by heappush(), and can be\n    more appropriate when using a fixed-size heap.  Note that the value\n    returned may be larger than item!  That constrains reasonable uses of\n    this routine unless written as part of a conditional replacement:\n\n        if item > heap[0]:\n            item = heapreplace(heap, item)\n    \"\"\"\n    returnitem = heap[0]    # raises appropriate IndexError if heap is empty\n    heap[0] = item\n    _siftup(heap, 0)\n    return returnitem\n\ndef heappushpop(heap, item):\n    \"\"\"Fast version of a heappush followed by a heappop.\"\"\"\n    if heap and heap[0] < item:\n        item, heap[0] = heap[0], item\n        _siftup(heap, 0)\n    return item\n\ndef heapify(x):\n    \"\"\"Transform list into a heap, in-place, in O(len(x)) time.\"\"\"\n    n = len(x)\n    # Transform bottom-up.  The largest index there's any point to looking at\n    # is the largest with a child index in-range, so must have 2*i + 1 < n,\n    # or i < (n-1)/2.  If n is even = 2*j, this is (2*j-1)/2 = j-1/2 so\n    # j-1 is the largest, which is n//2 - 1.  If n is odd = 2*j+1, this is\n    # (2*j+1-1)/2 = j so j-1 is the largest, and that's again n//2-1.\n    for i in reversed(range(n//2)):\n        _siftup(x, i)\n\n# 'heap' is a heap at all indices >= startpos, except possibly for pos.  pos\n# is the index of a leaf with a possibly out-of-order value.  Restore the\n# heap invariant.\ndef _siftdown(heap, startpos, pos):\n    newitem = heap[pos]\n    # Follow the path to the root, moving parents down until finding a place\n    # newitem fits.\n    while pos > startpos:\n        parentpos = (pos - 1) >> 1\n        parent = heap[parentpos]\n        if newitem < parent:\n            heap[pos] = parent\n            pos = parentpos\n            continue\n        break\n    heap[pos] = newitem\n\ndef _siftup(heap, pos):\n    endpos = len(heap)\n    startpos = pos\n    newitem = heap[pos]\n    # Bubble up the smaller child until hitting a leaf.\n    childpos = 2*pos + 1    # leftmost child position\n    while childpos < endpos:\n        # Set childpos to index of smaller child.\n        rightpos = childpos + 1\n        if rightpos < endpos and not heap[childpos] < heap[rightpos]:\n            childpos = rightpos\n        # Move the smaller child up.\n        heap[pos] = heap[childpos]\n        pos = childpos\n        childpos = 2*pos + 1\n    # The leaf at pos is empty now.  Put newitem there, and bubble it up\n    # to its final resting place (by sifting its parents down).\n    heap[pos] = newitem\n    _siftdown(heap, startpos, pos)";
+const char kPythonLibs_linalg[] = "from vmath import *";
 const char kPythonLibs_operator[] = "# https://docs.python.org/3/library/operator.html#mapping-operators-to-functions\n\ndef le(a, b): return a <= b\ndef lt(a, b): return a < b\ndef ge(a, b): return a >= b\ndef gt(a, b): return a > b\ndef eq(a, b): return a == b\ndef ne(a, b): return a != b\n\ndef and_(a, b): return a & b\ndef or_(a, b): return a | b\ndef xor(a, b): return a ^ b\ndef invert(a): return ~a\ndef lshift(a, b): return a << b\ndef rshift(a, b): return a >> b\n\ndef is_(a, b): return a is b\ndef is_not(a, b): return a is not b\ndef not_(a): return not a\ndef truth(a): return bool(a)\ndef contains(a, b): return b in a\n\ndef add(a, b): return a + b\ndef sub(a, b): return a - b\ndef mul(a, b): return a * b\ndef truediv(a, b): return a / b\ndef floordiv(a, b): return a // b\ndef mod(a, b): return a % b\ndef pow(a, b): return a ** b\ndef neg(a): return -a\ndef matmul(a, b): return a @ b\n\ndef getitem(a, b): return a[b]\ndef setitem(a, b, c): a[b] = c\ndef delitem(a, b): del a[b]\n\ndef iadd(a, b): a += b; return a\ndef isub(a, b): a -= b; return a\ndef imul(a, b): a *= b; return a\ndef itruediv(a, b): a /= b; return a\ndef ifloordiv(a, b): a //= b; return a\ndef imod(a, b): a %= b; return a\n# def ipow(a, b): a **= b; return a\n# def imatmul(a, b): a @= b; return a\ndef iand(a, b): a &= b; return a\ndef ior(a, b): a |= b; return a\ndef ixor(a, b): a ^= b; return a\ndef ilshift(a, b): a <<= b; return a\ndef irshift(a, b): a >>= b; return a\n";
-const char kPythonLibs_typing[] = "class _Placeholder:\n    def __init__(self, *args, **kwargs):\n        pass\n    def __getitem__(self, *args):\n        return self\n    def __call__(self, *args, **kwargs):\n        return self\n    def __and__(self, other):\n        return self\n    def __or__(self, other):\n        return self\n    def __xor__(self, other):\n        return self\n\n\n_PLACEHOLDER = _Placeholder()\n\nList = _PLACEHOLDER\nDict = _PLACEHOLDER\nTuple = _PLACEHOLDER\nSet = _PLACEHOLDER\nAny = _PLACEHOLDER\nUnion = _PLACEHOLDER\nOptional = _PLACEHOLDER\nCallable = _PLACEHOLDER\nType = _PLACEHOLDER\nTypeAlias = _PLACEHOLDER\nNewType = _PLACEHOLDER\n\nLiteral = _PLACEHOLDER\nLiteralString = _PLACEHOLDER\n\nIterable = _PLACEHOLDER\nGenerator = _PLACEHOLDER\nIterator = _PLACEHOLDER\n\nHashable = _PLACEHOLDER\n\nTypeVar = _PLACEHOLDER\nSelf = _PLACEHOLDER\n\nProtocol = object\nGeneric = object\nNever = object\n\nTYPE_CHECKING = False\n\n# decorators\noverload = lambda x: x\nfinal = lambda x: x\n\n# exhaustiveness checking\nassert_never = lambda x: x\n";
+const char kPythonLibs_typing[] = "class _Placeholder:\n    def __init__(self, *args, **kwargs):\n        pass\n    def __getitem__(self, *args):\n        return self\n    def __call__(self, *args, **kwargs):\n        return self\n    def __and__(self, other):\n        return self\n    def __or__(self, other):\n        return self\n    def __xor__(self, other):\n        return self\n\n\n_PLACEHOLDER = _Placeholder()\n\nSequence = _PLACEHOLDER\nList = _PLACEHOLDER\nDict = _PLACEHOLDER\nTuple = _PLACEHOLDER\nSet = _PLACEHOLDER\nAny = _PLACEHOLDER\nUnion = _PLACEHOLDER\nOptional = _PLACEHOLDER\nCallable = _PLACEHOLDER\nType = _PLACEHOLDER\nTypeAlias = _PLACEHOLDER\nNewType = _PLACEHOLDER\n\nLiteral = _PLACEHOLDER\nLiteralString = _PLACEHOLDER\n\nIterable = _PLACEHOLDER\nGenerator = _PLACEHOLDER\nIterator = _PLACEHOLDER\n\nHashable = _PLACEHOLDER\n\nTypeVar = _PLACEHOLDER\nSelf = _PLACEHOLDER\n\nProtocol = object\nGeneric = object\nNever = object\n\nTYPE_CHECKING = False\n\n# decorators\noverload = lambda x: x\nfinal = lambda x: x\n\n# exhaustiveness checking\nassert_never = lambda x: x\n";
 
 const char* load_kPythonLib(const char* name) {
     if (strchr(name, '.') != NULL) return NULL;
@@ -5494,13 +6492,13 @@ const char* load_kPythonLib(const char* name) {
     if (strcmp(name, "datetime") == 0) return kPythonLibs_datetime;
     if (strcmp(name, "functools") == 0) return kPythonLibs_functools;
     if (strcmp(name, "heapq") == 0) return kPythonLibs_heapq;
+    if (strcmp(name, "linalg") == 0) return kPythonLibs_linalg;
     if (strcmp(name, "operator") == 0) return kPythonLibs_operator;
     if (strcmp(name, "typing") == 0) return kPythonLibs_typing;
     return NULL;
 }
 
 // src/common/vector.c
-#include <stdlib.h>
 #include <string.h>
 void c11_vector__ctor(c11_vector* self, int elem_size) {
     self->data = NULL;
@@ -5537,7 +6535,7 @@ void c11_vector__reserve(c11_vector* self, int capacity) {
 void c11_vector__clear(c11_vector* self) { self->length = 0; }
 
 void* c11_vector__emplace(c11_vector* self) {
-    if(self->length == self->capacity) c11_vector__reserve(self, self->capacity * 2);
+    if(self->length == self->capacity) { c11_vector__reserve(self, c11_vector__nextcap(self)); }
     void* p = (char*)self->data + (size_t)self->elem_size * (size_t)self->length;
     self->length++;
     return p;
@@ -5560,18 +6558,25 @@ void* c11_vector__submit(c11_vector* self, int* length) {
     return retval;
 }
 
-void c11_vector__swap(c11_vector *self, c11_vector *other){
+void c11_vector__swap(c11_vector* self, c11_vector* other) {
     c11_vector tmp = *self;
     *self = *other;
     *other = tmp;
 }
 
+int c11_vector__nextcap(c11_vector* self) {
+    if(self->capacity < 1024) {
+        return self->capacity * 2;
+    } else {
+        // increase by 25%
+        return self->capacity + (self->capacity >> 2);
+    }
+}
 // src/common/str.c
-#include <assert.h>
-#include <string.h>
-#include <stdlib.h>
 #include <ctype.h>
+#include <string.h>
 #include <stdio.h>
+#include <assert.h>
 
 c11_string* c11_string__new(const char* data) { return c11_string__new2(data, strlen(data)); }
 
@@ -5746,6 +6751,35 @@ bool c11_sv__endswith(c11_sv self, c11_sv suffix) {
     return memcmp(self.data + self.size - suffix.size, suffix.data, suffix.size) == 0;
 }
 
+uint64_t c11_sv__hash(c11_sv self) {
+    uint64_t hash = 5381;
+    for(int i = 0; i < self.size; i++) {
+        // hash * 33 + c
+        hash = ((hash << 5) + hash) + (unsigned char)self.data[i];
+    }
+    return hash;
+}
+
+c11_vector /* T=c11_sv */ c11_sv__splitwhitespace(c11_sv self) {
+    c11_vector retval;
+    c11_vector__ctor(&retval, sizeof(c11_sv));
+    const char* data = self.data;
+    int i = 0;
+    for(int j = 0; j < self.size; j++) {
+        if(isspace(data[j])) {
+            assert(j >= i);
+            c11_sv tmp = {data + i, j - i};
+            c11_vector__push(c11_sv, &retval, tmp);
+            i = j + 1;
+        }
+    }
+    if(i <= self.size) {
+        c11_sv tmp = {data + i, self.size - i};
+        c11_vector__push(c11_sv, &retval, tmp);
+    }
+    return retval;
+}
+
 c11_vector /* T=c11_sv */ c11_sv__split(c11_sv self, char sep) {
     c11_vector retval;
     c11_vector__ctor(&retval, sizeof(c11_sv));
@@ -5833,23 +6867,6 @@ bool c11__sveq2(c11_sv a, const char* b) {
     return memcmp(a.data, b, size) == 0;
 }
 
-// clang-format off
-static const int kLoRangeA[] = {170,186,443,448,660,1488,1519,1568,1601,1646,1649,1749,1774,1786,1791,1808,1810,1869,1969,1994,2048,2112,2144,2208,2230,2308,2365,2384,2392,2418,2437,2447,2451,2474,2482,2486,2493,2510,2524,2527,2544,2556,2565,2575,2579,2602,2610,2613,2616,2649,2654,2674,2693,2703,2707,2730,2738,2741,2749,2768,2784,2809,2821,2831,2835,2858,2866,2869,2877,2908,2911,2929,2947,2949,2958,2962,2969,2972,2974,2979,2984,2990,3024,3077,3086,3090,3114,3133,3160,3168,3200,3205,3214,3218,3242,3253,3261,3294,3296,3313,3333,3342,3346,3389,3406,3412,3423,3450,3461,3482,3507,3517,3520,3585,3634,3648,3713,3716,3718,3724,3749,3751,3762,3773,3776,3804,3840,3904,3913,3976,4096,4159,4176,4186,4193,4197,4206,4213,4238,4352,4682,4688,4696,4698,4704,4746,4752,4786,4792,4800,4802,4808,4824,4882,4888,4992,5121,5743,5761,5792,5873,5888,5902,5920,5952,5984,5998,6016,6108,6176,6212,6272,6279,6314,6320,6400,6480,6512,6528,6576,6656,6688,6917,6981,7043,7086,7098,7168,7245,7258,7401,7406,7413,7418,8501,11568,11648,11680,11688,11696,11704,11712,11720,11728,11736,12294,12348,12353,12447,12449,12543,12549,12593,12704,12784,13312,19968,40960,40982,42192,42240,42512,42538,42606,42656,42895,42999,43003,43011,43015,43020,43072,43138,43250,43259,43261,43274,43312,43360,43396,43488,43495,43514,43520,43584,43588,43616,43633,43642,43646,43697,43701,43705,43712,43714,43739,43744,43762,43777,43785,43793,43808,43816,43968,44032,55216,55243,63744,64112,64285,64287,64298,64312,64318,64320,64323,64326,64467,64848,64914,65008,65136,65142,65382,65393,65440,65474,65482,65490,65498,65536,65549,65576,65596,65599,65616,65664,66176,66208,66304,66349,66370,66384,66432,66464,66504,66640,66816,66864,67072,67392,67424,67584,67592,67594,67639,67644,67647,67680,67712,67808,67828,67840,67872,67968,68030,68096,68112,68117,68121,68192,68224,68288,68297,68352,68416,68448,68480,68608,68864,69376,69415,69424,69600,69635,69763,69840,69891,69956,69968,70006,70019,70081,70106,70108,70144,70163,70272,70280,70282,70287,70303,70320,70405,70415,70419,70442,70450,70453,70461,70480,70493,70656,70727,70751,70784,70852,70855,71040,71128,71168,71236,71296,71352,71424,71680,71935,72096,72106,72161,72163,72192,72203,72250,72272,72284,72349,72384,72704,72714,72768,72818,72960,72968,72971,73030,73056,73063,73066,73112,73440,73728,74880,77824,82944,92160,92736,92880,92928,93027,93053,93952,94032,94208,100352,110592,110928,110948,110960,113664,113776,113792,113808,123136,123214,123584,124928,126464,126469,126497,126500,126503,126505,126516,126521,126523,126530,126535,126537,126539,126541,126545,126548,126551,126553,126555,126557,126559,126561,126564,126567,126572,126580,126585,126590,126592,126603,126625,126629,126635,131072,173824,177984,178208,183984,194560};
-static const int kLoRangeB[] = {170,186,443,451,660,1514,1522,1599,1610,1647,1747,1749,1775,1788,1791,1808,1839,1957,1969,2026,2069,2136,2154,2228,2237,2361,2365,2384,2401,2432,2444,2448,2472,2480,2482,2489,2493,2510,2525,2529,2545,2556,2570,2576,2600,2608,2611,2614,2617,2652,2654,2676,2701,2705,2728,2736,2739,2745,2749,2768,2785,2809,2828,2832,2856,2864,2867,2873,2877,2909,2913,2929,2947,2954,2960,2965,2970,2972,2975,2980,2986,3001,3024,3084,3088,3112,3129,3133,3162,3169,3200,3212,3216,3240,3251,3257,3261,3294,3297,3314,3340,3344,3386,3389,3406,3414,3425,3455,3478,3505,3515,3517,3526,3632,3635,3653,3714,3716,3722,3747,3749,3760,3763,3773,3780,3807,3840,3911,3948,3980,4138,4159,4181,4189,4193,4198,4208,4225,4238,4680,4685,4694,4696,4701,4744,4749,4784,4789,4798,4800,4805,4822,4880,4885,4954,5007,5740,5759,5786,5866,5880,5900,5905,5937,5969,5996,6000,6067,6108,6210,6264,6276,6312,6314,6389,6430,6509,6516,6571,6601,6678,6740,6963,6987,7072,7087,7141,7203,7247,7287,7404,7411,7414,7418,8504,11623,11670,11686,11694,11702,11710,11718,11726,11734,11742,12294,12348,12438,12447,12538,12543,12591,12686,12730,12799,19893,40943,40980,42124,42231,42507,42527,42539,42606,42725,42895,42999,43009,43013,43018,43042,43123,43187,43255,43259,43262,43301,43334,43388,43442,43492,43503,43518,43560,43586,43595,43631,43638,43642,43695,43697,43702,43709,43712,43714,43740,43754,43762,43782,43790,43798,43814,43822,44002,55203,55238,55291,64109,64217,64285,64296,64310,64316,64318,64321,64324,64433,64829,64911,64967,65019,65140,65276,65391,65437,65470,65479,65487,65495,65500,65547,65574,65594,65597,65613,65629,65786,66204,66256,66335,66368,66377,66421,66461,66499,66511,66717,66855,66915,67382,67413,67431,67589,67592,67637,67640,67644,67669,67702,67742,67826,67829,67861,67897,68023,68031,68096,68115,68119,68149,68220,68252,68295,68324,68405,68437,68466,68497,68680,68899,69404,69415,69445,69622,69687,69807,69864,69926,69956,70002,70006,70066,70084,70106,70108,70161,70187,70278,70280,70285,70301,70312,70366,70412,70416,70440,70448,70451,70457,70461,70480,70497,70708,70730,70751,70831,70853,70855,71086,71131,71215,71236,71338,71352,71450,71723,71935,72103,72144,72161,72163,72192,72242,72250,72272,72329,72349,72440,72712,72750,72768,72847,72966,72969,73008,73030,73061,73064,73097,73112,73458,74649,75075,78894,83526,92728,92766,92909,92975,93047,93071,94026,94032,100343,101106,110878,110930,110951,111355,113770,113788,113800,113817,123180,123214,123627,125124,126467,126495,126498,126500,126503,126514,126519,126521,126523,126530,126535,126537,126539,126543,126546,126548,126551,126553,126555,126557,126559,126562,126564,126570,126578,126583,126588,126590,126601,126619,126627,126633,126651,173782,177972,178205,183969,191456,195101};
-
-// clang-format on
-
-bool c11__is_unicode_Lo_char(int c) {
-    if(c == 0x1f955) return true;
-    int index;
-    c11__lower_bound(const int, kLoRangeA, 476, c, c11__less, &index);
-    if(index == 476) return false;
-    if(c == kLoRangeA[index]) return true;
-    index -= 1;
-    if(index < 0) return false;
-    return c >= kLoRangeA[index] && c <= kLoRangeB[index];
-}
-
 int c11__u8_header(unsigned char c, bool suppress) {
     if((c & 0b10000000) == 0) return 1;
     if((c & 0b11100000) == 0b11000000) return 2;
@@ -5911,6 +6928,20 @@ int c11__u32_to_u8(uint32_t utf32_char, char utf8_output[4]) {
         return -1;
     }
     return length;
+}
+
+char* c11_strdup(const char* str) {
+    int len = strlen(str);
+    char* dst = PK_MALLOC(len + 1);
+    memcpy(dst, str, len);
+    dst[len] = '\0';
+    return dst;
+}
+
+unsigned char* c11_memdup(const unsigned char* src, int size) {
+    unsigned char* dst = PK_MALLOC(size);
+    memcpy(dst, src, size);
+    return dst;
 }
 
 IntParsingResult c11__parse_uint(c11_sv text, int64_t* out, int base) {
@@ -6003,8 +7034,537 @@ IntParsingResult c11__parse_uint(c11_sv text, int64_t* out, int base) {
     }
     return IntParsing_FAILURE;
 }
+
+const char* c11__search_u32_ranges(int c, const c11_u32_range* p, int n_ranges) {
+    int lbound = 0;
+    int ubound = n_ranges - 1;
+
+    if(c < p[0].start || c > p[ubound].end) return NULL;
+    while(ubound >= lbound) {
+        int mid = (lbound + ubound) / 2;
+        if(c > p[mid].end) {
+            lbound = mid + 1;
+        } else if(c < p[mid].start) {
+            ubound = mid - 1;
+        } else {
+            return p[mid].data;
+        }
+    }
+    return NULL;
+}
+
+const static c11_u32_range kLoRanges[] = {
+    {170,    170   },
+    {186,    186   },
+    {443,    443   },
+    {448,    451   },
+    {660,    660   },
+    {1488,   1514  },
+    {1519,   1522  },
+    {1568,   1599  },
+    {1601,   1610  },
+    {1646,   1647  },
+    {1649,   1747  },
+    {1749,   1749  },
+    {1774,   1775  },
+    {1786,   1788  },
+    {1791,   1791  },
+    {1808,   1808  },
+    {1810,   1839  },
+    {1869,   1957  },
+    {1969,   1969  },
+    {1994,   2026  },
+    {2048,   2069  },
+    {2112,   2136  },
+    {2144,   2154  },
+    {2160,   2183  },
+    {2185,   2190  },
+    {2208,   2248  },
+    {2308,   2361  },
+    {2365,   2365  },
+    {2384,   2384  },
+    {2392,   2401  },
+    {2418,   2432  },
+    {2437,   2444  },
+    {2447,   2448  },
+    {2451,   2472  },
+    {2474,   2480  },
+    {2482,   2482  },
+    {2486,   2489  },
+    {2493,   2493  },
+    {2510,   2510  },
+    {2524,   2525  },
+    {2527,   2529  },
+    {2544,   2545  },
+    {2556,   2556  },
+    {2565,   2570  },
+    {2575,   2576  },
+    {2579,   2600  },
+    {2602,   2608  },
+    {2610,   2611  },
+    {2613,   2614  },
+    {2616,   2617  },
+    {2649,   2652  },
+    {2654,   2654  },
+    {2674,   2676  },
+    {2693,   2701  },
+    {2703,   2705  },
+    {2707,   2728  },
+    {2730,   2736  },
+    {2738,   2739  },
+    {2741,   2745  },
+    {2749,   2749  },
+    {2768,   2768  },
+    {2784,   2785  },
+    {2809,   2809  },
+    {2821,   2828  },
+    {2831,   2832  },
+    {2835,   2856  },
+    {2858,   2864  },
+    {2866,   2867  },
+    {2869,   2873  },
+    {2877,   2877  },
+    {2908,   2909  },
+    {2911,   2913  },
+    {2929,   2929  },
+    {2947,   2947  },
+    {2949,   2954  },
+    {2958,   2960  },
+    {2962,   2965  },
+    {2969,   2970  },
+    {2972,   2972  },
+    {2974,   2975  },
+    {2979,   2980  },
+    {2984,   2986  },
+    {2990,   3001  },
+    {3024,   3024  },
+    {3077,   3084  },
+    {3086,   3088  },
+    {3090,   3112  },
+    {3114,   3129  },
+    {3133,   3133  },
+    {3160,   3162  },
+    {3165,   3165  },
+    {3168,   3169  },
+    {3200,   3200  },
+    {3205,   3212  },
+    {3214,   3216  },
+    {3218,   3240  },
+    {3242,   3251  },
+    {3253,   3257  },
+    {3261,   3261  },
+    {3293,   3294  },
+    {3296,   3297  },
+    {3313,   3314  },
+    {3332,   3340  },
+    {3342,   3344  },
+    {3346,   3386  },
+    {3389,   3389  },
+    {3406,   3406  },
+    {3412,   3414  },
+    {3423,   3425  },
+    {3450,   3455  },
+    {3461,   3478  },
+    {3482,   3505  },
+    {3507,   3515  },
+    {3517,   3517  },
+    {3520,   3526  },
+    {3585,   3632  },
+    {3634,   3635  },
+    {3648,   3653  },
+    {3713,   3714  },
+    {3716,   3716  },
+    {3718,   3722  },
+    {3724,   3747  },
+    {3749,   3749  },
+    {3751,   3760  },
+    {3762,   3763  },
+    {3773,   3773  },
+    {3776,   3780  },
+    {3804,   3807  },
+    {3840,   3840  },
+    {3904,   3911  },
+    {3913,   3948  },
+    {3976,   3980  },
+    {4096,   4138  },
+    {4159,   4159  },
+    {4176,   4181  },
+    {4186,   4189  },
+    {4193,   4193  },
+    {4197,   4198  },
+    {4206,   4208  },
+    {4213,   4225  },
+    {4238,   4238  },
+    {4352,   4680  },
+    {4682,   4685  },
+    {4688,   4694  },
+    {4696,   4696  },
+    {4698,   4701  },
+    {4704,   4744  },
+    {4746,   4749  },
+    {4752,   4784  },
+    {4786,   4789  },
+    {4792,   4798  },
+    {4800,   4800  },
+    {4802,   4805  },
+    {4808,   4822  },
+    {4824,   4880  },
+    {4882,   4885  },
+    {4888,   4954  },
+    {4992,   5007  },
+    {5121,   5740  },
+    {5743,   5759  },
+    {5761,   5786  },
+    {5792,   5866  },
+    {5873,   5880  },
+    {5888,   5905  },
+    {5919,   5937  },
+    {5952,   5969  },
+    {5984,   5996  },
+    {5998,   6000  },
+    {6016,   6067  },
+    {6108,   6108  },
+    {6176,   6210  },
+    {6212,   6264  },
+    {6272,   6276  },
+    {6279,   6312  },
+    {6314,   6314  },
+    {6320,   6389  },
+    {6400,   6430  },
+    {6480,   6509  },
+    {6512,   6516  },
+    {6528,   6571  },
+    {6576,   6601  },
+    {6656,   6678  },
+    {6688,   6740  },
+    {6917,   6963  },
+    {6981,   6988  },
+    {7043,   7072  },
+    {7086,   7087  },
+    {7098,   7141  },
+    {7168,   7203  },
+    {7245,   7247  },
+    {7258,   7287  },
+    {7401,   7404  },
+    {7406,   7411  },
+    {7413,   7414  },
+    {7418,   7418  },
+    {8501,   8504  },
+    {11568,  11623 },
+    {11648,  11670 },
+    {11680,  11686 },
+    {11688,  11694 },
+    {11696,  11702 },
+    {11704,  11710 },
+    {11712,  11718 },
+    {11720,  11726 },
+    {11728,  11734 },
+    {11736,  11742 },
+    {12294,  12294 },
+    {12348,  12348 },
+    {12353,  12438 },
+    {12447,  12447 },
+    {12449,  12538 },
+    {12543,  12543 },
+    {12549,  12591 },
+    {12593,  12686 },
+    {12704,  12735 },
+    {12784,  12799 },
+    {13312,  19903 },
+    {19968,  40980 },
+    {40982,  42124 },
+    {42192,  42231 },
+    {42240,  42507 },
+    {42512,  42527 },
+    {42538,  42539 },
+    {42606,  42606 },
+    {42656,  42725 },
+    {42895,  42895 },
+    {42999,  42999 },
+    {43003,  43009 },
+    {43011,  43013 },
+    {43015,  43018 },
+    {43020,  43042 },
+    {43072,  43123 },
+    {43138,  43187 },
+    {43250,  43255 },
+    {43259,  43259 },
+    {43261,  43262 },
+    {43274,  43301 },
+    {43312,  43334 },
+    {43360,  43388 },
+    {43396,  43442 },
+    {43488,  43492 },
+    {43495,  43503 },
+    {43514,  43518 },
+    {43520,  43560 },
+    {43584,  43586 },
+    {43588,  43595 },
+    {43616,  43631 },
+    {43633,  43638 },
+    {43642,  43642 },
+    {43646,  43695 },
+    {43697,  43697 },
+    {43701,  43702 },
+    {43705,  43709 },
+    {43712,  43712 },
+    {43714,  43714 },
+    {43739,  43740 },
+    {43744,  43754 },
+    {43762,  43762 },
+    {43777,  43782 },
+    {43785,  43790 },
+    {43793,  43798 },
+    {43808,  43814 },
+    {43816,  43822 },
+    {43968,  44002 },
+    {44032,  55203 },
+    {55216,  55238 },
+    {55243,  55291 },
+    {63744,  64109 },
+    {64112,  64217 },
+    {64285,  64285 },
+    {64287,  64296 },
+    {64298,  64310 },
+    {64312,  64316 },
+    {64318,  64318 },
+    {64320,  64321 },
+    {64323,  64324 },
+    {64326,  64433 },
+    {64467,  64829 },
+    {64848,  64911 },
+    {64914,  64967 },
+    {65008,  65019 },
+    {65136,  65140 },
+    {65142,  65276 },
+    {65382,  65391 },
+    {65393,  65437 },
+    {65440,  65470 },
+    {65474,  65479 },
+    {65482,  65487 },
+    {65490,  65495 },
+    {65498,  65500 },
+    {65536,  65547 },
+    {65549,  65574 },
+    {65576,  65594 },
+    {65596,  65597 },
+    {65599,  65613 },
+    {65616,  65629 },
+    {65664,  65786 },
+    {66176,  66204 },
+    {66208,  66256 },
+    {66304,  66335 },
+    {66349,  66368 },
+    {66370,  66377 },
+    {66384,  66421 },
+    {66432,  66461 },
+    {66464,  66499 },
+    {66504,  66511 },
+    {66640,  66717 },
+    {66816,  66855 },
+    {66864,  66915 },
+    {67072,  67382 },
+    {67392,  67413 },
+    {67424,  67431 },
+    {67584,  67589 },
+    {67592,  67592 },
+    {67594,  67637 },
+    {67639,  67640 },
+    {67644,  67644 },
+    {67647,  67669 },
+    {67680,  67702 },
+    {67712,  67742 },
+    {67808,  67826 },
+    {67828,  67829 },
+    {67840,  67861 },
+    {67872,  67897 },
+    {67968,  68023 },
+    {68030,  68031 },
+    {68096,  68096 },
+    {68112,  68115 },
+    {68117,  68119 },
+    {68121,  68149 },
+    {68192,  68220 },
+    {68224,  68252 },
+    {68288,  68295 },
+    {68297,  68324 },
+    {68352,  68405 },
+    {68416,  68437 },
+    {68448,  68466 },
+    {68480,  68497 },
+    {68608,  68680 },
+    {68864,  68899 },
+    {69248,  69289 },
+    {69296,  69297 },
+    {69376,  69404 },
+    {69415,  69415 },
+    {69424,  69445 },
+    {69488,  69505 },
+    {69552,  69572 },
+    {69600,  69622 },
+    {69635,  69687 },
+    {69745,  69746 },
+    {69749,  69749 },
+    {69763,  69807 },
+    {69840,  69864 },
+    {69891,  69926 },
+    {69956,  69956 },
+    {69959,  69959 },
+    {69968,  70002 },
+    {70006,  70006 },
+    {70019,  70066 },
+    {70081,  70084 },
+    {70106,  70106 },
+    {70108,  70108 },
+    {70144,  70161 },
+    {70163,  70187 },
+    {70272,  70278 },
+    {70280,  70280 },
+    {70282,  70285 },
+    {70287,  70301 },
+    {70303,  70312 },
+    {70320,  70366 },
+    {70405,  70412 },
+    {70415,  70416 },
+    {70419,  70440 },
+    {70442,  70448 },
+    {70450,  70451 },
+    {70453,  70457 },
+    {70461,  70461 },
+    {70480,  70480 },
+    {70493,  70497 },
+    {70656,  70708 },
+    {70727,  70730 },
+    {70751,  70753 },
+    {70784,  70831 },
+    {70852,  70853 },
+    {70855,  70855 },
+    {71040,  71086 },
+    {71128,  71131 },
+    {71168,  71215 },
+    {71236,  71236 },
+    {71296,  71338 },
+    {71352,  71352 },
+    {71424,  71450 },
+    {71488,  71494 },
+    {71680,  71723 },
+    {71935,  71942 },
+    {71945,  71945 },
+    {71948,  71955 },
+    {71957,  71958 },
+    {71960,  71983 },
+    {71999,  71999 },
+    {72001,  72001 },
+    {72096,  72103 },
+    {72106,  72144 },
+    {72161,  72161 },
+    {72163,  72163 },
+    {72192,  72192 },
+    {72203,  72242 },
+    {72250,  72250 },
+    {72272,  72272 },
+    {72284,  72329 },
+    {72349,  72349 },
+    {72368,  72440 },
+    {72704,  72712 },
+    {72714,  72750 },
+    {72768,  72768 },
+    {72818,  72847 },
+    {72960,  72966 },
+    {72968,  72969 },
+    {72971,  73008 },
+    {73030,  73030 },
+    {73056,  73061 },
+    {73063,  73064 },
+    {73066,  73097 },
+    {73112,  73112 },
+    {73440,  73458 },
+    {73648,  73648 },
+    {73728,  74649 },
+    {74880,  75075 },
+    {77712,  77808 },
+    {77824,  78894 },
+    {82944,  83526 },
+    {92160,  92728 },
+    {92736,  92766 },
+    {92784,  92862 },
+    {92880,  92909 },
+    {92928,  92975 },
+    {93027,  93047 },
+    {93053,  93071 },
+    {93952,  94026 },
+    {94032,  94032 },
+    {94208,  100343},
+    {100352, 101589},
+    {101632, 101640},
+    {110592, 110882},
+    {110928, 110930},
+    {110948, 110951},
+    {110960, 111355},
+    {113664, 113770},
+    {113776, 113788},
+    {113792, 113800},
+    {113808, 113817},
+    {122634, 122634},
+    {123136, 123180},
+    {123214, 123214},
+    {123536, 123565},
+    {123584, 123627},
+    {124896, 124902},
+    {124904, 124907},
+    {124909, 124910},
+    {124912, 124926},
+    {124928, 125124},
+    {126464, 126467},
+    {126469, 126495},
+    {126497, 126498},
+    {126500, 126500},
+    {126503, 126503},
+    {126505, 126514},
+    {126516, 126519},
+    {126521, 126521},
+    {126523, 126523},
+    {126530, 126530},
+    {126535, 126535},
+    {126537, 126537},
+    {126539, 126539},
+    {126541, 126543},
+    {126545, 126546},
+    {126548, 126548},
+    {126551, 126551},
+    {126553, 126553},
+    {126555, 126555},
+    {126557, 126557},
+    {126559, 126559},
+    {126561, 126562},
+    {126564, 126564},
+    {126567, 126570},
+    {126572, 126578},
+    {126580, 126583},
+    {126585, 126588},
+    {126590, 126590},
+    {126592, 126601},
+    {126603, 126619},
+    {126625, 126627},
+    {126629, 126633},
+    {126635, 126651},
+    {131072, 173791},
+    {173824, 177976},
+    {177984, 178205},
+    {178208, 183969},
+    {183984, 191456},
+    {194560, 195101},
+    {196608, 201546},
+};
+
+bool c11__is_unicode_Lo_char(int c) {
+    if(c == 0x1f955) return true;
+    const char* data =
+        c11__search_u32_ranges(c, kLoRanges, sizeof(kLoRanges) / sizeof(c11_u32_range));
+    return data != NULL;
+}
+
 // src/common/memorypool.c
-#include <stdlib.h>
 #include <stdbool.h>
 
 void FixedMemoryPool__ctor(FixedMemoryPool* self, int BlockSize, int BlockCount) {
@@ -6055,18 +7615,20 @@ void FixedMemoryPool__dealloc(FixedMemoryPool* self, void* p) {
 // }
 // src/common/smallmap.c
 #define SMALLMAP_T__SOURCE
-#define K uint16_t
+#define K py_Name
 #define V int
-#define NAME c11_smallmap_n2i
+#define NAME c11_smallmap_n2d
 #if !defined(SMALLMAP_T__HEADER) && !defined(SMALLMAP_T__SOURCE)
 #include "pocketpy/common/vector.h"
+#include "pocketpy/common/utils.h"
+#include "pocketpy/config.h"
 
 #define SMALLMAP_T__HEADER
 #define SMALLMAP_T__SOURCE
 /* Input */
 #define K int
 #define V float
-#define NAME c11_smallmap_i2f
+#define NAME c11_smallmap_d2f
 #endif
 
 /* Optional Input */
@@ -6192,22 +7754,163 @@ void METHOD(clear)(NAME* self) { c11_vector__clear(self); }
 
 #undef SMALLMAP_T__SOURCE
 
-
 #define SMALLMAP_T__SOURCE
-#define K c11_sv
-#define V uint16_t
-#define NAME c11_smallmap_s2n
-#define less(a, b)      (c11_sv__cmp((a), (b)) <  0)
-#define equal(a, b)     (c11_sv__cmp((a), (b)) == 0)
+#define K int
+#define V int
+#define NAME c11_smallmap_d2d
 #if !defined(SMALLMAP_T__HEADER) && !defined(SMALLMAP_T__SOURCE)
 #include "pocketpy/common/vector.h"
+#include "pocketpy/common/utils.h"
+#include "pocketpy/config.h"
 
 #define SMALLMAP_T__HEADER
 #define SMALLMAP_T__SOURCE
 /* Input */
 #define K int
 #define V float
-#define NAME c11_smallmap_i2f
+#define NAME c11_smallmap_d2f
+#endif
+
+/* Optional Input */
+#ifndef less
+#define less(a, b) ((a) < (b))
+#endif
+
+#ifndef equal
+#define equal(a, b) ((a) == (b))
+#endif
+
+/* Temporary macros */
+#define partial_less(a, b) less((a).key, (b))
+#define CONCAT(A, B) CONCAT_(A, B)
+#define CONCAT_(A, B) A##B
+
+#define KV CONCAT(NAME, _KV)
+#define METHOD(name) CONCAT(NAME, CONCAT(__, name))
+
+#ifdef SMALLMAP_T__HEADER
+/* Declaration */
+typedef struct {
+    K key;
+    V value;
+} KV;
+
+typedef c11_vector NAME;
+
+void METHOD(ctor)(NAME* self);
+void METHOD(dtor)(NAME* self);
+NAME* METHOD(new)();
+void METHOD(delete)(NAME* self);
+void METHOD(set)(NAME* self, K key, V value);
+V* METHOD(try_get)(const NAME* self, K key);
+V METHOD(get)(const NAME* self, K key, V default_value);
+bool METHOD(contains)(const NAME* self, K key);
+bool METHOD(del)(NAME* self, K key);
+void METHOD(clear)(NAME* self);
+
+#endif
+
+#ifdef SMALLMAP_T__SOURCE
+/* Implementation */
+
+void METHOD(ctor)(NAME* self) {
+    c11_vector__ctor(self, sizeof(KV));
+    c11_vector__reserve(self, 4);
+}
+
+void METHOD(dtor)(NAME* self) { c11_vector__dtor(self); }
+
+NAME* METHOD(new)() {
+    NAME* self = PK_MALLOC(sizeof(NAME));
+    METHOD(ctor)(self);
+    return self;
+}
+
+void METHOD(delete)(NAME* self) {
+    METHOD(dtor)(self);
+    PK_FREE(self);
+}
+
+void METHOD(set)(NAME* self, K key, V value) {
+    int index;
+    c11__lower_bound(KV, self->data, self->length, key, partial_less, &index);
+    if(index != self->length) {
+        KV* it = c11__at(KV, self, index);
+        if(equal(it->key, key)) {
+            it->value = value;
+            return;
+        }
+    }
+    KV kv = {key, value};
+    c11_vector__insert(KV, self, index, kv);
+}
+
+V* METHOD(try_get)(const NAME* self, K key) {
+    int index;
+    c11__lower_bound(KV, self->data, self->length, key, partial_less, &index);
+    if(index != self->length) {
+        KV* it = c11__at(KV, self, index);
+        if(equal(it->key, key)) return &it->value;
+    }
+    return NULL;
+}
+
+V METHOD(get)(const NAME* self, K key, V default_value) {
+    V* p = METHOD(try_get)(self, key);
+    return p ? *p : default_value;
+}
+
+bool METHOD(contains)(const NAME* self, K key) { return METHOD(try_get)(self, key) != NULL; }
+
+bool METHOD(del)(NAME* self, K key) {
+    int index;
+    c11__lower_bound(KV, self->data, self->length, key, partial_less, &index);
+    if(index != self->length) {
+        KV* it = c11__at(KV, self, index);
+        if(equal(it->key, key)) {
+            c11_vector__erase(KV, self, index);
+            return true;
+        }
+    }
+    return false;
+}
+
+void METHOD(clear)(NAME* self) { c11_vector__clear(self); }
+
+#endif
+
+/* Undefine all macros */
+#undef KV
+#undef METHOD
+#undef CONCAT
+#undef CONCAT_
+
+#undef K
+#undef V
+#undef NAME
+#undef less
+#undef partial_less
+#undef equal
+
+#undef SMALLMAP_T__SOURCE
+
+#define SMALLMAP_T__SOURCE
+#define K c11_sv
+#define V int
+#define NAME c11_smallmap_v2d
+#define less(a, b)      (c11_sv__cmp((a), (b)) <  0)
+#define equal(a, b)     (c11_sv__cmp((a), (b)) == 0)
+#if !defined(SMALLMAP_T__HEADER) && !defined(SMALLMAP_T__SOURCE)
+#include "pocketpy/common/vector.h"
+#include "pocketpy/common/utils.h"
+#include "pocketpy/config.h"
+
+#define SMALLMAP_T__HEADER
+#define SMALLMAP_T__SOURCE
+/* Input */
+#define K int
+#define V float
+#define NAME c11_smallmap_d2f
 #endif
 
 /* Optional Input */
@@ -6336,17 +8039,19 @@ void METHOD(clear)(NAME* self) { c11_vector__clear(self); }
 
 #define SMALLMAP_T__SOURCE
 #define K void*
-#define V int
+#define V py_i64
 #define NAME c11_smallmap_p2i
 #if !defined(SMALLMAP_T__HEADER) && !defined(SMALLMAP_T__SOURCE)
 #include "pocketpy/common/vector.h"
+#include "pocketpy/common/utils.h"
+#include "pocketpy/config.h"
 
 #define SMALLMAP_T__HEADER
 #define SMALLMAP_T__SOURCE
 /* Input */
 #define K int
 #define V float
-#define NAME c11_smallmap_i2f
+#define NAME c11_smallmap_d2f
 #endif
 
 /* Optional Input */
@@ -6472,16 +8177,141 @@ void METHOD(clear)(NAME* self) { c11_vector__clear(self); }
 
 #undef SMALLMAP_T__SOURCE
 
+// src/common/socket.c
+#if PK_ENABLE_OS
+
+#include <stddef.h>
+
+#if defined (_WIN32) || defined (_WIN64)
+#include <WinSock2.h>
+#include <ws2tcpip.h>
+typedef SOCKET socket_fd;
+#else
+#include <sys/types.h>
+#include <sys/socket.h>
+#include <netinet/in.h>
+#include <arpa/inet.h>
+#include <fcntl.h>
+#include <unistd.h>
+#include <errno.h>
+typedef int socket_fd;
+#endif
+
+#define SOCKET_HANDLERTOFD(handler) (socket_fd)(uintptr_t)(handler)
+#define SOCKET_FDTOHANDLER(fd) (c11_socket_handler)(uintptr_t)(fd)
+
+
+static int c11_socket_init(){
+    #if defined (_WIN32) || defined (_WIN64)
+        WORD sockVersion = MAKEWORD(2,2);
+	    WSADATA wsaData;
+        return WSAStartup(sockVersion, &wsaData); 
+    #endif 
+    return 0;
+}
+
+c11_socket_handler c11_socket_create(int family, int type, int protocol){
+    static int is_initialized = 0;
+    if(is_initialized == 0)
+    {
+        c11_socket_init();
+        is_initialized = 1;     
+    }
+    return SOCKET_FDTOHANDLER(socket(family, type, protocol));
+}
+
+int c11_socket_bind(c11_socket_handler socket, const char* hostname, unsigned short port){
+    struct sockaddr_in bind_addr;
+    bind_addr.sin_family = AF_INET;
+    bind_addr.sin_port = htons(port);
+    inet_pton(AF_INET,hostname,&bind_addr.sin_addr);
+    if(bind(SOCKET_HANDLERTOFD(socket), (const struct sockaddr*)&bind_addr, sizeof(bind_addr)) == -1){
+        return -1;
+    }
+    return 0;
+}
+
+int c11_socket_listen(c11_socket_handler socket, int backlog){
+    listen(SOCKET_HANDLERTOFD(socket), backlog);
+    return 0;
+}
+
+c11_socket_handler c11_socket_accept(c11_socket_handler socket, char* client_ip, unsigned short* client_port){
+    struct sockaddr_in client_addr;
+    socklen_t sockaddr_len = sizeof(client_addr);
+    socket_fd client_socket = accept(SOCKET_HANDLERTOFD(socket), (struct sockaddr*)&client_addr, &sockaddr_len);
+    if(client_ip != NULL){
+        inet_ntop(AF_INET, &client_addr.sin_addr,client_ip,sizeof("255.255.255.255"));
+    }
+    if(client_port != NULL){
+        *client_port = ntohs(client_addr.sin_port);
+    }
+    return SOCKET_FDTOHANDLER(client_socket);
+}
+int c11_socket_connect(c11_socket_handler socket, const char* server_ip, unsigned short server_port){
+    struct sockaddr_in server_addr;
+    server_addr.sin_family = AF_INET;
+    server_addr.sin_port = htons(server_port);
+    inet_pton(AF_INET, server_ip, &server_addr.sin_addr);
+    if(connect(SOCKET_HANDLERTOFD(socket), (const struct sockaddr*)&server_addr, sizeof(server_addr)) == -1){
+        return -1;
+    }
+    return 0;
+}
+
+int c11_socket_recv(c11_socket_handler socket, char* buffer, int maxsize){
+    return recv(SOCKET_HANDLERTOFD(socket), buffer, maxsize,0);
+}
+
+int c11_socket_send(c11_socket_handler socket, const char* senddata, int datalen){
+    return send(SOCKET_HANDLERTOFD(socket), senddata, datalen, 0);
+}
+
+int c11_socket_close(c11_socket_handler socket){
+    #if defined (_WIN32) || defined (_WIN64)
+        return closesocket(SOCKET_HANDLERTOFD(socket));
+    #else
+        return close(SOCKET_HANDLERTOFD(socket));
+    #endif
+}
+
+int c11_socket_set_block(c11_socket_handler socket,int flag){
+    #if defined (_WIN32) || defined (_WIN64)
+        u_long mode = flag == 1 ? 0 : 1;
+        return ioctlsocket(SOCKET_HANDLERTOFD(socket), FIONBIO, &mode);
+    #else
+        int flags = fcntl(SOCKET_HANDLERTOFD(socket), F_GETFL, 0);
+        return fcntl(SOCKET_HANDLERTOFD(socket), F_SETFL, flags | O_NONBLOCK);
+    #endif
+}
+
+c11_socket_handler c11_socket_invalid_socket_handler(){
+    return (void*)(uintptr_t)(-1);
+}
+
+
+int c11_socket_get_last_error(){
+    #if defined (_WIN32) || defined (_WIN64)
+        return WSAGetLastError();
+    #else
+        return errno;
+    #endif
+}
+
+#undef SOCKET_HANDLERTOFD
+#undef SOCKET_FDTOHANDLER
+
+#endif // PK_ENABLE_OS
 // src/common/sstream.c
 #include <stdarg.h>
-#include <stdio.h>
 #include <assert.h>
+#include <stdio.h>
 #include <ctype.h>
 #include <math.h>
 
 void c11_sbuf__ctor(c11_sbuf* self) {
     c11_vector__ctor(&self->data, sizeof(char));
-    c11_vector__reserve(&self->data, sizeof(c11_string) + 100);
+    c11_vector__reserve(&self->data, sizeof(c11_string) + 64);
     self->data.length = sizeof(c11_string);
 }
 
@@ -6673,6 +8503,11 @@ void pk_vsprintf(c11_sbuf* ss, const char* fmt, va_list args) {
                 c11_sbuf__write_quoted(ss, sv, '\'');
                 break;
             }
+            case 'Q': {
+                c11_sv sv = va_arg(args, c11_sv);
+                c11_sbuf__write_quoted(ss, sv, '"');
+                break;
+            }
             case 'v': {
                 c11_sv sv = va_arg(args, c11_sv);
                 c11_sbuf__write_sv(ss, sv);
@@ -6694,7 +8529,7 @@ void pk_vsprintf(c11_sbuf* ss, const char* fmt, va_list args) {
                 break;
             }
             case 'n': {
-                py_Name n = va_arg(args, int);
+                py_Name n = va_arg(args, void*);
                 c11_sbuf__write_cstr(ss, py_name2str(n));
                 break;
             }
@@ -6717,7 +8552,6 @@ void pk_sprintf(c11_sbuf* ss, const char* fmt, ...) {
 
 // src/common/algorithm.c
 #include <string.h>
-#include <stdlib.h>
 
 static bool _stable_sort_merge(char* a,
                   char* a_end,
@@ -6728,10 +8562,10 @@ static bool _stable_sort_merge(char* a,
                   int (*f_lt)(const void* a, const void* b, void* extra),
                   void* extra) {
     while(a < a_end && b < b_end) {
-        int res = f_lt(a, b, extra);
+        int res = f_lt(b, a, extra);
         // check error
         if(res == -1) return false;
-        if(res) {
+        if(res == 0) {  // !(b<a) -> (b>=a) -> (a<=b)
             memcpy(r, a, elem_size);
             a += elem_size;
         } else {
@@ -6772,9 +8606,245 @@ bool c11__stable_sort(void* ptr_,
     return true;
 }
 
+// src/common/name.c
+#if PK_ENABLE_CUSTOM_SNAME == 0
+
+#include <assert.h>
+
+typedef struct NameBucket NameBucket;
+
+typedef struct NameBucket {
+    NameBucket* next;
+    uint64_t hash;
+    int size;     // size of the data excluding the null-terminator
+    char data[];  // null-terminated data
+} NameBucket;
+
+static struct {
+    NameBucket* table[0x10000];
+#if PK_ENABLE_THREADS
+    atomic_flag lock;
+#endif
+} pk_string_table;
+
+#define MAGIC_METHOD(x) py_Name x;
+#ifdef MAGIC_METHOD
+
+// math operators
+MAGIC_METHOD(__lt__)
+MAGIC_METHOD(__le__)
+MAGIC_METHOD(__gt__)
+MAGIC_METHOD(__ge__)
+/////////////////////////////
+MAGIC_METHOD(__neg__)
+MAGIC_METHOD(__abs__)
+MAGIC_METHOD(__round__)
+MAGIC_METHOD(__divmod__)
+/////////////////////////////
+MAGIC_METHOD(__add__)
+MAGIC_METHOD(__radd__)
+MAGIC_METHOD(__sub__)
+MAGIC_METHOD(__rsub__)
+MAGIC_METHOD(__mul__)
+MAGIC_METHOD(__rmul__)
+MAGIC_METHOD(__truediv__)
+MAGIC_METHOD(__rtruediv__)
+MAGIC_METHOD(__floordiv__)
+MAGIC_METHOD(__rfloordiv__)
+MAGIC_METHOD(__mod__)
+MAGIC_METHOD(__rmod__)
+MAGIC_METHOD(__pow__)
+MAGIC_METHOD(__rpow__)
+MAGIC_METHOD(__matmul__)
+MAGIC_METHOD(__lshift__)
+MAGIC_METHOD(__rshift__)
+MAGIC_METHOD(__and__)
+MAGIC_METHOD(__or__)
+MAGIC_METHOD(__xor__)
+/////////////////////////////
+MAGIC_METHOD(__repr__)
+MAGIC_METHOD(__str__)
+MAGIC_METHOD(__hash__)
+MAGIC_METHOD(__len__)
+MAGIC_METHOD(__iter__)
+MAGIC_METHOD(__next__)
+MAGIC_METHOD(__contains__)
+MAGIC_METHOD(__bool__)
+MAGIC_METHOD(__invert__)
+/////////////////////////////
+MAGIC_METHOD(__eq__)
+MAGIC_METHOD(__ne__)
+// indexer
+MAGIC_METHOD(__getitem__)
+MAGIC_METHOD(__setitem__)
+MAGIC_METHOD(__delitem__)
+// specials
+MAGIC_METHOD(__new__)
+MAGIC_METHOD(__init__)
+MAGIC_METHOD(__call__)
+MAGIC_METHOD(__enter__)
+MAGIC_METHOD(__exit__)
+MAGIC_METHOD(__name__)
+MAGIC_METHOD(__all__)
+MAGIC_METHOD(__package__)
+MAGIC_METHOD(__path__)
+MAGIC_METHOD(__class__)
+MAGIC_METHOD(__getattr__)
+MAGIC_METHOD(__reduce__)
+MAGIC_METHOD(__missing__)
+
+#endif
+#undef MAGIC_METHOD
+
+void pk_names_initialize() {
+#define MAGIC_METHOD(x) x = py_name(#x);
+#ifdef MAGIC_METHOD
+
+// math operators
+MAGIC_METHOD(__lt__)
+MAGIC_METHOD(__le__)
+MAGIC_METHOD(__gt__)
+MAGIC_METHOD(__ge__)
+/////////////////////////////
+MAGIC_METHOD(__neg__)
+MAGIC_METHOD(__abs__)
+MAGIC_METHOD(__round__)
+MAGIC_METHOD(__divmod__)
+/////////////////////////////
+MAGIC_METHOD(__add__)
+MAGIC_METHOD(__radd__)
+MAGIC_METHOD(__sub__)
+MAGIC_METHOD(__rsub__)
+MAGIC_METHOD(__mul__)
+MAGIC_METHOD(__rmul__)
+MAGIC_METHOD(__truediv__)
+MAGIC_METHOD(__rtruediv__)
+MAGIC_METHOD(__floordiv__)
+MAGIC_METHOD(__rfloordiv__)
+MAGIC_METHOD(__mod__)
+MAGIC_METHOD(__rmod__)
+MAGIC_METHOD(__pow__)
+MAGIC_METHOD(__rpow__)
+MAGIC_METHOD(__matmul__)
+MAGIC_METHOD(__lshift__)
+MAGIC_METHOD(__rshift__)
+MAGIC_METHOD(__and__)
+MAGIC_METHOD(__or__)
+MAGIC_METHOD(__xor__)
+/////////////////////////////
+MAGIC_METHOD(__repr__)
+MAGIC_METHOD(__str__)
+MAGIC_METHOD(__hash__)
+MAGIC_METHOD(__len__)
+MAGIC_METHOD(__iter__)
+MAGIC_METHOD(__next__)
+MAGIC_METHOD(__contains__)
+MAGIC_METHOD(__bool__)
+MAGIC_METHOD(__invert__)
+/////////////////////////////
+MAGIC_METHOD(__eq__)
+MAGIC_METHOD(__ne__)
+// indexer
+MAGIC_METHOD(__getitem__)
+MAGIC_METHOD(__setitem__)
+MAGIC_METHOD(__delitem__)
+// specials
+MAGIC_METHOD(__new__)
+MAGIC_METHOD(__init__)
+MAGIC_METHOD(__call__)
+MAGIC_METHOD(__enter__)
+MAGIC_METHOD(__exit__)
+MAGIC_METHOD(__name__)
+MAGIC_METHOD(__all__)
+MAGIC_METHOD(__package__)
+MAGIC_METHOD(__path__)
+MAGIC_METHOD(__class__)
+MAGIC_METHOD(__getattr__)
+MAGIC_METHOD(__reduce__)
+MAGIC_METHOD(__missing__)
+
+#endif
+#undef MAGIC_METHOD
+}
+
+void pk_names_finalize() {
+    for(int i = 0; i < 0x10000; i++) {
+        NameBucket* p = pk_string_table.table[i];
+        while(p) {
+            NameBucket* next = p->next;
+            PK_FREE(p);
+            p = next;
+        }
+        pk_string_table.table[i] = NULL;
+    }
+}
+
+py_Name py_namev(c11_sv name) {
+#if PK_ENABLE_THREADS
+    while(atomic_flag_test_and_set(&pk_string_table.lock)) {
+        c11_thrd_yield();
+    }
+#endif
+    uint64_t hash = c11_sv__hash(name);
+    int index = hash & 0xFFFF;
+    NameBucket* p = pk_string_table.table[index];
+    NameBucket* prev = NULL;
+    bool found = false;
+    while(p) {
+        c11_sv p_sv = {p->data, p->size};
+        if(p->hash == hash && c11__sveq(p_sv, name)) {
+            found = true;
+            break;
+        }
+        prev = p;
+        p = p->next;
+    }
+    if(found) {
+#if PK_ENABLE_THREADS
+        atomic_flag_clear(&pk_string_table.lock);
+#endif
+        return (py_Name)p;
+    }
+
+    // generate new index
+    NameBucket* bucket = PK_MALLOC(sizeof(NameBucket) + name.size + 1);
+    bucket->next = NULL;
+    bucket->hash = hash;
+    bucket->size = name.size;
+    memcpy(bucket->data, name.data, name.size);
+    bucket->data[name.size] = '\0';
+    if(prev == NULL) {
+        pk_string_table.table[index] = bucket;
+    } else {
+        assert(prev->next == NULL);
+        prev->next = bucket;
+    }
+#if PK_ENABLE_THREADS
+    atomic_flag_clear(&pk_string_table.lock);
+#endif
+    return (py_Name)bucket;
+}
+
+c11_sv py_name2sv(py_Name index) {
+    NameBucket* p = (NameBucket*)index;
+    return (c11_sv){p->data, p->size};
+}
+
+py_Name py_name(const char* name) {
+    c11_sv sv;
+    sv.data = name;
+    sv.size = strlen(name);
+    return py_namev(sv);
+}
+
+const char* py_name2str(py_Name index) {
+    NameBucket* p = (NameBucket*)index;
+    return p->data;
+}
+
+#endif
 // src/common/sourcedata.c
 #include <ctype.h>
-#include <stdlib.h>
 #include <string.h>
 
 static void SourceData__ctor(struct SourceData* self,
@@ -6798,6 +8868,16 @@ static void SourceData__ctor(struct SourceData* self,
         source++;
     }
     self->source = c11_sbuf__submit(&ss);
+    // remove trailing newline
+    int last_index = self->source->size - 1;
+    while(last_index >= 0 && isspace((unsigned char)self->source->data[last_index])) {
+        last_index--;
+    }
+    if(last_index >= 0) {
+        self->source->size = last_index + 1;
+        self->source->data[last_index + 1] = '\0';
+    }
+
     self->is_dynamic = is_dynamic;
     c11_vector__push(const char*, &self->line_starts, self->source->data);
 }
@@ -6870,43 +8950,165 @@ void SourceData__snapshot(const struct SourceData* self,
     if(!st) { c11_sbuf__write_cstr(ss, "    <?>"); }
 }
 
+// src/common/chunkedvector.c
+#include <assert.h>
+
+#if defined(_MSC_VER)
+#include <intrin.h>
+#endif
+
+PK_INLINE static int c11__bit_length(unsigned long x) {
+#if(defined(__clang__) || defined(__GNUC__))
+    return x == 0 ? 0 : (int)sizeof(unsigned long) * 8 - __builtin_clzl(x);
+#elif defined(_MSC_VER)
+    static_assert(sizeof(unsigned long) <= 4, "unsigned long is greater than 4 bytes");
+    unsigned long msb;
+    if(_BitScanReverse(&msb, x)) { return (int)msb + 1; }
+    return 0;
+#else
+    const int BIT_LENGTH_TABLE[32] = {0, 1, 2, 2, 3, 3, 3, 3, 4, 4, 4, 4, 4, 4, 4, 4,
+                                      5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5};
+    int msb = 0;
+    while(x >= 32) {
+        msb += 6;
+        x >>= 6;
+    }
+    msb += BIT_LENGTH_TABLE[x];
+    return msb;
+#endif
+}
+
+void c11_chunkedvector__ctor(c11_chunkedvector* self, int elem_size, int initial_chunks) {
+    if(initial_chunks < 5) initial_chunks = 5;
+    c11_vector__ctor(&self->chunks, sizeof(c11_chunkedvector_chunk));
+    self->length = 0;
+    self->capacity = (1U << (unsigned int)initial_chunks) - 1U;
+    self->elem_size = elem_size;
+    self->initial_chunks = initial_chunks;
+    void* chunks_data = PK_MALLOC(elem_size * ((1U << (unsigned int)initial_chunks) - 1));
+    for(int i = 0; i < initial_chunks; i++) {
+        c11_chunkedvector_chunk chunk = {.length = 0,
+                                         .capacity = 1U << i,
+                                         .data = (char*)chunks_data + elem_size * ((1U << i) - 1U)};
+        c11_vector__push(c11_chunkedvector_chunk, &self->chunks, chunk);
+    }
+}
+
+void c11_chunkedvector__dtor(c11_chunkedvector* self) {
+    for(int index = self->initial_chunks; index < self->chunks.length; index++) {
+        c11_chunkedvector_chunk* chunk = c11__at(c11_chunkedvector_chunk, &self->chunks, index);
+        PK_FREE(chunk->data);
+    }
+    c11_chunkedvector_chunk* initial_chunk = c11__at(c11_chunkedvector_chunk, &self->chunks, 0);
+    PK_FREE(initial_chunk->data);
+    c11_vector__dtor(&self->chunks);
+}
+
+void* c11_chunkedvector__emplace(c11_chunkedvector* self) {
+    if(self->length == self->capacity) {
+#ifndef NDEBUG
+        c11_chunkedvector_chunk last_chunk =
+            c11_vector__back(c11_chunkedvector_chunk, &self->chunks);
+        assert(last_chunk.capacity == last_chunk.length);
+#endif
+        c11_chunkedvector_chunk chunk = {
+            .length = 0,
+            .capacity = 1U << (unsigned int)self->chunks.length,
+            .data = PK_MALLOC(self->elem_size * ((1U << (unsigned int)self->chunks.length)))};
+        self->capacity += chunk.capacity;
+        c11_vector__push(c11_chunkedvector_chunk, &self->chunks, chunk);
+    }
+#if 1
+    int last_chunk_index = c11__bit_length(self->length + 1) - 1;
+    c11_chunkedvector_chunk* last_chunk =
+        c11__at(c11_chunkedvector_chunk, &self->chunks, last_chunk_index);
+#else
+    // This is not correct, because there is some pre-allocated chunks
+    c11_chunkedvector_chunk* last_chunk = &c11_vector__back(c11_chunkedvector_chunk, &self->chunks);
+#endif
+    void* p = (char*)last_chunk->data + self->elem_size * last_chunk->length;
+    last_chunk->length++;
+    self->length++;
+    return p;
+}
+
+void* c11_chunkedvector__at(c11_chunkedvector* self, int index) {
+    int chunk_index = c11__bit_length(index + 1) - 1;
+    c11_chunkedvector_chunk* chunk = c11__at(c11_chunkedvector_chunk, &self->chunks, chunk_index);
+    return (char*)chunk->data + (index + 1 - (1U << (unsigned int)chunk_index)) * self->elem_size;
+}
+
+// src/common/threads.c
+#if PK_ENABLE_THREADS
+
+#if PK_USE_PTHREADS
+
+bool c11_thrd_create(c11_thrd_t* thrd, c11_thrd_retval_t (*func)(void*), void* arg) {
+    int res = pthread_create(thrd, NULL, func, arg);
+    return res == 0;
+}
+
+void c11_thrd_yield() { sched_yield(); }
+
+#else
+
+bool c11_thrd_create(c11_thrd_t* thrd, c11_thrd_retval_t (*func)(void*), void* arg) {
+    int res = thrd_create(thrd, func, arg);
+    return res == thrd_success;
+}
+
+void c11_thrd_yield() { thrd_yield(); }
+
+#endif
+
+#endif  // PK_ENABLE_THREADS
 // src/public/values.c
-void py_newint(py_Ref out, int64_t val) {
+void py_newint(py_OutRef out, py_i64 val) {
     out->type = tp_int;
     out->is_ptr = false;
     out->_i64 = val;
 }
 
-void py_newfloat(py_Ref out, double val) {
+void py_newtrivial(py_OutRef out, py_Type type, void* data, int size) {
+    out->type = type;
+    out->is_ptr = false;
+    assert(size <= 16);
+    memcpy(&out->_chars, data, size);
+}
+
+void py_newfloat(py_OutRef out, py_f64 val) {
     out->type = tp_float;
     out->is_ptr = false;
     out->_f64 = val;
 }
 
-void py_newbool(py_Ref out, bool val) {
+void py_newbool(py_OutRef out, bool val) {
     out->type = tp_bool;
     out->is_ptr = false;
     out->_bool = val;
 }
 
-void py_newnone(py_Ref out) {
+void py_newnone(py_OutRef out) {
     out->type = tp_NoneType;
     out->is_ptr = false;
 }
 
-void py_newnotimplemented(py_Ref out) {
+void py_newnotimplemented(py_OutRef out) {
     out->type = tp_NotImplementedType;
     out->is_ptr = false;
 }
 
-void py_newellipsis(py_Ref out) {
+void py_newellipsis(py_OutRef out) {
     out->type = tp_ellipsis;
     out->is_ptr = false;
 }
 
-void py_newnil(py_Ref out) { out->type = 0; }
+void py_newnil(py_OutRef out) {
+    out->type = tp_nil;
+    out->is_ptr = false;
+}
 
-void py_newnativefunc(py_Ref out, py_CFunction f) {
+void py_newnativefunc(py_OutRef out, py_CFunction f) {
     out->type = tp_nativefunc;
     out->is_ptr = false;
     out->_cfunc = f;
@@ -6947,14 +9149,36 @@ void py_bindproperty(py_Type type, const char* name, py_CFunction getter, py_CFu
     py_setdict(py_tpobject(type), py_name(name), &tmp);
 }
 
-void py_bind(py_Ref obj, const char* sig, py_CFunction f) {
-    py_TValue tmp;
-    py_Name name = py_newfunction(&tmp, sig, f, NULL, 0);
-    py_setdict(obj, name, &tmp);
+void py_bindmagic(py_Type type, py_Name name, py_CFunction f) {
+    py_Ref tmp = py_emplacedict(py_tpobject(type), name);
+    py_newnativefunc(tmp, f);
 }
 
-py_Name
-    py_newfunction(py_Ref out, const char* sig, py_CFunction f, const char* docstring, int slots) {
+void py_bind(py_Ref obj, const char* sig, py_CFunction f) {
+    py_Ref tmp = py_pushtmp();
+    py_Name name = py_newfunction(tmp, sig, f, NULL, 0);
+    py_setdict(obj, name, tmp);
+    py_pop();
+}
+
+void py_macrobind(const char* sig, py_CFunction f) {
+    py_Ref tmp = py_pushtmp();
+    py_Name name = py_newfunction(tmp, sig, f, NULL, 0);
+    NameDict__set(&pk_current_vm->compile_time_funcs, name, tmp);
+    py_pop();
+}
+
+py_ItemRef py_macroget(py_Name name) {
+    NameDict* d = &pk_current_vm->compile_time_funcs;
+    if(d->length == 0) return NULL;
+    return NameDict__try_get(d, name);
+}
+
+py_Name py_newfunction(py_OutRef out,
+                       const char* sig,
+                       py_CFunction f,
+                       const char* docstring,
+                       int slots) {
     char buffer[256];
     snprintf(buffer, sizeof(buffer), "def %s: pass", sig);
     // fn(a, b, *c, d=1) -> None
@@ -6982,13 +9206,13 @@ py_Name
     return decl_name;
 }
 
-void py_newboundmethod(py_Ref out, py_Ref self, py_Ref func) {
+void py_newboundmethod(py_OutRef out, py_Ref self, py_Ref func) {
     py_newobject(out, tp_boundmethod, 2, 0);
     py_setslot(out, 0, self);
     py_setslot(out, 1, func);
 }
 
-void* py_newobject(py_Ref out, py_Type type, int slots, int udsize) {
+void* py_newobject(py_OutRef out, py_Type type, int slots, int udsize) {
     ManagedHeap* heap = &pk_current_vm->heap;
     PyObject* obj = ManagedHeap__gcnew(heap, type, slots, udsize);
     out->type = type;
@@ -7003,56 +9227,62 @@ void* py_newobject(py_Ref out, py_Type type, int slots, int udsize) {
 
 py_Ref py_getmodule(const char* path) {
     VM* vm = pk_current_vm;
-    return ModuleDict__try_get(&vm->modules, path);
+    return BinTree__try_get(&vm->modules, (void*)path);
 }
 
-py_Ref py_getbuiltin(py_Name name) { return py_getdict(&pk_current_vm->builtins, name); }
+py_Ref py_getbuiltin(py_Name name) { return py_getdict(pk_current_vm->builtins, name); }
 
-py_Ref py_getglobal(py_Name name) { return py_getdict(&pk_current_vm->main, name); }
+py_Ref py_getglobal(py_Name name) { return py_getdict(pk_current_vm->main, name); }
 
-void py_setglobal(py_Name name, py_Ref val) { py_setdict(&pk_current_vm->main, name, val); }
+void py_setglobal(py_Name name, py_Ref val) { py_setdict(pk_current_vm->main, name, val); }
+
+static void py_ModuleInfo__dtor(py_ModuleInfo* mi) {
+    c11_string__delete(mi->name);
+    c11_string__delete(mi->package);
+    c11_string__delete(mi->path);
+}
+
+py_Type pk_module__register() {
+    py_Type type = pk_newtype("module", tp_object, NULL, (py_Dtor)py_ModuleInfo__dtor, false, true);
+    return type;
+}
 
 py_Ref py_newmodule(const char* path) {
-    ManagedHeap* heap = &pk_current_vm->heap;
-    if(strlen(path) > PK_MAX_MODULE_PATH_LEN) c11__abort("module path too long: %s", path);
+    int path_len = strlen(path);
+    if(path_len > PK_MAX_MODULE_PATH_LEN) c11__abort("module path too long: %s", path);
+    if(path_len == 0) c11__abort("module path cannot be empty");
 
-    py_Ref r0 = py_pushtmp();
-    py_Ref r1 = py_pushtmp();
+    py_ModuleInfo* mi = py_newobject(py_retval(), tp_module, -1, sizeof(py_ModuleInfo));
 
-    *r0 = (py_TValue){
-        .type = tp_module,
-        .is_ptr = true,
-        ._obj = ManagedHeap__new(heap, tp_module, -1, 0),
-    };
-
-    int last_dot = c11_sv__rindex((c11_sv){path, strlen(path)}, '.');
+    int last_dot = c11_sv__rindex((c11_sv){path, path_len}, '.');
     if(last_dot == -1) {
-        py_newstr(r1, path);
-        py_setdict(r0, __name__, r1);
-        py_newstr(r1, "");
-        py_setdict(r0, __package__, r1);
+        mi->name = c11_string__new(path);
+        mi->package = c11_string__new("");
     } else {
         const char* start = path + last_dot + 1;
-        py_newstr(r1, start);
-        py_setdict(r0, __name__, r1);
-        py_newstrv(r1, (c11_sv){path, last_dot});
-        py_setdict(r0, __package__, r1);
+        mi->name = c11_string__new(start);
+        mi->package = c11_string__new2(path, last_dot);
     }
 
-    py_newstr(r1, path);
-    py_setdict(r0, __path__, r1);
+    mi->path = c11_string__new(path);
+    path = mi->path->data;
 
     // we do not allow override in order to avoid memory leak
     // it is because Module objects are not garbage collected
-    bool exists = ModuleDict__contains(&pk_current_vm->modules, path);
+    bool exists = BinTree__contains(&pk_current_vm->modules, (void*)path);
     if(exists) c11__abort("module '%s' already exists", path);
 
-    // convert to a weak (const char*)
-    path = py_tostr(py_getdict(r0, __path__));
-    ModuleDict__set(&pk_current_vm->modules, path, *r0);
+    BinTree__set(&pk_current_vm->modules, (void*)path, py_retval());
+    py_GlobalRef retval = py_getmodule(path);
+    mi->self = retval;
 
-    py_shrink(2);
-    return py_getmodule(path);
+    // setup __name__
+    py_newstrv(py_emplacedict(retval, __name__), c11_string__sv(mi->name));
+    // setup __package__
+    py_newstrv(py_emplacedict(retval, __package__), c11_string__sv(mi->package));
+    // setup __path__
+    py_newstrv(py_emplacedict(retval, __path__), c11_string__sv(mi->path));
+    return retval;
 }
 
 int load_module_from_dll_desktop_only(const char* path) PY_RAISE PY_RETURN;
@@ -7071,8 +9301,8 @@ int py_import(const char* path_cstr) {
         c11_sv top_filename = c11_string__sv(vm->top_frame->co->src->filename);
         int is_init = c11_sv__endswith(top_filename, (c11_sv){"__init__.py", 11});
 
-        py_Ref package = py_getdict(vm->top_frame->module, __path__);
-        c11_sv package_sv = py_tosv(package);
+        py_ModuleInfo* mi = py_touserdata(vm->top_frame->module);
+        c11_sv package_sv = c11_string__sv(mi->path);
         if(package_sv.size == 0) {
             return ImportError("attempted relative import with no known parent package");
         }
@@ -7113,11 +9343,12 @@ int py_import(const char* path_cstr) {
         return true;
     }
 
-    if(vm->callbacks.importhook) {
-        py_GlobalRef hook_mod = vm->callbacks.importhook(path_cstr);
-        if(hook_mod) {
-            py_assign(py_retval(), hook_mod);
-            return true;
+    if(vm->callbacks.lazyimport) {
+        py_GlobalRef lazymod = vm->callbacks.lazyimport(path_cstr);
+        if(lazymod) {
+            c11__rtassert(py_istype(lazymod, tp_module));
+            py_assign(py_retval(), lazymod);
+            return 1;
         }
     }
 
@@ -7158,9 +9389,12 @@ __SUCCESS:
     return ok ? 1 : -1;
 }
 
-bool py_importlib_reload(py_GlobalRef module) {
+bool py_importlib_reload(py_Ref module) {
     VM* vm = pk_current_vm;
-    c11_sv path = py_tosv(py_getdict(module, __path__));
+    py_ModuleInfo* mi = py_touserdata(module);
+    // We should ensure that the module is its original py_GlobalRef
+    module = mi->self;
+    c11_sv path = c11_string__sv(mi->path);
     c11_string* slashed_path = c11_sv__replace(path, '.', PK_PLATFORM_SEP);
     c11_string* filename = c11_string__new3("%s.py", slashed_path->data);
     char* data = vm->callbacks.importfile(filename->data);
@@ -7171,7 +9405,8 @@ bool py_importlib_reload(py_GlobalRef module) {
     }
     c11_string__delete(slashed_path);
     if(data == NULL) return ImportError("module '%v' not found", path);
-    bool ok = py_exec(data, filename->data, EXEC_MODE, module);
+    // py_cleardict(module); BUG: removing old classes will cause RELOAD_MODE to fail
+    bool ok = py_exec(data, filename->data, RELOAD_MODE, module);
     c11_string__delete(filename);
     PK_FREE(data);
     py_assign(py_retval(), module);
@@ -7198,12 +9433,12 @@ static bool builtins_input(int argc, py_Ref argv) {
         if(!py_checkstr(argv)) return false;
         prompt = py_tostr(argv);
     }
-    pk_current_vm->callbacks.print(prompt);
+    py_callbacks()->print(prompt);
 
     c11_sbuf buf;
     c11_sbuf__ctor(&buf);
     while(true) {
-        int c = pk_current_vm->callbacks.getchar();
+        int c = py_callbacks()->getchr();
         if(c == '\n' || c == '\r') break;
         if(c == EOF) break;
         c11_sbuf__write_char(&buf, c);
@@ -7321,11 +9556,15 @@ static bool builtins_round(int argc, py_Ref argv) {
 }
 
 static bool builtins_print(int argc, py_Ref argv) {
-    // print(*args, sep=' ', end='\n')
+    // print(*args, sep=' ', end='\n', flush=False)
     py_TValue* args = py_tuple_data(argv);
     int length = py_tuple_len(argv);
+    PY_CHECK_ARG_TYPE(1, tp_str);
+    PY_CHECK_ARG_TYPE(2, tp_str);
+    PY_CHECK_ARG_TYPE(3, tp_bool);
     c11_sv sep = py_tosv(py_arg(1));
     c11_sv end = py_tosv(py_arg(2));
+    bool flush = py_tobool(py_arg(3));
     c11_sbuf buf;
     c11_sbuf__ctor(&buf);
     for(int i = 0; i < length; i++) {
@@ -7338,7 +9577,8 @@ static bool builtins_print(int argc, py_Ref argv) {
     }
     c11_sbuf__write_sv(&buf, end);
     c11_string* res = c11_sbuf__submit(&buf);
-    pk_current_vm->callbacks.print(res->data);
+    py_callbacks()->print(res->data);
+    if(flush) py_callbacks()->flush();
     c11_string__delete(res);
     py_newnone(py_retval());
     return true;
@@ -7448,15 +9688,11 @@ static bool builtins_chr(int argc, py_Ref argv) {
     PY_CHECK_ARGC(1);
     PY_CHECK_ARG_TYPE(0, tp_int);
     uint32_t val = py_toint(py_arg(0));
-    if(val >= 0 && val < 128) {
-        py_assign(py_retval(), &pk_current_vm->ascii_literals[val]);
-    } else {
-        // convert to utf-8
-        char utf8[4];
-        int len = c11__u32_to_u8(val, utf8);
-        if(len == -1) return ValueError("invalid unicode code point: %d", val);
-        py_newstrv(py_retval(), (c11_sv){utf8, len});
-    }
+    // convert to utf-8
+    char utf8[4];
+    int len = c11__u32_to_u8(val, utf8);
+    if(len == -1) return ValueError("invalid unicode code point: %d", val);
+    py_newstrv(py_retval(), (c11_sv){utf8, len});
     return true;
 }
 
@@ -7469,7 +9705,7 @@ static bool builtins_ord(int argc, py_Ref argv) {
                          c11_sv__u8_length(sv));
     }
     int u8bytes = c11__u8_header(sv.data[0], true);
-    if(u8bytes == 0) { return ValueError("invalid char: %c", sv.data[0]); }
+    if(u8bytes == 0) return ValueError("invalid utf-8 char: %c", sv.data[0]);
     int value = c11__u8_value(u8bytes, sv.data);
     py_newint(py_retval(), value);
     return true;
@@ -7497,12 +9733,12 @@ static bool builtins_locals(int argc, py_Ref argv) {
     return true;
 }
 
-void py_newglobals(py_Ref out) {
+void py_newglobals(py_OutRef out) {
     py_Frame* frame = pk_current_vm->top_frame;
     py_Frame_newglobals(frame, out);
 }
 
-void py_newlocals(py_Ref out) {
+void py_newlocals(py_OutRef out) {
     py_Frame* frame = pk_current_vm->top_frame;
     py_Frame_newlocals(frame, out);
 }
@@ -7602,7 +9838,7 @@ static bool builtins_eval(int argc, py_Ref argv) {
 
 static bool
     pk_smartexec(const char* source, py_Ref module, enum py_CompileMode mode, va_list args) {
-    if(module == NULL) module = &pk_current_vm->main;
+    if(module == NULL) module = pk_current_vm->main;
     pk_mappingproxy__namedict(py_pushtmp(), module);  // globals
     py_newdict(py_pushtmp());                         // locals
     bool ok = py_compile(source, "<string>", mode, true);
@@ -7614,7 +9850,7 @@ static bool
     int max_index = -1;
     c11__foreach(Bytecode, &co->codes, bc) {
         if(bc->op == OP_LOAD_NAME) {
-            c11_sv name = py_name2sv(bc->arg);
+            c11_sv name = py_name2sv(c11__getitem(py_Name, &co->names, bc->arg));
             if(name.data[0] != '_') continue;
             int index;
             if(name.size == 1) {
@@ -7710,8 +9946,8 @@ static bool NotImplementedType__repr__(int argc, py_Ref argv) {
     return true;
 }
 
-py_TValue pk_builtins__register() {
-    py_Ref builtins = py_newmodule("builtins");
+py_GlobalRef pk_builtins__register() {
+    py_GlobalRef builtins = py_newmodule("builtins");
     py_bindfunc(builtins, "exit", builtins_exit);
     py_bindfunc(builtins, "input", builtins_input);
     py_bindfunc(builtins, "repr", builtins_repr);
@@ -7724,7 +9960,7 @@ py_TValue pk_builtins__register() {
     py_bindfunc(builtins, "divmod", builtins_divmod);
     py_bindfunc(builtins, "round", builtins_round);
 
-    py_bind(builtins, "print(*args, sep=' ', end='\\n')", builtins_print);
+    py_bind(builtins, "print(*args, sep=' ', end='\\n', flush=False)", builtins_print);
 
     py_bindfunc(builtins, "isinstance", builtins_isinstance);
     py_bindfunc(builtins, "issubclass", builtins_issubclass);
@@ -7749,25 +9985,26 @@ py_TValue pk_builtins__register() {
 
     // some patches
     py_bindmagic(tp_NoneType, __repr__, NoneType__repr__);
-    *py_tpgetmagic(tp_NoneType, __hash__) = *py_None();
+    py_setdict(py_tpobject(tp_NoneType), __hash__, py_None());
     py_bindmagic(tp_ellipsis, __repr__, ellipsis__repr__);
-    *py_tpgetmagic(tp_ellipsis, __hash__) = *py_None();
+    py_setdict(py_tpobject(tp_ellipsis), __hash__, py_None());
     py_bindmagic(tp_NotImplementedType, __repr__, NotImplementedType__repr__);
-    *py_tpgetmagic(tp_NotImplementedType, __hash__) = *py_None();
-    return *builtins;
+    py_setdict(py_tpobject(tp_NotImplementedType), __hash__, py_None());
+    return builtins;
 }
 
-void function__gc_mark(void* ud) {
+void function__gc_mark(void* ud, c11_vector* p_stack) {
     Function* func = ud;
     if(func->globals) pk__mark_value(func->globals);
     if(func->closure) {
-        NameDict* namedict = func->closure;
-        for(int i = 0; i < namedict->length; i++) {
-            NameDict_KV* kv = c11__at(NameDict_KV, namedict, i);
+        NameDict* dict = func->closure;
+        for(int i = 0; i < dict->capacity; i++) {
+            NameDict_KV* kv = &dict->items[i];
+            if(kv->key == NULL) continue;
             pk__mark_value(&kv->value);
         }
     }
-    FuncDecl__gc_mark(func->decl);
+    FuncDecl__gc_mark(func->decl, p_stack);
 }
 
 static bool function__doc__(int argc, py_Ref argv) {
@@ -7836,7 +10073,7 @@ static bool super__new__(int argc, py_Ref argv) {
             if(callable->type == tp_function) {
                 Function* func = py_touserdata(callable);
                 if(func->clazz != NULL) {
-                    class_arg = *(py_Type*)PyObject__userdata(func->clazz);
+                    class_arg = ((py_TypeInfo*)PyObject__userdata(func->clazz))->index;
                     if(frame->co->nlocals > 0) { self_arg = &frame->locals[0]; }
                 }
             }
@@ -7844,7 +10081,7 @@ static bool super__new__(int argc, py_Ref argv) {
         if(class_arg == 0 || self_arg == NULL) return RuntimeError("super(): no arguments");
         if(self_arg->type == tp_type) {
             // f(cls, ...)
-            class_arg = pk__type_info(class_arg)->base;
+            class_arg = pk_typeinfo(class_arg)->base;
             if(class_arg == 0) return RuntimeError("super(): base class is invalid");
             py_assign(py_retval(), py_tpobject(class_arg));
             return true;
@@ -7861,7 +10098,7 @@ static bool super__new__(int argc, py_Ref argv) {
         return TypeError("super() takes 0 or 2 arguments");
     }
 
-    class_arg = pk__type_info(class_arg)->base;
+    class_arg = pk_typeinfo(class_arg)->base;
     if(class_arg == 0) return RuntimeError("super(): base class is invalid");
 
     py_Type* p_class_arg = py_newobject(py_retval(), tp_super, 1, sizeof(py_Type));
@@ -7876,6 +10113,46 @@ py_Type pk_super__register() {
     return type;
 }
 
+// src/public/typecast.c
+PK_INLINE bool py_istype(py_Ref self, py_Type type) { return self->type == type; }
+
+bool py_checktype(py_Ref self, py_Type type) {
+    if(self->type == type) return true;
+    return TypeError("expected '%t', got '%t'", type, self->type);
+}
+
+bool py_checkinstance(py_Ref self, py_Type type) {
+    if(py_isinstance(self, type)) return true;
+    return TypeError("expected '%t' or its subclass, got '%t'", type, self->type);
+}
+
+bool py_isinstance(py_Ref obj, py_Type type) { return py_issubclass(obj->type, type); }
+
+bool py_issubclass(py_Type derived, py_Type base) {
+    assert(derived != 0 && base != 0);
+    py_TypeInfo* derived_ti = pk_typeinfo(derived);
+    py_TypeInfo* base_ti = pk_typeinfo(base);
+    do {
+        if(derived_ti == base_ti) return true;
+        derived_ti = derived_ti->base_ti;
+    } while(derived_ti);
+    return false;
+}
+
+py_Type py_typeof(py_Ref self) { return self->type; }
+
+py_Type py_gettype(const char* module, py_Name name) {
+    py_Ref mod;
+    if(module != NULL) {
+        mod = py_getmodule(module);
+        if(!mod) return tp_nil;
+    } else {
+        mod = pk_current_vm->builtins;
+    }
+    py_Ref object = py_getdict(mod, name);
+    if(object && py_istype(object, tp_type)) return py_totype(object);
+    return tp_nil;
+}
 // src/public/py_method.c
 /* staticmethod */
 
@@ -7956,6 +10233,16 @@ py_Type pk_boundmethod__register() {
     return type;
 }
 // src/public/py_dict.c
+typedef struct {
+    Dict* dict;  // weakref for slot 0
+    Dict dict_backup;
+    DictEntry* curr;
+    DictEntry* end;
+    int mode;  // 0: keys, 1: values, 2: items
+} DictIterator;
+
+#define Dict__step(x) ((x) < mask ? (x) + 1 : 0)
+
 static uint32_t Dict__next_cap(uint32_t cap) {
     switch(cap) {
         case 7: return 17;
@@ -8002,18 +10289,36 @@ static uint32_t Dict__next_cap(uint32_t cap) {
     }
 }
 
-
-
-typedef struct {
-    DictEntry* curr;
-    DictEntry* end;
-} DictIterator;
+static uint64_t Dict__hash_2nd(uint64_t key) {
+    // https://gist.github.com/badboy/6267743
+    key = (~key) + (key << 21);  // key = (key << 21) - key - 1
+    key = key ^ (key >> 24);
+    key = (key + (key << 3)) + (key << 8);  // key * 265
+    key = key ^ (key >> 14);
+    key = (key + (key << 2)) + (key << 4);  // key * 21
+    key = key ^ (key >> 28);
+    key = key + (key << 31);
+    return key;
+}
 
 static void Dict__ctor(Dict* self, uint32_t capacity, int entries_capacity) {
     self->length = 0;
     self->capacity = capacity;
-    self->indices = PK_MALLOC(self->capacity * sizeof(DictIndex));
-    memset(self->indices, -1, self->capacity * sizeof(DictIndex));
+
+    size_t indices_size;
+    if(self->capacity < UINT16_MAX) {
+        self->index_is_short = true;
+        indices_size = self->capacity * sizeof(uint16_t);
+        self->null_index_value = UINT16_MAX;
+    } else {
+        self->index_is_short = false;
+        indices_size = self->capacity * sizeof(uint32_t);
+        self->null_index_value = UINT32_MAX;
+    }
+
+    self->indices = PK_MALLOC(indices_size);
+    memset(self->indices, -1, indices_size);
+
     c11_vector__ctor(&self->entries, sizeof(DictEntry));
     c11_vector__reserve(&self->entries, entries_capacity);
 }
@@ -8025,70 +10330,118 @@ static void Dict__dtor(Dict* self) {
     c11_vector__dtor(&self->entries);
 }
 
-static bool Dict__try_get(Dict* self, py_TValue* key, DictEntry** out) {
-    py_i64 hash;
-    if(!py_hash(key, &hash)) return false;
-    int idx = (uint64_t)hash % self->capacity;
-    for(int i = 0; i < PK_DICT_MAX_COLLISION; i++) {
-        int idx2 = self->indices[idx]._[i];
-        if(idx2 == -1) continue;
+static uint32_t Dict__get_index(Dict* self, uint32_t index) {
+    if(self->index_is_short) {
+        uint16_t* indices = self->indices;
+        return indices[index];
+    } else {
+        uint32_t* indices = self->indices;
+        return indices[index];
+    }
+}
+
+static void Dict__swap_null_index(Dict* self, uint32_t pre_z, uint32_t z) {
+    if(self->index_is_short) {
+        uint16_t* indices = self->indices;
+        assert(indices[pre_z] == UINT16_MAX);
+        indices[pre_z] = indices[z];
+        indices[z] = UINT16_MAX;
+    } else {
+        uint32_t* indices = self->indices;
+        assert(indices[pre_z] == UINT32_MAX);
+        indices[pre_z] = indices[z];
+        indices[z] = UINT32_MAX;
+    }
+}
+
+static void Dict__set_index(Dict* self, uint32_t index, uint32_t value) {
+    if(self->index_is_short) {
+        uint16_t* indices = self->indices;
+        indices[index] = (uint16_t)value;
+    } else {
+        uint32_t* indices = self->indices;
+        indices[index] = value;
+    }
+}
+
+static bool Dict__probe(Dict* self,
+                        py_TValue* key,
+                        uint64_t* p_hash,
+                        uint32_t* p_idx,
+                        DictEntry** p_entry) {
+    py_i64 h_user;
+    if(!py_hash(key, &h_user)) return false;
+    if(py_isstr(key)) {
+        *p_hash = (uint64_t)h_user;
+    } else {
+        *p_hash = Dict__hash_2nd((uint64_t)h_user);
+    }
+    uint32_t mask = self->capacity - 1;
+    uint32_t idx = (*p_hash) % self->capacity;
+    while(true) {
+        uint32_t idx2 = Dict__get_index(self, idx);
+        if(idx2 == self->null_index_value) break;
         DictEntry* entry = c11__at(DictEntry, &self->entries, idx2);
-        if(entry->hash == (uint64_t)hash) {
+        if(entry->hash == (*p_hash)) {
             int res = py_equal(&entry->key, key);
             if(res == 1) {
-                *out = entry;
+                *p_idx = idx;
+                *p_entry = entry;
                 return true;
             }
             if(res == -1) return false;  // error
         }
+        // try next index
+        idx = Dict__step(idx);
     }
-    *out = NULL;
+    // not found
+    *p_idx = idx;
+    *p_entry = NULL;
     return true;
 }
 
+static bool Dict__try_get(Dict* self, py_TValue* key, DictEntry** out) {
+    uint64_t hash;
+    uint32_t idx;
+    return Dict__probe(self, key, &hash, &idx, out);
+}
+
 static void Dict__clear(Dict* self) {
-    memset(self->indices, -1, self->capacity * sizeof(DictIndex));
+    size_t indices_size = self->index_is_short ? self->capacity * sizeof(uint16_t)
+                                               : self->capacity * sizeof(uint32_t);
+    memset(self->indices, -1, indices_size);
     c11_vector__clear(&self->entries);
     self->length = 0;
 }
 
 static void Dict__rehash_2x(Dict* self) {
     Dict old_dict = *self;
-    uint32_t new_capacity = self->capacity;
-
-__RETRY:
-    // use next capacity
-    new_capacity = Dict__next_cap(new_capacity);
+    uint32_t new_capacity = Dict__next_cap(old_dict.capacity);
+    uint32_t mask = new_capacity - 1;
     // create a new dict with new capacity
     Dict__ctor(self, new_capacity, old_dict.entries.capacity);
     // move entries from old dict to new dict
     for(int i = 0; i < old_dict.entries.length; i++) {
         DictEntry* old_entry = c11__at(DictEntry, &old_dict.entries, i);
-        if(py_isnil(&old_entry->key)) continue;
-        int idx = old_entry->hash % new_capacity;
-        bool success = false;
-        for(int i = 0; i < PK_DICT_MAX_COLLISION; i++) {
-            int idx2 = self->indices[idx]._[i];
-            if(idx2 == -1) {
-                // insert new entry (empty slot)
+        if(py_isnil(&old_entry->key)) continue;  // skip deleted
+        uint32_t idx = old_entry->hash % new_capacity;
+        while(true) {
+            uint32_t idx2 = Dict__get_index(self, idx);
+            if(idx2 == self->null_index_value) {
                 c11_vector__push(DictEntry, &self->entries, *old_entry);
-                self->indices[idx]._[i] = self->entries.length - 1;
+                Dict__set_index(self, idx, self->entries.length - 1);
                 self->length++;
-                success = true;
                 break;
             }
-        }
-        if(!success) {
-            Dict__dtor(self);
-            goto __RETRY;
+            // try next index
+            idx = Dict__step(idx);
         }
     }
-    // done
     Dict__dtor(&old_dict);
 }
 
 static void Dict__compact_entries(Dict* self) {
-    int* mappings = PK_MALLOC(self->entries.length * sizeof(int));
+    uint32_t* mappings = PK_MALLOC(self->entries.length * sizeof(uint32_t));
 
     int n = 0;
     for(int i = 0; i < self->entries.length; i++) {
@@ -8103,98 +10456,100 @@ static void Dict__compact_entries(Dict* self) {
     }
     self->entries.length = n;
     // update indices
-    for(uint32_t i = 0; i < self->capacity; i++) {
-        for(int j = 0; j < PK_DICT_MAX_COLLISION; j++) {
-            int idx = self->indices[i]._[j];
-            if(idx == -1) continue;
-            self->indices[i]._[j] = mappings[idx];
-        }
+    for(uint32_t idx = 0; idx < self->capacity; idx++) {
+        uint32_t idx2 = Dict__get_index(self, idx);
+        if(idx2 == self->null_index_value) continue;
+        Dict__set_index(self, idx, mappings[idx2]);
     }
     PK_FREE(mappings);
 }
 
 static bool Dict__set(Dict* self, py_TValue* key, py_TValue* val) {
-    py_i64 hash;
-    if(!py_hash(key, &hash)) return false;
-    int idx = (uint64_t)hash % self->capacity;
-    int bad_hash_count = 0;
-    for(int i = 0; i < PK_DICT_MAX_COLLISION; i++) {
-        int idx2 = self->indices[idx]._[i];
-        if(idx2 == -1) {
-            // insert new entry
-            DictEntry* new_entry = c11_vector__emplace(&self->entries);
-            new_entry->hash = (uint64_t)hash;
-            new_entry->key = *key;
-            new_entry->val = *val;
-            self->indices[idx]._[i] = self->entries.length - 1;
-            self->length++;
-            return true;
-        }
+    uint64_t hash;
+    uint32_t idx;
+    DictEntry* entry;
+    if(!Dict__probe(self, key, &hash, &idx, &entry)) return false;
+    if(entry) {
         // update existing entry
-        DictEntry* entry = c11__at(DictEntry, &self->entries, idx2);
-        // check if they have the same hash
-        if(entry->hash == (uint64_t)hash) {
-            // check if they are equal
-            int res = py_equal(&entry->key, key);
-            if(res == 1) {
-                entry->val = *val;
-                return true;
-            }
-            if(res == -1) return false;  // error
-            // res == 0
-            bad_hash_count++;
-        }
+        entry->val = *val;
+        return true;
     }
-    // no empty slot found
-    if(bad_hash_count == PK_DICT_MAX_COLLISION) {
-        // all `PK_DICT_MAX_COLLISION` slots have the same hash but different keys
-        // we are unable to solve this collision via rehashing
-        return RuntimeError("dict: %d/%d/%d: maximum collision reached (hash=%i)",
-                            self->entries.length,
-                            self->entries.capacity,
-                            self->capacity,
-                            hash);
-    }
-
-    if(self->capacity >= (uint32_t)self->entries.length * 10) {
-        return RuntimeError("dict: %d/%d/%d: minimum load factor reached",
-                            self->entries.length,
-                            self->entries.capacity,
-                            self->capacity);
-    }
-    Dict__rehash_2x(self);
-    return Dict__set(self, key, val);
+    // insert new entry
+    DictEntry* new_entry = c11_vector__emplace(&self->entries);
+    new_entry->hash = hash;
+    new_entry->key = *key;
+    new_entry->val = *val;
+    Dict__set_index(self, idx, self->entries.length - 1);
+    self->length++;
+    // check if we need to rehash
+    float load_factor = (float)self->length / self->capacity;
+    if(load_factor > (self->index_is_short ? 0.3f : 0.4f)) Dict__rehash_2x(self);
+    return true;
 }
 
 /// Delete an entry from the dict.
 /// -1: error, 0: not found, 1: found and deleted
 static int Dict__pop(Dict* self, py_Ref key) {
-    py_i64 hash;
-    if(!py_hash(key, &hash)) return -1;
-    int idx = (uint64_t)hash % self->capacity;
-    for(int i = 0; i < PK_DICT_MAX_COLLISION; i++) {
-        int idx2 = self->indices[idx]._[i];
-        if(idx2 == -1) continue;
-        DictEntry* entry = c11__at(DictEntry, &self->entries, idx2);
-        if(entry->hash == (uint64_t)hash) {
-            int res = py_equal(&entry->key, key);
-            if(res == 1) {
-                *py_retval() = entry->val;
-                py_newnil(&entry->key);
-                self->indices[idx]._[i] = -1;
-                self->length--;
-                if(self->length < self->entries.length / 2) Dict__compact_entries(self);
-                return 1;
-            }
-            if(res == -1) return -1;  // error
+    // Dict__log_index(self, "before pop");
+    uint64_t hash;
+    uint32_t idx;
+    DictEntry* entry;
+    if(!Dict__probe(self, key, &hash, &idx, &entry)) return -1;
+    if(!entry) return 0;  // not found
+
+    // found the entry, delete and return it
+    py_assign(py_retval(), &entry->val);
+    Dict__set_index(self, idx, self->null_index_value);
+    py_newnil(&entry->key);
+    py_newnil(&entry->val);
+    self->length--;
+
+    /* tidy */
+    // https://github.com/OpenHFT/Chronicle-Map/blob/820573a68471509ffc1b0584454f4a67c0be1b84/src/main/java/net/openhft/chronicle/hash/impl/CompactOffHeapLinearHashTable.java#L156
+    uint32_t mask = self->capacity - 1;
+    uint32_t posToRemove = idx;
+    uint32_t posToShift = posToRemove;
+    // int probe_count = 0;
+    // int swap_count = 0;
+    while(true) {
+        posToShift = Dict__step(posToShift);
+        uint32_t idx_z = Dict__get_index(self, posToShift);
+        if(idx_z == self->null_index_value) break;
+        uint64_t hash_z = c11__at(DictEntry, &self->entries, idx_z)->hash;
+        uint32_t insertPos = (uint64_t)hash_z % self->capacity;
+        // the following condition essentially means circular permutations
+        // of three (r = posToRemove, s = posToShift, i = insertPos)
+        // positions are accepted:
+        // [...i..r...s.] or
+        // [...r..s...i.] or
+        // [...s..i...r.]
+        bool cond1 = insertPos <= posToRemove;
+        bool cond2 = posToRemove <= posToShift;
+        if((cond1 && cond2) ||
+           // chain wrapped around capacity
+           (posToShift < insertPos && (cond1 || cond2))) {
+            Dict__swap_null_index(self, posToRemove, posToShift);
+            posToRemove = posToShift;
+            // swap_count++;
         }
+        // probe_count++;
     }
-    return 0;
+    // printf("Dict__pop: probe_count=%d, swap_count=%d\n", probe_count, swap_count);
+    // compact entries if necessary
+    if(self->entries.length > 16 && (self->length < self->entries.length >> 1)) {
+        Dict__compact_entries(self);  // compact entries
+    }
+    // Dict__log_index(self, "after pop");
+    return 1;
 }
 
-static void DictIterator__ctor(DictIterator* self, Dict* dict) {
+static void DictIterator__ctor(DictIterator* self, Dict* dict, int mode) {
+    assert(mode >= 0 && mode <= 2);
+    self->dict = dict;
+    self->dict_backup = *dict;  // backup the dict
     self->curr = dict->entries.data;
     self->end = self->curr + dict->entries.length;
+    self->mode = mode;
 }
 
 static DictEntry* DictIterator__next(DictIterator* self) {
@@ -8206,18 +10561,22 @@ static DictEntry* DictIterator__next(DictIterator* self) {
     return retval;
 }
 
+static bool DictIterator__modified(DictIterator* self) {
+    return memcmp(self->dict, &self->dict_backup, sizeof(Dict)) != 0;
+}
+
 ///////////////////////////////
 static bool dict__new__(int argc, py_Ref argv) {
     py_Type cls = py_totype(argv);
     int slots = cls == tp_dict ? 0 : -1;
     Dict* ud = py_newobject(py_retval(), cls, slots, sizeof(Dict));
-    Dict__ctor(ud, 7, 8);
+    Dict__ctor(ud, 17, 4);
     return true;
 }
 
-void py_newdict(py_Ref out) {
+void py_newdict(py_OutRef out) {
     Dict* ud = py_newobject(out, tp_dict, 0, sizeof(Dict));
-    Dict__ctor(ud, 7, 8);
+    Dict__ctor(ud, 17, 4);
 }
 
 static bool dict__init__(int argc, py_Ref argv) {
@@ -8328,7 +10687,7 @@ static bool dict__eq__(int argc, py_Ref argv) {
         return true;
     }
     DictIterator iter;
-    DictIterator__ctor(&iter, self);
+    DictIterator__ctor(&iter, self, 2);
     // for each self key
     while(1) {
         DictEntry* entry = DictIterator__next(&iter);
@@ -8375,12 +10734,17 @@ static bool dict_copy(int argc, py_Ref argv) {
     PY_CHECK_ARGC(1);
     Dict* self = py_touserdata(argv);
     Dict* new_dict = py_newobject(py_retval(), tp_dict, 0, sizeof(Dict));
-    new_dict->capacity = self->capacity;
     new_dict->length = self->length;
+    new_dict->capacity = self->capacity;
+    new_dict->null_index_value = self->null_index_value;
+    new_dict->index_is_short = self->index_is_short;
+    // copy entries
     new_dict->entries = c11_vector__copy(&self->entries);
     // copy indices
-    new_dict->indices = PK_MALLOC(new_dict->capacity * sizeof(DictIndex));
-    memcpy(new_dict->indices, self->indices, new_dict->capacity * sizeof(DictIndex));
+    size_t indices_size = self->index_is_short ? self->capacity * sizeof(uint16_t)
+                                               : self->capacity * sizeof(uint32_t);
+    new_dict->indices = PK_MALLOC(indices_size);
+    memcpy(new_dict->indices, self->indices, indices_size);
     return true;
 }
 
@@ -8414,48 +10778,34 @@ static bool dict_pop(int argc, py_Ref argv) {
     py_Ref default_val = argc == 3 ? py_arg(2) : py_None();
     int res = Dict__pop(self, py_arg(1));
     if(res == -1) return false;
-    if(res == 0) { py_assign(py_retval(), default_val); }
-    return true;
-}
-
-static bool dict_items(int argc, py_Ref argv) {
-    PY_CHECK_ARGC(1);
-    Dict* self = py_touserdata(argv);
-    DictIterator* ud = py_newobject(py_retval(), tp_dict_items, 1, sizeof(DictIterator));
-    DictIterator__ctor(ud, self);
-    py_setslot(py_retval(), 0, argv);  // keep a reference to the dict
+    if(res == 0) py_assign(py_retval(), default_val);
     return true;
 }
 
 static bool dict_keys(int argc, py_Ref argv) {
     PY_CHECK_ARGC(1);
     Dict* self = py_touserdata(argv);
-    py_Ref p = py_newtuple(py_retval(), self->length);
-    DictIterator iter;
-    DictIterator__ctor(&iter, self);
-    int i = 0;
-    while(1) {
-        DictEntry* entry = DictIterator__next(&iter);
-        if(!entry) break;
-        p[i++] = entry->key;
-    }
-    assert(i == self->length);
+    DictIterator* ud = py_newobject(py_retval(), tp_dict_iterator, 1, sizeof(DictIterator));
+    DictIterator__ctor(ud, self, 0);
+    py_setslot(py_retval(), 0, argv);  // keep a reference to the dict
     return true;
 }
 
 static bool dict_values(int argc, py_Ref argv) {
     PY_CHECK_ARGC(1);
     Dict* self = py_touserdata(argv);
-    py_Ref p = py_newtuple(py_retval(), self->length);
-    DictIterator iter;
-    DictIterator__ctor(&iter, self);
-    int i = 0;
-    while(1) {
-        DictEntry* entry = DictIterator__next(&iter);
-        if(!entry) break;
-        p[i++] = entry->val;
-    }
-    assert(i == self->length);
+    DictIterator* ud = py_newobject(py_retval(), tp_dict_iterator, 1, sizeof(DictIterator));
+    DictIterator__ctor(ud, self, 1);
+    py_setslot(py_retval(), 0, argv);  // keep a reference to the dict
+    return true;
+}
+
+static bool dict_items(int argc, py_Ref argv) {
+    PY_CHECK_ARGC(1);
+    Dict* self = py_touserdata(argv);
+    DictIterator* ud = py_newobject(py_retval(), tp_dict_iterator, 1, sizeof(DictIterator));
+    DictIterator__ctor(ud, self, 2);
+    py_setslot(py_retval(), 0, argv);  // keep a reference to the dict
     return true;
 }
 
@@ -8472,36 +10822,50 @@ py_Type pk_dict__register() {
     py_bindmagic(type, __repr__, dict__repr__);
     py_bindmagic(type, __eq__, dict__eq__);
     py_bindmagic(type, __ne__, dict__ne__);
+    py_bindmagic(type, __iter__, dict_keys);
 
     py_bindmethod(type, "clear", dict_clear);
     py_bindmethod(type, "copy", dict_copy);
     py_bindmethod(type, "update", dict_update);
     py_bindmethod(type, "get", dict_get);
     py_bindmethod(type, "pop", dict_pop);
-    py_bindmethod(type, "items", dict_items);
     py_bindmethod(type, "keys", dict_keys);
     py_bindmethod(type, "values", dict_values);
+    py_bindmethod(type, "items", dict_items);
 
     py_setdict(py_tpobject(type), __hash__, py_None());
     return type;
 }
 
 //////////////////////////
-static bool dict_items__next__(int argc, py_Ref argv) {
+bool dict_items__next__(int argc, py_Ref argv) {
     PY_CHECK_ARGC(1);
     DictIterator* iter = py_touserdata(py_arg(0));
+    if(DictIterator__modified(iter)) return RuntimeError("dictionary modified during iteration");
     DictEntry* entry = (DictIterator__next(iter));
     if(entry) {
-        py_Ref p = py_newtuple(py_retval(), 2);
-        p[0] = entry->key;
-        p[1] = entry->val;
-        return true;
+        switch(iter->mode) {
+            case 0:  // keys
+                py_assign(py_retval(), &entry->key);
+                return true;
+            case 1:  // values
+                py_assign(py_retval(), &entry->val);
+                return true;
+            case 2:  // items
+            {
+                py_Ref p = py_newtuple(py_retval(), 2);
+                p[0] = entry->key;
+                p[1] = entry->val;
+                return true;
+            }
+            default: c11__unreachable();
+        }
     }
     return StopIteration();
 }
 
 py_Type pk_dict_items__register() {
-    py_Type type = pk_newtype("dict_items", tp_object, NULL, NULL, false, true);
+    py_Type type = pk_newtype("dict_iterator", tp_object, NULL, NULL, false, true);
     py_bindmagic(type, __iter__, pk_wrapper__self);
     py_bindmagic(type, __next__, dict_items__next__);
     return type;
@@ -8591,7 +10955,7 @@ bool py_dict_apply(py_Ref self, bool (*f)(py_Ref, py_Ref, void*), void* ctx) {
     return true;
 }
 
-#undef PK_DICT_MAX_COLLISION
+#undef Dict__step
 // src/public/py_range.c
 typedef struct Range {
     py_i64 start;
@@ -8657,9 +11021,9 @@ static bool range_iterator__new__(int argc, py_Ref argv) {
     return true;
 }
 
-static bool range_iterator__next__(int argc, py_Ref argv) {
+bool range_iterator__next__(int argc, py_Ref argv) {
     PY_CHECK_ARGC(1);
-    RangeIterator* ud = py_touserdata(py_arg(0));
+    RangeIterator* ud = py_touserdata(argv);
     if(ud->range.step > 0) {
         if(ud->current >= ud->range.stop) return StopIteration();
     } else {
@@ -8696,7 +11060,7 @@ bool _py_compile(CodeObject* out,
     Error* err = pk_compile(src, out);
     if(err) {
         py_exception(tp_SyntaxError, err->msg);
-        py_BaseException__stpush(&vm->curr_exception, err->src, err->lineno, NULL);
+        py_BaseException__stpush(NULL, &vm->curr_exception, err->src, err->lineno, NULL);
         PK_DECREF(src);
 
         PK_DECREF(err->src);
@@ -8723,7 +11087,7 @@ bool py_compile(const char* source,
 
 bool pk_exec(CodeObject* co, py_Ref module) {
     VM* vm = pk_current_vm;
-    if(!module) module = &vm->main;
+    if(!module) module = vm->main;
     assert(module->type == tp_module);
 
     py_StackRef sp = vm->stack.sp;
@@ -8737,7 +11101,7 @@ bool pk_exec(CodeObject* co, py_Ref module) {
 
 bool pk_execdyn(CodeObject* co, py_Ref module, py_Ref globals, py_Ref locals) {
     VM* vm = pk_current_vm;
-    if(!module) module = &vm->main;
+    if(!module) module = vm->main;
     assert(module->type == tp_module);
 
     py_StackRef sp = vm->stack.sp;
@@ -8796,6 +11160,15 @@ static bool namedict__getitem__(int argc, py_Ref argv) {
     return true;
 }
 
+static bool namedict__get(int argc, py_Ref argv) {
+    PY_CHECK_ARGC(3);
+    PY_CHECK_ARG_TYPE(1, tp_str);
+    py_Name name = py_namev(py_tosv(py_arg(1)));
+    py_Ref res = py_getdict(py_getslot(argv, 0), name);
+    py_assign(py_retval(), res ? res : py_arg(2));
+    return true;
+}
+
 static bool namedict__setitem__(int argc, py_Ref argv) {
     PY_CHECK_ARGC(3);
     PY_CHECK_ARG_TYPE(1, tp_str);
@@ -8828,29 +11201,11 @@ static bool namedict_items(int argc, py_Ref argv) {
     py_Ref object = py_getslot(argv, 0);
     NameDict* dict = PyObject__dict(object->_obj);
     py_newlist(py_retval());
-    if(object->type == tp_type) {
-        py_TypeInfo* ti = pk__type_info(py_totype(object));
-        for(int j = 0; j < PK_MAGIC_SLOTS_COMMON_LENGTH; j++) {
-            if(py_isnil(ti->magic_0 + j)) continue;
-            py_Ref slot = py_list_emplace(py_retval());
-            py_Ref p = py_newtuple(slot, 2);
-            p[0] = *py_name2ref(j + PK_MAGIC_SLOTS_UNCOMMON_LENGTH);
-            p[1] = ti->magic_0[j];
-        }
-        if(ti->magic_1) {
-            for(int j = 0; j < PK_MAGIC_SLOTS_UNCOMMON_LENGTH; j++) {
-                if(py_isnil(ti->magic_1 + j)) continue;
-                py_Ref slot = py_list_emplace(py_retval());
-                py_Ref p = py_newtuple(slot, 2);
-                p[0] = *py_name2ref(j);
-                p[1] = ti->magic_1[j];
-            }
-        }
-    }
-    for(int i = 0; i < dict->length; i++) {
+    for(int i = 0; i < dict->capacity; i++) {
+        NameDict_KV* kv = &dict->items[i];
+        if(kv->key == NULL) continue;
         py_Ref slot = py_list_emplace(py_retval());
         py_Ref p = py_newtuple(slot, 2);
-        NameDict_KV* kv = c11__at(NameDict_KV, dict, i);
         p[0] = *py_name2ref(kv->key);
         p[1] = kv->value;
     }
@@ -8873,19 +11228,20 @@ py_Type pk_namedict__register() {
     py_bindmagic(type, __setitem__, namedict__setitem__);
     py_bindmagic(type, __delitem__, namedict__delitem__);
     py_bindmagic(type, __contains__, namedict__contains__);
-    py_newnone(py_tpgetmagic(type, __hash__));
+    py_setdict(py_tpobject(type), __hash__, py_None());
     py_bindmethod(type, "items", namedict_items);
     py_bindmethod(type, "clear", namedict_clear);
+    py_bindmethod(type, "get", namedict__get);
     return type;
 }
 
 // src/public/py_list.c
-void py_newlist(py_Ref out) {
+void py_newlist(py_OutRef out) {
     List* ud = py_newobject(out, tp_list, 0, sizeof(List));
     c11_vector__ctor(ud, sizeof(py_TValue));
 }
 
-void py_newlistn(py_Ref out, int n) {
+void py_newlistn(py_OutRef out, int n) {
     py_newlist(out);
     List* ud = py_touserdata(out);
     c11_vector__reserve(ud, n);
@@ -9269,7 +11625,11 @@ static bool list_sort(int argc, py_Ref argv) {
 
 static bool list__iter__(int argc, py_Ref argv) {
     PY_CHECK_ARGC(1);
-    return pk_arrayiter(argv);
+    list_iterator* ud = py_newobject(py_retval(), tp_list_iterator, 1, sizeof(list_iterator));
+    ud->vec = py_touserdata(argv);
+    ud->index = 0;
+    py_setslot(py_retval(), 0, argv);  // keep a reference to the object
+    return true;
 }
 
 static bool list__contains__(int argc, py_Ref argv) {
@@ -9319,6 +11679,8 @@ int64_t py_toint(py_Ref self) {
     return self->_i64;
 }
 
+void* py_totrivial(py_Ref self) { return &self->_chars; }
+
 double py_tofloat(py_Ref self) {
     assert(self->type == tp_float);
     return self->_f64;
@@ -9355,8 +11717,8 @@ bool py_tobool(py_Ref self) {
 
 py_Type py_totype(py_Ref self) {
     assert(self->type == tp_type);
-    py_Type* ud = py_touserdata(self);
-    return *ud;
+    py_TypeInfo* ud = py_touserdata(self);
+    return ud->index;
 }
 
 void* py_touserdata(py_Ref self) {
@@ -9364,43 +11726,6 @@ void* py_touserdata(py_Ref self) {
     return PyObject__userdata(self->_obj);
 }
 
-bool py_istype(py_Ref self, py_Type type) { return self->type == type; }
-
-bool py_checktype(py_Ref self, py_Type type) {
-    if(self->type == type) return true;
-    return TypeError("expected '%t', got '%t'", type, self->type);
-}
-
-bool py_checkinstance(py_Ref self, py_Type type) {
-    if(py_isinstance(self, type)) return true;
-    return TypeError("expected '%t' or its subclass, got '%t'", type, self->type);
-}
-
-bool py_isinstance(py_Ref obj, py_Type type) { return py_issubclass(obj->type, type); }
-
-bool py_issubclass(py_Type derived, py_Type base) {
-    TypeList* types = &pk_current_vm->types;
-    do {
-        if(derived == base) return true;
-        derived = TypeList__get(types, derived)->base;
-    } while(derived);
-    return false;
-}
-
-py_Type py_typeof(py_Ref self) { return self->type; }
-
-py_Type py_gettype(const char* module, py_Name name) {
-    py_Ref mod;
-    if(module != NULL) {
-        mod = py_getmodule(module);
-        if(!mod) return 0;
-    } else {
-        mod = &pk_current_vm->builtins;
-    }
-    py_Ref object = py_getdict(mod, name);
-    if(object && py_istype(object, tp_type)) return py_totype(object);
-    return 0;
-}
 // src/public/py_property.c
 static bool property__new__(int argc, py_Ref argv) {
     py_newobject(py_retval(), tp_property, 2, 0);
@@ -9449,7 +11774,7 @@ py_Type pk_property__register() {
 }
 
 // src/public/py_slice.c
-void py_newslice(py_Ref out) {
+void py_newslice(py_OutRef out) {
     VM* vm = pk_current_vm;
     PyObject* obj = ManagedHeap__gcnew(&vm->heap, tp_slice, 3, 0);
     out->type = tp_slice;
@@ -9556,25 +11881,14 @@ py_Ref py_getreg(int i) { return pk_current_vm->reg + i; }
 
 void py_setreg(int i, py_Ref val) { pk_current_vm->reg[i] = *val; }
 
-py_Ref py_getdict(py_Ref self, py_Name name) {
+PK_INLINE py_Ref py_getdict(py_Ref self, py_Name name) {
     assert(self && self->is_ptr);
-    if(!py_ismagicname(name) || self->type != tp_type) {
-        return NameDict__try_get(PyObject__dict(self->_obj), name);
-    } else {
-        py_Type* ud = py_touserdata(self);
-        py_Ref slot = py_tpgetmagic(*ud, name);
-        return py_isnil(slot) ? NULL : slot;
-    }
+    return NameDict__try_get(PyObject__dict(self->_obj), name);
 }
 
-void py_setdict(py_Ref self, py_Name name, py_Ref val) {
+PK_INLINE void py_setdict(py_Ref self, py_Name name, py_Ref val) {
     assert(self && self->is_ptr);
-    if(!py_ismagicname(name) || self->type != tp_type) {
-        NameDict__set(PyObject__dict(self->_obj), name, *val);
-    } else {
-        py_Type* ud = py_touserdata(self);
-        *py_tpgetmagic(*ud, name) = *val;
-    }
+    NameDict__set(PyObject__dict(self->_obj), name, val);
 }
 
 py_ItemRef py_emplacedict(py_Ref self, py_Name name) {
@@ -9585,23 +11899,24 @@ py_ItemRef py_emplacedict(py_Ref self, py_Name name) {
 bool py_applydict(py_Ref self, bool (*f)(py_Name, py_Ref, void*), void* ctx) {
     assert(self && self->is_ptr);
     NameDict* dict = PyObject__dict(self->_obj);
-    for(int i = 0; i < dict->length; i++) {
-        NameDict_KV* kv = c11__at(NameDict_KV, dict, i);
+    for(int i = 0; i < dict->capacity; i++) {
+        NameDict_KV* kv = &dict->items[i];
+        if(kv->key == NULL) continue;
         bool ok = f(kv->key, &kv->value, ctx);
         if(!ok) return false;
     }
     return true;
 }
 
+void py_cleardict(py_Ref self) {
+    assert(self && self->is_ptr);
+    NameDict* dict = PyObject__dict(self->_obj);
+    NameDict__clear(dict);
+}
+
 bool py_deldict(py_Ref self, py_Name name) {
     assert(self && self->is_ptr);
-    if(!py_ismagicname(name) || self->type != tp_type) {
-        return NameDict__del(PyObject__dict(self->_obj), name);
-    } else {
-        py_Type* ud = py_touserdata(self);
-        py_newnil(py_tpgetmagic(*ud, name));
-        return true;
-    }
+    return NameDict__del(PyObject__dict(self->_obj), name);
 }
 
 py_Ref py_getslot(py_Ref self, int i) {
@@ -9618,7 +11933,7 @@ void py_setslot(py_Ref self, int i, py_Ref val) {
 
 py_StackRef py_inspect_currentfunction() {
     VM* vm = pk_current_vm;
-    if(vm->curr_decl_based_function) { return vm->curr_decl_based_function; }
+    if(vm->curr_decl_based_function) return vm->curr_decl_based_function;
     py_Frame* frame = vm->top_frame;
     if(!frame || frame->is_locals_special) return NULL;
     return frame->p0;
@@ -9631,8 +11946,6 @@ py_GlobalRef py_inspect_currentmodule() {
 }
 
 py_Frame* py_inspect_currentframe() { return pk_current_vm->top_frame; }
-
-void py_assign(py_Ref dst, py_Ref src) { *dst = *src; }
 
 /* Stack References */
 py_Ref py_peek(int i) {
@@ -9667,7 +11980,7 @@ void py_pushnone() {
 
 void py_pushname(py_Name name) {
     VM* vm = pk_current_vm;
-    py_newint(vm->stack.sp++, name);
+    py_newint(vm->stack.sp++, (uintptr_t)name);
 }
 
 py_Ref py_pushtmp() {
@@ -9675,26 +11988,31 @@ py_Ref py_pushtmp() {
     return vm->stack.sp++;
 }
 // src/public/internal.c
-VM* pk_current_vm;
+_Thread_local VM* pk_current_vm;
+
+static bool pk_initialized;
+static bool pk_finalized;
 
 static VM pk_default_vm;
 static VM* pk_all_vm[16];
 static py_TValue _True, _False, _None, _NIL;
 
 void py_initialize() {
-    if(pk_current_vm) {
+    c11__rtassert(!pk_finalized);
+
+    if(pk_initialized) {
         // c11__abort("py_initialize() can only be called once!");
         return;
     }
+
+    pk_names_initialize();
 
     // check endianness
     int x = 1;
     bool is_little_endian = *(char*)&x == 1;
     if(!is_little_endian) c11__abort("is_little_endian != true");
 
-    // check py_TValue; 16 bytes to make py_arg() macro work
-    static_assert(sizeof(py_CFunction) <= 8, "sizeof(py_CFunction) > 8");
-    static_assert(sizeof(py_TValue) == 16, "sizeof(py_TValue) != 16");
+    static_assert(sizeof(py_TValue) == 24, "sizeof(py_TValue) != 24");
     static_assert(offsetof(py_TValue, extra) == 4, "offsetof(py_TValue, extra) != 4");
 
     pk_current_vm = pk_all_vm[0] = &pk_default_vm;
@@ -9705,7 +12023,15 @@ void py_initialize() {
     py_newnone(&_None);
     py_newnil(&_NIL);
     VM__ctor(&pk_default_vm);
+
+    pk_initialized = true;
 }
+
+void* py_malloc(size_t size) { return PK_MALLOC(size); }
+
+void* py_realloc(void* ptr, size_t size) { return PK_REALLOC(ptr, size); }
+
+void py_free(void* ptr) { PK_FREE(ptr); }
 
 py_GlobalRef py_True() { return &_True; }
 
@@ -9716,6 +12042,9 @@ py_GlobalRef py_None() { return &_None; }
 py_GlobalRef py_NIL() { return &_NIL; }
 
 void py_finalize() {
+    if(pk_finalized) c11__abort("py_finalize() can only be called once!");
+    pk_finalized = true;
+
     for(int i = 1; i < 16; i++) {
         VM* vm = pk_all_vm[i];
         if(vm) {
@@ -9729,6 +12058,8 @@ void py_finalize() {
     pk_current_vm = &pk_default_vm;
     VM__dtor(&pk_default_vm);
     pk_current_vm = NULL;
+
+    pk_names_finalize();
 }
 
 void py_switchvm(int index) {
@@ -9747,6 +12078,14 @@ void py_resetvm() {
     VM__dtor(vm);
     memset(vm, 0, sizeof(VM));
     VM__ctor(vm);
+}
+
+void py_resetallvm() {
+    for(int i = 0; i < 16; i++) {
+        py_switchvm(i);
+        py_resetvm();
+    }
+    py_switchvm(0);
 }
 
 int py_currentvm() {
@@ -9827,11 +12166,30 @@ OPCODE(BUILD_SET)
 OPCODE(BUILD_SLICE)
 OPCODE(BUILD_STRING)
 /**************************/
-OPCODE(BINARY_OP)
+OPCODE(BINARY_ADD)
+OPCODE(BINARY_SUB)
+OPCODE(BINARY_MUL)
+OPCODE(BINARY_TRUEDIV)
+OPCODE(BINARY_FLOORDIV)
+OPCODE(BINARY_MOD)
+OPCODE(BINARY_POW)
+OPCODE(BINARY_LSHIFT)
+OPCODE(BINARY_RSHIFT)
+OPCODE(BINARY_AND)
+OPCODE(BINARY_OR)
+OPCODE(BINARY_XOR)
+OPCODE(BINARY_MATMUL)
+OPCODE(COMPARE_LT)
+OPCODE(COMPARE_LE)
+OPCODE(COMPARE_EQ)
+OPCODE(COMPARE_NE)
+OPCODE(COMPARE_GT)
+OPCODE(COMPARE_GE)
 OPCODE(IS_OP)
 OPCODE(CONTAINS_OP)
 /**************************/
 OPCODE(JUMP_FORWARD)
+OPCODE(POP_JUMP_IF_NOT_MATCH)
 OPCODE(POP_JUMP_IF_FALSE)
 OPCODE(POP_JUMP_IF_TRUE)
 OPCODE(JUMP_IF_TRUE_OR_POP)
@@ -9938,7 +12296,7 @@ bool py_vectorcall(uint16_t argc, uint16_t kwargc) {
     return VM__vectorcall(pk_current_vm, argc, kwargc, false) != RES_ERROR;
 }
 
-py_Ref py_retval() { return &pk_current_vm->last_retval; }
+PK_INLINE py_Ref py_retval() { return &pk_current_vm->last_retval; }
 
 bool py_pushmethod(py_Name name) {
     bool ok = pk_loadmethod(py_peek(-1), name);
@@ -9983,7 +12341,21 @@ bool pk_loadmethod(py_StackRef self, py_Name name) {
         self_bak = *self;
     }
 
-    py_Ref cls_var = py_tpfindname(type, name);
+    py_TypeInfo* ti = pk_typeinfo(type);
+
+    if(ti->getunboundmethod) {
+        bool ok = ti->getunboundmethod(self, name);
+        if(ok) {
+            assert(py_retval()->type == tp_nativefunc || py_retval()->type == tp_function);
+            self[0] = *py_retval();
+            self[1] = self_bak;
+            return true;
+        } else {
+            return false;
+        }
+    }
+
+    py_Ref cls_var = pk_tpfindname(ti, name);
     if(cls_var != NULL) {
         switch(cls_var->type) {
             case tp_function:
@@ -9998,7 +12370,7 @@ bool pk_loadmethod(py_StackRef self, py_Name name) {
                 break;
             case tp_classmethod:
                 self[0] = *py_getslot(cls_var, 0);
-                self[1] = pk__type_info(type)->self;
+                self[1] = ti->self;
                 break;
             default: c11__unreachable();
         }
@@ -10007,52 +12379,13 @@ bool pk_loadmethod(py_StackRef self, py_Name name) {
     return false;
 }
 
-py_Ref py_tpfindmagic(py_Type t, py_Name name) {
-    assert(py_ismagicname(name));
-    py_TypeInfo* ti = pk__type_info(t);
-    do {
-        py_Ref f = TypeList__magic_readonly(ti, name);
-        assert(f != NULL);
-        if(!py_isnil(f)) return f;
-        ti = ti->base_ti;
-    } while(ti);
-    return NULL;
-}
-
-py_Ref py_tpfindname(py_Type t, py_Name name) {
-    py_TypeInfo* ti = pk__type_info(t);
-    do {
-        py_Ref res = py_getdict(&ti->self, name);
-        if(res) return res;
-        ti = ti->base_ti;
-    } while(ti);
-    return NULL;
-}
-
-py_Ref py_tpgetmagic(py_Type type, py_Name name) {
-    assert(py_ismagicname(name));
-    py_TypeInfo* ti = pk__type_info(type);
-    return TypeList__magic(ti, name);
-}
-
-py_Ref py_tpobject(py_Type type) {
-    assert(type);
-    return &pk__type_info(type)->self;
-}
-
-const char* py_tpname(py_Type type) {
-    if(!type) return "nil";
-    py_Name name = pk__type_info(type)->name;
-    return py_name2str(name);
-}
-
 bool py_tpcall(py_Type type, int argc, py_Ref argv) {
     return py_call(py_tpobject(type), argc, argv);
 }
 
 bool pk_callmagic(py_Name name, int argc, py_Ref argv) {
     assert(argc >= 1);
-    assert(py_ismagicname(name));
+    // assert(py_ismagicname(name));
     py_Ref tmp = py_tpfindmagic(argv->type, name);
     if(!tmp) return AttributeError(argv, name);
     return py_call(tmp, argc, argv);
@@ -10065,7 +12398,7 @@ bool StopIteration() {
 }
 
 // src/public/py_tuple.c
-py_ObjectRef py_newtuple(py_Ref out, int n) {
+py_ObjectRef py_newtuple(py_OutRef out, int n) {
     VM* vm = pk_current_vm;
     PyObject* obj = ManagedHeap__gcnew(&vm->heap, tp_tuple, n, 0);
     out->type = tp_tuple;
@@ -10204,7 +12537,12 @@ static bool tuple__lt__(int argc, py_Ref argv) {
 
 static bool tuple__iter__(int argc, py_Ref argv) {
     PY_CHECK_ARGC(1);
-    return pk_arrayiter(argv);
+    tuple_iterator* ud = py_newobject(py_retval(), tp_tuple_iterator, 1, sizeof(tuple_iterator));
+    ud->p = py_tuple_data(argv);
+    ud->length = py_tuple_len(argv);
+    ud->index = 0;
+    py_setslot(py_retval(), 0, argv);  // keep a reference to the object
+    return true;
 }
 
 static bool tuple__contains__(int argc, py_Ref argv) {
@@ -10244,12 +12582,6 @@ py_Type pk_tuple__register() {
 }
 
 // src/public/py_array.c
-typedef struct array_iterator {
-    py_TValue* p;
-    int length;
-    int index;
-} array_iterator;
-
 int pk_arrayview(py_Ref self, py_TValue** p) {
     if(self->type == tp_list) {
         *p = py_list_data(self);
@@ -10288,18 +12620,6 @@ bool pk_wrapper__arrayequal(py_Type type, int argc, py_Ref argv) {
     return true;
 }
 
-bool pk_arrayiter(py_Ref val) {
-    py_TValue* p;
-    int length = pk_arrayview(val, &p);
-    if(length == -1) return TypeError("expected list or tuple, got %t", val->type);
-    array_iterator* ud = py_newobject(py_retval(), tp_array_iterator, 1, sizeof(array_iterator));
-    ud->p = p;
-    ud->length = length;
-    ud->index = 0;
-    py_setslot(py_retval(), 0, val);  // keep a reference to the object
-    return true;
-}
-
 bool pk_arraycontains(py_Ref self, py_Ref val) {
     py_TValue* p;
     int length = pk_arrayview(self, &p);
@@ -10316,48 +12636,67 @@ bool pk_arraycontains(py_Ref self, py_Ref val) {
     return true;
 }
 
-static bool array_iterator__iter__(int argc, py_Ref argv) {
+bool list_iterator__next__(int argc, py_Ref argv) {
     PY_CHECK_ARGC(1);
-    *py_retval() = *argv;
-    return true;
-}
-
-static bool array_iterator__next__(int argc, py_Ref argv) {
-    PY_CHECK_ARGC(1);
-    array_iterator* ud = py_touserdata(argv);
-    if(ud->index < ud->length) {
-        *py_retval() = ud->p[ud->index++];
+    list_iterator* ud = py_touserdata(argv);
+    if(ud->index < ud->vec->length) {
+        py_TValue* res = c11__at(py_TValue, ud->vec, ud->index);
+        py_assign(py_retval(), res);
+        ud->index++;
         return true;
     }
     return StopIteration();
 }
 
-py_Type pk_array_iterator__register() {
-    py_Type type = pk_newtype("array_iterator", tp_object, NULL, NULL, false, true);
-    py_bindmagic(type, __iter__, array_iterator__iter__);
-    py_bindmagic(type, __next__, array_iterator__next__);
+bool tuple_iterator__next__(int argc, py_Ref argv) {
+    PY_CHECK_ARGC(1);
+    tuple_iterator* ud = py_touserdata(argv);
+    if(ud->index < ud->length) {
+        py_assign(py_retval(), ud->p + ud->index);
+        ud->index++;
+        return true;
+    }
+    return StopIteration();
+}
+
+py_Type pk_list_iterator__register() {
+    py_Type type = pk_newtype("list_iterator", tp_object, NULL, NULL, false, true);
+    py_bindmagic(type, __iter__, pk_wrapper__self);
+    py_bindmagic(type, __next__, list_iterator__next__);
+    return type;
+}
+
+py_Type pk_tuple_iterator__register() {
+    py_Type type = pk_newtype("tuple_iterator", tp_object, NULL, NULL, false, true);
+    py_bindmagic(type, __iter__, pk_wrapper__self);
+    py_bindmagic(type, __next__, tuple_iterator__next__);
     return type;
 }
 
 // src/public/py_exception.c
-typedef struct BaseExceptionFrame {
-    SourceData_ src;
-    int lineno;
-    c11_string* name;
-} BaseExceptionFrame;
-
-typedef struct BaseException {
-    c11_vector /*T=BaseExceptionFrame*/ stacktrace;
-} BaseException;
-
-void py_BaseException__stpush(py_Ref self, SourceData_ src, int lineno, const char* func_name) {
+void py_BaseException__stpush(py_Frame* frame,
+                              py_Ref self,
+                              SourceData_ src,
+                              int lineno,
+                              const char* func_name) {
     BaseException* ud = py_touserdata(self);
-    if(ud->stacktrace.length >= 7) return;
-    BaseExceptionFrame* frame = c11_vector__emplace(&ud->stacktrace);
+    int max_frame_dumps = py_debugger_isattached() ? 31 : 7;
+    if(ud->stacktrace.length >= max_frame_dumps) return;
+    BaseExceptionFrame* frame_dump = c11_vector__emplace(&ud->stacktrace);
     PK_INCREF(src);
-    frame->src = src;
-    frame->lineno = lineno;
-    frame->name = func_name ? c11_string__new(func_name) : NULL;
+    frame_dump->src = src;
+    frame_dump->lineno = lineno;
+    frame_dump->name = func_name ? c11_string__new(func_name) : NULL;
+
+    if(py_debugger_isattached()) {
+        if(frame != NULL) {
+            py_Frame_newlocals(frame, &frame_dump->locals);
+            py_Frame_newglobals(frame, &frame_dump->globals);
+        } else {
+            py_newdict(&frame_dump->locals);
+            py_newdict(&frame_dump->globals);
+        }
+    }
 }
 
 static void BaseException__dtor(void* ud) {
@@ -10371,28 +12710,33 @@ static void BaseException__dtor(void* ud) {
 
 static bool _py_BaseException__new__(int argc, py_Ref argv) {
     py_Type cls = py_totype(argv);
-    BaseException* ud = py_newobject(py_retval(), cls, 2, sizeof(BaseException));
+    BaseException* ud = py_newobject(py_retval(), cls, 0, sizeof(BaseException));
+    py_newnil(&ud->args);
+    py_newnil(&ud->inner_exc);
     c11_vector__ctor(&ud->stacktrace, sizeof(BaseExceptionFrame));
     return true;
 }
 
 static bool _py_BaseException__init__(int argc, py_Ref argv) {
+    BaseException* ud = py_touserdata(argv);
     py_newnone(py_retval());
     if(argc == 1 + 0) return true;
     if(argc == 1 + 1) {
-        py_setslot(py_arg(0), 0, py_arg(1));
+        py_assign(&ud->args, &argv[1]);
         return true;
     }
     return TypeError("__init__() takes at most 1 arguments but %d were given", argc - 1);
 }
 
 static bool _py_BaseException__repr__(int argc, py_Ref argv) {
+    PY_CHECK_ARGC(1);
+    BaseException* ud = py_touserdata(argv);
     c11_sbuf ss;
     c11_sbuf__ctor(&ss);
     pk_sprintf(&ss, "%t(", argv->type);
-    py_Ref arg = py_getslot(argv, 0);
-    if(!py_isnil(arg)) {
-        if(!py_repr(arg)) return false;
+    py_Ref args = &ud->args;
+    if(!py_isnil(args)) {
+        if(!py_repr(args)) return false;
         c11_sbuf__write_sv(&ss, py_tosv(py_retval()));
     }
     c11_sbuf__write_char(&ss, ')');
@@ -10401,14 +12745,16 @@ static bool _py_BaseException__repr__(int argc, py_Ref argv) {
 }
 
 static bool _py_BaseException__str__(int argc, py_Ref argv) {
+    PY_CHECK_ARGC(1);
+    BaseException* ud = py_touserdata(argv);
     c11_sbuf ss;
     c11_sbuf__ctor(&ss);
-    py_Ref arg = py_getslot(argv, 0);
-    if(!py_isnil(arg)) {
+    py_Ref args = &ud->args;
+    if(!py_isnil(args)) {
         if(argv->type == tp_KeyError) {
-            if(!py_repr(arg)) return false;
+            if(!py_repr(args)) return false;
         } else {
-            if(!py_str(arg)) return false;
+            if(!py_str(args)) return false;
         }
         c11_sbuf__write_sv(&ss, py_tosv(py_retval()));
     }
@@ -10417,11 +12763,12 @@ static bool _py_BaseException__str__(int argc, py_Ref argv) {
 }
 
 static bool BaseException_args(int argc, py_Ref argv) {
+    BaseException* ud = py_touserdata(argv);
     PY_CHECK_ARGC(1);
-    py_Ref arg = py_getslot(argv, 0);
-    if(!py_isnil(arg)) {
+    py_Ref args = &ud->args;
+    if(!py_isnil(args)) {
         py_Ref p = py_newtuple(py_retval(), 1);
-        p[0] = *arg;
+        p[0] = *args;
     } else {
         py_newtuple(py_retval(), 0);
     }
@@ -10429,12 +12776,13 @@ static bool BaseException_args(int argc, py_Ref argv) {
 }
 
 static bool StopIteration_value(int argc, py_Ref argv) {
+    BaseException* ud = py_touserdata(argv);
     PY_CHECK_ARGC(1);
-    py_Ref arg = py_getslot(argv, 0);
-    if(py_isnil(arg)) {
+    py_Ref args = &ud->args;
+    if(py_isnil(args)) {
         py_newnone(py_retval());
     } else {
-        py_assign(py_retval(), arg);
+        py_assign(py_retval(), args);
     }
     return true;
 }
@@ -10491,14 +12839,6 @@ void py_clearexc(py_StackRef p0) {
     if(p0) vm->stack.sp = p0;
 }
 
-void py_printexc() {
-    char* msg = py_formatexc();
-    if(!msg) return;
-    pk_current_vm->callbacks.print(msg);
-    pk_current_vm->callbacks.print("\n");
-    PK_FREE(msg);
-}
-
 static void c11_sbuf__write_exc(c11_sbuf* self, py_Ref exc) {
     if(true) { c11_sbuf__write_cstr(self, "Traceback (most recent call last):\n"); }
 
@@ -10528,6 +12868,14 @@ static void c11_sbuf__write_exc(c11_sbuf* self, py_Ref exc) {
     c11_sbuf__write_cstr(self, message);
 }
 
+void py_printexc() {
+    char* msg = py_formatexc();
+    if(!msg) return;
+    pk_current_vm->callbacks.print(msg);
+    pk_current_vm->callbacks.print("\n");
+    PK_FREE(msg);
+}
+
 char* py_formatexc() {
     VM* vm = pk_current_vm;
     if(py_isnil(&vm->curr_exception)) return NULL;
@@ -10538,7 +12886,8 @@ char* py_formatexc() {
     c11_sbuf ss;
     c11_sbuf__ctor(&ss);
 
-    py_Ref inner = py_getslot(&vm->curr_exception, 1);
+    BaseException* ud = py_touserdata(&vm->curr_exception);
+    py_Ref inner = &ud->inner_exc;
     if(py_isnil(inner)) {
         c11_sbuf__write_exc(&ss, &vm->curr_exception);
     } else {
@@ -10554,10 +12903,19 @@ char* py_formatexc() {
     memcpy(dup, res->data, res->size);
     dup[res->size] = '\0';
     c11_string__delete(res);
+
+    if(py_debugger_isattached()) py_debugger_exceptionbreakpoint(&vm->curr_exception);
     return dup;
 }
 
 bool py_exception(py_Type type, const char* fmt, ...) {
+#ifndef NDEBUG
+    if(py_checkexc(true)) {
+        const char* name = py_tpname(pk_current_vm->curr_exception.type);
+        c11__abort("py_exception(): `%s` was already set!", name);
+    }
+#endif
+
     c11_sbuf buf;
     c11_sbuf__ctor(&buf);
     va_list args;
@@ -10579,16 +12937,11 @@ bool py_raise(py_Ref exc) {
     assert(py_isinstance(exc, tp_BaseException));
     VM* vm = pk_current_vm;
     if(!py_isnil(&vm->curr_exception)) {
-        // inner exception
-        py_setslot(exc, 1, &vm->curr_exception);
+        BaseException* ud = py_touserdata(&vm->curr_exception);
+        ud->inner_exc = vm->curr_exception;
     }
     vm->curr_exception = *exc;
     vm->is_curr_exc_handled = false;
-    
-    if(vm->trace_info.func && !py_istype(exc, tp_StopIteration)) {
-        py_Frame* frame = vm->top_frame;
-        vm->trace_info.func(frame, TRACE_EVENT_EXCEPTION);
-    }
     return false;
 }
 
@@ -10666,6 +13019,7 @@ static bool int__truediv__(int argc, py_Ref argv) {
     py_i64 lhs = py_toint(&argv[0]);
     py_f64 rhs;
     if(try_castfloat(&argv[1], &rhs)) {
+        if(rhs == 0.0) return ZeroDivisionError("float division by zero");
         py_newfloat(py_retval(), lhs / rhs);
     } else {
         py_newnotimplemented(py_retval());
@@ -10678,6 +13032,7 @@ static bool float__truediv__(int argc, py_Ref argv) {
     py_f64 lhs = py_tofloat(&argv[0]);
     py_f64 rhs;
     if(try_castfloat(&argv[1], &rhs)) {
+        if(rhs == 0.0) return ZeroDivisionError("float division by zero");
         py_newfloat(py_retval(), lhs / rhs);
     } else {
         py_newnotimplemented(py_retval());
@@ -10769,6 +13124,32 @@ static bool int__mod__(int argc, py_Ref argv) {
     return true;
 }
 
+static bool float__mod__(int argc, py_Ref argv) {
+    PY_CHECK_ARGC(2);
+    py_f64 lhs = py_tofloat(&argv[0]);
+    py_f64 rhs;
+    if(try_castfloat(&argv[1], &rhs)) {
+        if(rhs == 0.0) return ZeroDivisionError("float modulo by zero");
+        py_newfloat(py_retval(), fmod(lhs, rhs));
+        return true;
+    }
+    py_newnotimplemented(py_retval());
+    return true;
+}
+
+static bool float__rmod__(int argc, py_Ref argv) {
+    PY_CHECK_ARGC(2);
+    py_f64 rhs = py_tofloat(&argv[0]);
+    py_f64 lhs;
+    if(try_castfloat(&argv[1], &lhs)) {
+        if(rhs == 0.0) return ZeroDivisionError("float modulo by zero");
+        py_newfloat(py_retval(), fmod(lhs, rhs));
+        return true;
+    }
+    py_newnotimplemented(py_retval());
+    return true;
+}
+
 static bool int__divmod__(int argc, py_Ref argv) {
     PY_CHECK_ARGC(2);
     PY_CHECK_ARG_TYPE(1, tp_int);
@@ -10839,24 +13220,6 @@ static bool float__repr__(int argc, py_Ref argv) {
     return true;
 }
 
-union c11_8bytes {
-    py_i64 _i64;
-    py_f64 _f64;
-
-    union {
-        uint32_t upper;
-        uint32_t lower;
-    } bits;
-};
-
-static py_i64 c11_8bytes__hash(union c11_8bytes u) {
-    // https://stackoverflow.com/questions/664014/what-integer-hash-function-are-good-that-accepts-an-integer-hash-key
-    const uint32_t C = 2654435761;
-    u.bits.upper *= C;
-    u.bits.lower *= C;
-    return u._i64;
-}
-
 static bool int__hash__(int argc, py_Ref argv) {
     PY_CHECK_ARGC(1);
     py_assign(py_retval(), argv);
@@ -10866,8 +13229,9 @@ static bool int__hash__(int argc, py_Ref argv) {
 static bool float__hash__(int argc, py_Ref argv) {
     PY_CHECK_ARGC(1);
     py_f64 val = py_tofloat(&argv[0]);
-    union c11_8bytes u = {._f64 = val};
-    py_newint(py_retval(), c11_8bytes__hash(u));
+    py_i64 h_user;
+    memcpy(&h_user, &val, sizeof(py_f64));
+    py_newint(py_retval(), h_user);
     return true;
 }
 
@@ -11119,6 +13483,10 @@ void pk_number__register() {
     py_bindmagic(tp_int, __mod__, int__mod__);
     py_bindmagic(tp_int, __divmod__, int__divmod__);
 
+    // fmod
+    py_bindmagic(tp_float, __mod__, float__mod__);
+    py_bindmagic(tp_float, __rmod__, float__rmod__);
+
     // int.__invert__ & int.<BITWISE OP>
     py_bindmagic(tp_int, __invert__, int__invert__);
 
@@ -11149,8 +13517,8 @@ void pk_number__register() {
 // src/public/py_object.c
 bool pk__object_new(int argc, py_Ref argv) {
     if(argc == 0) return TypeError("object.__new__(): not enough arguments");
-    py_Type cls = py_totype(py_arg(0));
-    py_TypeInfo* ti = pk__type_info(cls);
+    py_TypeInfo* ti = py_touserdata(argv);
+    py_Type cls = ti->index;
     if(!ti->is_python) {
         return TypeError("object.__new__(%t) is not safe, use %t.__new__() instead", cls, cls);
     }
@@ -11217,7 +13585,7 @@ static bool type__new__(int argc, py_Ref argv) {
 
 static bool type__base__(int argc, py_Ref argv) {
     PY_CHECK_ARGC(1);
-    py_TypeInfo* ti = pk__type_info(py_totype(argv));
+    py_TypeInfo* ti = py_touserdata(argv);
     if(ti->base) {
         py_assign(py_retval(), &ti->base_ti->self);
     } else {
@@ -11228,7 +13596,7 @@ static bool type__base__(int argc, py_Ref argv) {
 
 static bool type__name__(int argc, py_Ref argv) {
     PY_CHECK_ARGC(1);
-    py_TypeInfo* ti = pk__type_info(py_totype(argv));
+    py_TypeInfo* ti = py_touserdata(argv);
     py_assign(py_retval(), py_name2ref(ti->name));
     return true;
 }
@@ -11245,19 +13613,19 @@ static bool type__or__(int argc, py_Ref argv) {
 
 static bool type__module__(int argc, py_Ref argv) {
     PY_CHECK_ARGC(1);
-    py_TypeInfo* ti = pk__type_info(py_totype(argv));
-    if(py_isnil(&ti->module)) {
+    py_TypeInfo* ti = py_touserdata(argv);
+    if(py_isnil(ti->module)) {
         py_newnone(py_retval());
     } else {
-        py_Ref path = py_getdict(&ti->module, __path__);
-        py_assign(py_retval(), path);
+        py_ModuleInfo* mi = py_touserdata(ti->module);
+        py_newstrv(py_retval(), c11_string__sv(mi->path));
     }
     return true;
 }
 
 static bool type__annotations__(int argc, py_Ref argv) {
     PY_CHECK_ARGC(1);
-    py_TypeInfo* ti = pk__type_info(py_totype(argv));
+    py_TypeInfo* ti = py_touserdata(argv);
     if(py_isnil(&ti->annotations)) {
         py_newdict(py_retval());
     } else {
@@ -11292,6 +13660,13 @@ bool py_isidentical(py_Ref lhs, py_Ref rhs) {
         case tp_int: return lhs->_i64 == rhs->_i64;
         case tp_float: return lhs->_f64 == rhs->_f64;
         case tp_bool: return lhs->_bool == rhs->_bool;
+        case tp_str: {
+            if(lhs->is_ptr && rhs->is_ptr) {
+                return lhs->_obj == rhs->_obj;
+            } else {
+                return strcmp(lhs->_chars, rhs->_chars) == 0;
+            }
+        }
         case tp_nativefunc: return lhs->_cfunc == rhs->_cfunc;
         case tp_NoneType: return true;
         case tp_NotImplementedType: return true;
@@ -11328,13 +13703,13 @@ int py_bool(py_Ref val) {
 }
 
 bool py_hash(py_Ref val, int64_t* out) {
-    py_TypeInfo* ti = pk__type_info(val->type);
+    py_TypeInfo* ti = pk_typeinfo(val->type);
     do {
-        py_Ref slot_hash = TypeList__magic_common(ti, __hash__);
-        if(py_isnone(slot_hash)) break;
-        py_Ref slot_eq = TypeList__magic_common(ti, __eq__);
-        if(!py_isnil(slot_eq)) {
-            if(py_isnil(slot_hash)) break;
+        py_Ref slot_hash = py_getdict(&ti->self, __hash__);
+        if(slot_hash && py_isnone(slot_hash)) break;
+        py_Ref slot_eq = py_getdict(&ti->self, __eq__);
+        if(slot_eq) {
+            if(!slot_hash) break;
             if(!py_call(slot_hash, 1, val)) return false;
             if(!py_checkint(py_retval())) return false;
             *out = py_toint(py_retval());
@@ -11353,12 +13728,39 @@ bool py_iter(py_Ref val) {
 
 int py_next(py_Ref val) {
     VM* vm = pk_current_vm;
-    py_Ref tmp = py_tpfindmagic(val->type, __next__);
-    if(!tmp) {
-        TypeError("'%t' object is not an iterator", val->type);
-        return -1;
+
+    switch(val->type) {
+        case tp_generator:
+            if(generator__next__(1, val)) return 1;
+            break;
+        case tp_array2d_like_iterator:
+            if(array2d_like_iterator__next__(1, val)) return 1;
+            break;
+        case tp_list_iterator:
+            if(list_iterator__next__(1, val)) return 1;
+            break;
+        case tp_tuple_iterator:
+            if(tuple_iterator__next__(1, val)) return 1;
+            break;
+        case tp_dict_iterator:
+            if(dict_items__next__(1, val)) return 1;
+            break;
+        case tp_range_iterator:
+            if(range_iterator__next__(1, val)) return 1;
+            break;
+        case tp_str_iterator:
+            if(str_iterator__next__(1, val)) return 1;
+            break;
+        default: {
+            py_Ref tmp = py_tpfindmagic(val->type, __next__);
+            if(!tmp) {
+                TypeError("'%t' object is not an iterator", val->type);
+                return -1;
+            }
+            if(py_call(tmp, 1, val)) return 1;
+            break;
+        }
     }
-    if(py_call(tmp, 1, val)) return 1;
     if(vm->curr_exception.type == tp_StopIteration) {
         vm->last_retval = vm->curr_exception;
         py_clearexc(NULL);
@@ -11369,8 +13771,10 @@ int py_next(py_Ref val) {
 
 bool py_getattr(py_Ref self, py_Name name) {
     // https://docs.python.org/3/howto/descriptor.html#invocation-from-an-instance
-    py_Type type = self->type;
-    py_Ref cls_var = py_tpfindname(type, name);
+    py_TypeInfo* ti = pk_typeinfo(self->type);
+    if(ti->getattribute) return ti->getattribute(self, name);
+
+    py_Ref cls_var = pk_tpfindname(ti, name);
     if(cls_var) {
         // handle descriptor
         if(py_istype(cls_var, tp_property)) {
@@ -11387,8 +13791,9 @@ bool py_getattr(py_Ref self, py_Name name) {
                 return true;
             }
         } else {
-            py_Type* inner_type = py_touserdata(self);
-            py_Ref res = py_tpfindname(*inner_type, name);
+            // self is a type object
+            py_TypeInfo* inner_type = py_touserdata(self);
+            py_Ref res = pk_tpfindname(inner_type, name);
             if(res) {
                 if(py_istype(res, tp_staticmethod)) {
                     res = py_getslot(res, 0);
@@ -11421,7 +13826,7 @@ bool py_getattr(py_Ref self, py_Name name) {
                 return true;
             }
             case tp_classmethod: {
-                py_newboundmethod(py_retval(), py_tpobject(type), py_getslot(cls_var, 0));
+                py_newboundmethod(py_retval(), &ti->self, py_getslot(cls_var, 0));
                 return true;
             }
             default: {
@@ -11432,7 +13837,7 @@ bool py_getattr(py_Ref self, py_Name name) {
         }
     }
 
-    py_Ref fallback = py_tpfindmagic(type, __getattr__);
+    py_Ref fallback = pk_tpfindmagic(ti, __getattr__);
     if(fallback) {
         py_push(fallback);
         py_push(self);
@@ -11441,10 +13846,10 @@ bool py_getattr(py_Ref self, py_Name name) {
     }
 
     if(self->type == tp_module) {
-        py_Ref path = py_getdict(self, __path__);
+        py_ModuleInfo* mi = py_touserdata(self);
         c11_sbuf buf;
         c11_sbuf__ctor(&buf);
-        pk_sprintf(&buf, "%v.%n", py_tosv(path), name);
+        pk_sprintf(&buf, "%v.%n", c11_string__sv(mi->path), name);
         c11_string* new_path = c11_sbuf__submit(&buf);
         int res = py_import(new_path->data);
         c11_string__delete(new_path);
@@ -11459,8 +13864,10 @@ bool py_getattr(py_Ref self, py_Name name) {
 }
 
 bool py_setattr(py_Ref self, py_Name name, py_Ref val) {
-    py_Type type = self->type;
-    py_Ref cls_var = py_tpfindname(type, name);
+    py_TypeInfo* ti = pk_typeinfo(self->type);
+    if(ti->setattribute) return ti->setattribute(self, name, val);
+
+    py_Ref cls_var = pk_tpfindname(ti, name);
     if(cls_var) {
         // handle descriptor
         if(py_istype(cls_var, tp_property)) {
@@ -11486,6 +13893,9 @@ bool py_setattr(py_Ref self, py_Name name, py_Ref val) {
 }
 
 bool py_delattr(py_Ref self, py_Name name) {
+    py_TypeInfo* ti = pk_typeinfo(self->type);
+    if(ti->delattribute) return ti->delattribute(self, name);
+
     if(self->is_ptr && self->_obj->slots == -1) {
         if(py_deldict(self, name)) return true;
         return AttributeError(self, name);
@@ -11518,6 +13928,14 @@ bool py_delitem(py_Ref self, py_Ref key) {
     return ok;
 }
 
+void py_assign2(py_Ref dst, py_Ref src) {
+    *(dst) = *(src);
+}
+
+py_Ref py_arg2(py_Ref argv, int i) {
+    return &argv[i];
+}
+
 int py_equal(py_Ref lhs, py_Ref rhs) {
     if(py_isidentical(lhs, rhs)) return 1;
     if(!py_eq(lhs, rhs)) return -1;
@@ -11529,9 +13947,16 @@ int py_less(py_Ref lhs, py_Ref rhs) {
     return py_bool(py_retval());
 }
 // src/public/py_str.c
-void py_newstr(py_Ref out, const char* data) { py_newstrv(out, (c11_sv){data, strlen(data)}); }
+void py_newstr(py_OutRef out, const char* data) { py_newstrv(out, (c11_sv){data, strlen(data)}); }
 
-char* py_newstrn(py_Ref out, int size) {
+char* py_newstrn(py_OutRef out, int size) {
+    if(size < 16) {
+        out->type = tp_str;
+        out->is_ptr = false;
+        c11_string* ud = (c11_string*)(&out->extra);
+        c11_string__ctor3(ud, size);
+        return ud->data;
+    }
     ManagedHeap* heap = &pk_current_vm->heap;
     int total_size = sizeof(c11_string) + size + 1;
     PyObject* obj = ManagedHeap__gcnew(heap, tp_str, 0, total_size);
@@ -11544,17 +13969,6 @@ char* py_newstrn(py_Ref out, int size) {
 }
 
 void py_newstrv(py_OutRef out, c11_sv sv) {
-    if(sv.size == 0) {
-        *out = pk_current_vm->ascii_literals[128];
-        return;
-    }
-    if(sv.size == 1) {
-        int c = sv.data[0];
-        if(c >= 0 && c < 128) {
-            *out = pk_current_vm->ascii_literals[c];
-            return;
-        }
-    }
     char* data = py_newstrn(out, sv.size);
     memcpy(data, sv.data, sv.size);
 }
@@ -11569,7 +13983,7 @@ void py_newfstr(py_OutRef out, const char* fmt, ...) {
     c11_sbuf__py_submit(&buf, out);
 }
 
-unsigned char* py_newbytes(py_Ref out, int size) {
+unsigned char* py_newbytes(py_OutRef out, int size) {
     ManagedHeap* heap = &pk_current_vm->heap;
     // 4 bytes size + data
     PyObject* obj = ManagedHeap__gcnew(heap, tp_bytes, 0, sizeof(c11_bytes) + size);
@@ -11581,22 +13995,25 @@ unsigned char* py_newbytes(py_Ref out, int size) {
     return ud->data;
 }
 
-const char* py_tostr(py_Ref self) {
+c11_string* pk_tostr(py_Ref self) {
     assert(self->type == tp_str);
-    c11_string* ud = PyObject__userdata(self->_obj);
-    return ud->data;
+    if(!self->is_ptr) {
+        return (c11_string*)(&self->extra);
+    } else {
+        return PyObject__userdata(self->_obj);
+    }
 }
 
+const char* py_tostr(py_Ref self) { return pk_tostr(self)->data; }
+
 const char* py_tostrn(py_Ref self, int* size) {
-    assert(self->type == tp_str);
-    c11_string* ud = PyObject__userdata(self->_obj);
+    c11_string* ud = pk_tostr(self);
     *size = ud->size;
     return ud->data;
 }
 
 c11_sv py_tosv(py_Ref self) {
-    assert(self->type == tp_str);
-    c11_string* ud = PyObject__userdata(self->_obj);
+    c11_string* ud = pk_tostr(self);
     return c11_string__sv(ud);
 }
 
@@ -11627,44 +14044,35 @@ static bool str__new__(int argc, py_Ref argv) {
 
 static bool str__hash__(int argc, py_Ref argv) {
     PY_CHECK_ARGC(1);
-    int size;
-    const char* data = py_tostrn(&argv[0], &size);
-    uint64_t res = 0;
-    for(int i = 0; i < size; i++) {
-        res = res * 31 + data[i];
-    }
-    py_newint(py_retval(), res);
+    uint64_t res = c11_sv__hash(py_tosv(argv));
+    py_newint(py_retval(), (py_i64)res);
     return true;
 }
 
 static bool str__len__(int argc, py_Ref argv) {
     PY_CHECK_ARGC(1);
-    c11_string* self = py_touserdata(&argv[0]);
+    c11_string* self = pk_tostr(&argv[0]);
     py_newint(py_retval(), c11_sv__u8_length((c11_sv){self->data, self->size}));
     return true;
 }
 
 static bool str__add__(int argc, py_Ref argv) {
     PY_CHECK_ARGC(2);
-    c11_string* self = py_touserdata(&argv[0]);
+    c11_string* self = pk_tostr(&argv[0]);
     if(py_arg(1)->type != tp_str) {
         py_newnotimplemented(py_retval());
     } else {
-        c11_string* other = py_touserdata(&argv[1]);
-        int total_size = sizeof(c11_string) + self->size + other->size + 1;
-        c11_string* res = py_newobject(py_retval(), tp_str, 0, total_size);
-        res->size = self->size + other->size;
-        char* p = res->data;
+        c11_string* other = pk_tostr(&argv[1]);
+        char* p = py_newstrn(py_retval(), self->size + other->size);
         memcpy(p, self->data, self->size);
         memcpy(p + self->size, other->data, other->size);
-        p[res->size] = '\0';
     }
     return true;
 }
 
 static bool str__mul__(int argc, py_Ref argv) {
     PY_CHECK_ARGC(2);
-    c11_string* self = py_touserdata(&argv[0]);
+    c11_string* self = pk_tostr(&argv[0]);
     if(py_arg(1)->type != tp_int) {
         py_newnotimplemented(py_retval());
     } else {
@@ -11672,14 +14080,10 @@ static bool str__mul__(int argc, py_Ref argv) {
         if(n <= 0) {
             py_newstr(py_retval(), "");
         } else {
-            int total_size = sizeof(c11_string) + self->size * n + 1;
-            c11_string* res = py_newobject(py_retval(), tp_str, 0, total_size);
-            res->size = self->size * n;
-            char* p = res->data;
+            char* p = py_newstrn(py_retval(), self->size * n);
             for(int i = 0; i < n; i++) {
                 memcpy(p + i * self->size, self->data, self->size);
             }
-            p[res->size] = '\0';
         }
     }
     return true;
@@ -11689,11 +14093,11 @@ static bool str__rmul__(int argc, py_Ref argv) { return str__mul__(argc, argv); 
 
 static bool str__contains__(int argc, py_Ref argv) {
     PY_CHECK_ARGC(2);
-    c11_string* self = py_touserdata(&argv[0]);
+    c11_string* self = pk_tostr(&argv[0]);
     if(py_arg(1)->type != tp_str) {
         py_newnotimplemented(py_retval());
     } else {
-        c11_string* other = py_touserdata(&argv[1]);
+        c11_string* other = pk_tostr(&argv[1]);
         const char* p = strstr(self->data, other->data);
         py_newbool(py_retval(), p != NULL);
     }
@@ -11725,7 +14129,7 @@ static bool str__iter__(int argc, py_Ref argv) {
 
 static bool str__getitem__(int argc, py_Ref argv) {
     PY_CHECK_ARGC(2);
-    c11_sv self = c11_string__sv(py_touserdata(&argv[0]));
+    c11_sv self = c11_string__sv(pk_tostr(&argv[0]));
     py_Ref _1 = py_arg(1);
     if(_1->type == tp_int) {
         int index = py_toint(py_arg(1));
@@ -11749,11 +14153,11 @@ static bool str__getitem__(int argc, py_Ref argv) {
 #define DEF_STR_CMP_OP(op, __f, __cond)                                                            \
     static bool str##op(int argc, py_Ref argv) {                                                   \
         PY_CHECK_ARGC(2);                                                                          \
-        c11_string* self = py_touserdata(&argv[0]);                                                \
+        c11_string* self = pk_tostr(&argv[0]);                                                     \
         if(py_arg(1)->type != tp_str) {                                                            \
             py_newnotimplemented(py_retval());                                                     \
         } else {                                                                                   \
-            c11_string* other = py_touserdata(&argv[1]);                                           \
+            c11_string* other = pk_tostr(&argv[1]);                                                \
             int res = __f(c11_string__sv(self), c11_string__sv(other));                            \
             py_newbool(py_retval(), __cond);                                                       \
         }                                                                                          \
@@ -11771,55 +14175,47 @@ DEF_STR_CMP_OP(__ge__, c11_sv__cmp, res >= 0)
 
 static bool str_lower(int argc, py_Ref argv) {
     PY_CHECK_ARGC(1);
-    c11_string* self = py_touserdata(&argv[0]);
-    int total_size = sizeof(c11_string) + self->size + 1;
-    c11_string* res = py_newobject(py_retval(), tp_str, 0, total_size);
-    res->size = self->size;
-    char* p = res->data;
+    c11_string* self = pk_tostr(&argv[0]);
+    char* p = py_newstrn(py_retval(), self->size);
     for(int i = 0; i < self->size; i++) {
         char c = self->data[i];
         p[i] = c >= 'A' && c <= 'Z' ? c + 32 : c;
     }
-    p[res->size] = '\0';
     return true;
 }
 
 static bool str_upper(int argc, py_Ref argv) {
     PY_CHECK_ARGC(1);
-    c11_string* self = py_touserdata(&argv[0]);
-    int total_size = sizeof(c11_string) + self->size + 1;
-    c11_string* res = py_newobject(py_retval(), tp_str, 0, total_size);
-    res->size = self->size;
-    char* p = res->data;
+    c11_string* self = pk_tostr(&argv[0]);
+    char* p = py_newstrn(py_retval(), self->size);
     for(int i = 0; i < self->size; i++) {
         char c = self->data[i];
         p[i] = c >= 'a' && c <= 'z' ? c - 32 : c;
     }
-    p[res->size] = '\0';
     return true;
 }
 
 static bool str_startswith(int argc, py_Ref argv) {
     PY_CHECK_ARGC(2);
-    c11_string* self = py_touserdata(&argv[0]);
+    c11_string* self = pk_tostr(&argv[0]);
     PY_CHECK_ARG_TYPE(1, tp_str);
-    c11_string* other = py_touserdata(&argv[1]);
+    c11_string* other = pk_tostr(&argv[1]);
     py_newbool(py_retval(), c11_sv__startswith(c11_string__sv(self), c11_string__sv(other)));
     return true;
 }
 
 static bool str_endswith(int argc, py_Ref argv) {
     PY_CHECK_ARGC(2);
-    c11_string* self = py_touserdata(&argv[0]);
+    c11_string* self = pk_tostr(&argv[0]);
     PY_CHECK_ARG_TYPE(1, tp_str);
-    c11_string* other = py_touserdata(&argv[1]);
+    c11_string* other = pk_tostr(&argv[1]);
     py_newbool(py_retval(), c11_sv__endswith(c11_string__sv(self), c11_string__sv(other)));
     return true;
 }
 
 static bool str_join(int argc, py_Ref argv) {
     PY_CHECK_ARGC(2);
-    c11_sv self = c11_string__sv(py_touserdata(argv));
+    c11_sv self = c11_string__sv(pk_tostr(argv));
 
     if(!py_iter(py_arg(1))) return false;
     py_push(py_retval());  // iter
@@ -11841,7 +14237,7 @@ static bool str_join(int argc, py_Ref argv) {
             c11_sbuf__dtor(&buf);
             return false;
         }
-        c11_string* item = py_touserdata(py_retval());
+        c11_string* item = pk_tostr(py_retval());
         c11_sbuf__write_cstrn(&buf, item->data, item->size);
         first = false;
     }
@@ -11853,11 +14249,11 @@ static bool str_join(int argc, py_Ref argv) {
 
 static bool str_replace(int argc, py_Ref argv) {
     PY_CHECK_ARGC(3);
-    c11_string* self = py_touserdata(&argv[0]);
+    c11_string* self = pk_tostr(&argv[0]);
     PY_CHECK_ARG_TYPE(1, tp_str);
     PY_CHECK_ARG_TYPE(2, tp_str);
-    c11_string* old = py_touserdata(&argv[1]);
-    c11_string* new_ = py_touserdata(&argv[2]);
+    c11_string* old = pk_tostr(&argv[1]);
+    c11_string* new_ = pk_tostr(&argv[2]);
     c11_string* res =
         c11_sv__replace2(c11_string__sv(self), c11_string__sv(old), c11_string__sv(new_));
     py_newstrv(py_retval(), (c11_sv){res->data, res->size});
@@ -11866,19 +14262,19 @@ static bool str_replace(int argc, py_Ref argv) {
 }
 
 static bool str_split(int argc, py_Ref argv) {
-    c11_sv self = c11_string__sv(py_touserdata(&argv[0]));
+    c11_sv self = c11_string__sv(pk_tostr(&argv[0]));
     c11_vector res;
     bool discard_empty = false;
     if(argc > 2) return TypeError("split() takes at most 2 arguments");
     if(argc == 1) {
         // sep = None
-        res = c11_sv__split(self, ' ');
+        res = c11_sv__splitwhitespace(self);
         discard_empty = true;
     }
     if(argc == 2) {
         // sep = argv[1]
         if(!py_checkstr(&argv[1])) return false;
-        c11_sv sep = c11_string__sv(py_touserdata(&argv[1]));
+        c11_sv sep = c11_string__sv(pk_tostr(&argv[1]));
         if(sep.size == 0) return ValueError("empty separator");
         res = c11_sv__split2(self, sep);
     }
@@ -11894,22 +14290,22 @@ static bool str_split(int argc, py_Ref argv) {
 
 static bool str_count(int argc, py_Ref argv) {
     PY_CHECK_ARGC(2);
-    c11_string* self = py_touserdata(&argv[0]);
+    c11_string* self = pk_tostr(&argv[0]);
     PY_CHECK_ARG_TYPE(1, tp_str);
-    c11_string* sub = py_touserdata(&argv[1]);
+    c11_string* sub = pk_tostr(&argv[1]);
     int res = c11_sv__count(c11_string__sv(self), c11_string__sv(sub));
     py_newint(py_retval(), res);
     return true;
 }
 
 static bool str__strip_impl(bool left, bool right, int argc, py_Ref argv) {
-    c11_sv self = c11_string__sv(py_touserdata(&argv[0]));
+    c11_sv self = c11_string__sv(pk_tostr(&argv[0]));
     c11_sv chars;
     if(argc == 1) {
         chars = (c11_sv){" \t\n\r", 4};
     } else if(argc == 2) {
         if(!py_checkstr(&argv[1])) return false;
-        chars = c11_string__sv(py_touserdata(&argv[1]));
+        chars = c11_string__sv(pk_tostr(&argv[1]));
     } else {
         return TypeError("strip() takes at most 2 arguments");
     }
@@ -11926,7 +14322,7 @@ static bool str_rstrip(int argc, py_Ref argv) { return str__strip_impl(false, tr
 
 static bool str_zfill(int argc, py_Ref argv) {
     PY_CHECK_ARGC(2);
-    c11_sv self = c11_string__sv(py_touserdata(&argv[0]));
+    c11_sv self = c11_string__sv(pk_tostr(&argv[0]));
     PY_CHECK_ARG_TYPE(1, tp_int);
     int width = py_toint(py_arg(1));
     int delta = width - c11_sv__u8_length(self);
@@ -11951,12 +14347,12 @@ static bool str__widthjust_impl(bool left, int argc, py_Ref argv) {
         pad = ' ';
     } else {
         if(!py_checkstr(&argv[2])) return false;
-        c11_string* padstr = py_touserdata(&argv[2]);
+        c11_string* padstr = pk_tostr(&argv[2]);
         if(padstr->size != 1)
             return TypeError("The fill character must be exactly one character long");
         pad = padstr->data[0];
     }
-    c11_sv self = c11_string__sv(py_touserdata(&argv[0]));
+    c11_sv self = c11_string__sv(pk_tostr(&argv[0]));
     PY_CHECK_ARG_TYPE(1, tp_int);
     int width = py_toint(py_arg(1));
     if(width <= self.size) {
@@ -11991,9 +14387,9 @@ static bool str_find(int argc, py_Ref argv) {
         PY_CHECK_ARG_TYPE(2, tp_int);
         start = py_toint(py_arg(2));
     }
-    c11_string* self = py_touserdata(&argv[0]);
+    c11_string* self = pk_tostr(&argv[0]);
     PY_CHECK_ARG_TYPE(1, tp_str);
-    c11_string* sub = py_touserdata(&argv[1]);
+    c11_string* sub = pk_tostr(&argv[1]);
     int res = c11_sv__index2(c11_string__sv(self), c11_string__sv(sub), start);
     py_newint(py_retval(), res);
     return true;
@@ -12058,7 +14454,7 @@ py_Type pk_str__register() {
     return type;
 }
 
-static bool str_iterator__next__(int argc, py_Ref argv) {
+bool str_iterator__next__(int argc, py_Ref argv) {
     PY_CHECK_ARGC(1);
     int* ud = py_touserdata(&argv[0]);
     int size;
@@ -12233,6 +14629,1091 @@ bool py_repr(py_Ref val) { return pk_callmagic(__repr__, 1, val); }
 bool py_len(py_Ref val) { return pk_callmagic(__len__, 1, val); }
 
 #undef DEF_STR_CMP_OP
+// src/debugger/dap.c
+#include <stdbool.h>
+#include <stdio.h>
+#if PK_ENABLE_OS
+
+#define DAP_COMMAND_LIST(X)                                                                        \
+    X(initialize)                                                                                  \
+    X(setBreakpoints)                                                                              \
+    X(attach)                                                                                      \
+    X(launch)                                                                                      \
+    X(next)                                                                                        \
+    X(stepIn)                                                                                      \
+    X(stepOut)                                                                                     \
+    X(continue)                                                                                    \
+    X(stackTrace)                                                                                  \
+    X(scopes)                                                                                      \
+    X(variables)                                                                                   \
+    X(threads)                                                                                     \
+    X(configurationDone)                                                                           \
+    X(ready)                                                                                       \
+    X(evaluate)                                                                                    \
+    X(exceptionInfo)
+
+#define DECLARE_HANDLE_FN(name) void c11_dap_handle_##name(py_Ref arguments, c11_sbuf*);
+DAP_COMMAND_LIST(DECLARE_HANDLE_FN)
+#undef DECLARE_ARG_FN
+
+typedef void (*c11_dap_arg_parser_fn)(py_Ref, c11_sbuf*);
+
+typedef struct {
+    const char* command;
+    c11_dap_arg_parser_fn parser;
+} dap_command_entry;
+
+#define DAP_ENTRY(name) {#name, c11_dap_handle_##name},
+static dap_command_entry dap_command_table[] = {
+    DAP_COMMAND_LIST(DAP_ENTRY){NULL, NULL}
+};
+
+#undef DAP_ENTRY
+
+static struct c11_dap_server {
+    int dap_next_seq;
+    char buffer_data[1024];
+    char* buffer_begin;
+    int buffer_length;
+    c11_socket_handler server;
+    c11_socket_handler toclient;
+    bool isconfiguredone;
+    bool isfirstatttach;
+    bool isattach;
+    bool isclientready;
+} server;
+
+void c11_dap_handle_initialize(py_Ref arguments, c11_sbuf* buffer) {
+    c11_sbuf__write_cstr(buffer,
+                         "\"body\":{"
+                         "\"supportsConfigurationDoneRequest\":true,"
+                         "\"supportsExceptionInfoRequest\":true"
+                         "}");
+    c11_sbuf__write_char(buffer, ',');
+}
+
+void c11_dap_handle_attach(py_Ref arguments, c11_sbuf* buffer) { server.isfirstatttach = true; }
+
+void c11_dap_handle_launch(py_Ref arguments, c11_sbuf* buffer) { server.isfirstatttach = true; }
+
+void c11_dap_handle_ready(py_Ref arguments, c11_sbuf* buffer) { server.isclientready = true; }
+
+void c11_dap_handle_next(py_Ref arguments, c11_sbuf* buffer) {
+    c11_debugger_set_step_mode(C11_STEP_OVER);
+}
+
+void c11_dap_handle_stepIn(py_Ref arguments, c11_sbuf* buffer) {
+    c11_debugger_set_step_mode(C11_STEP_IN);
+}
+
+void c11_dap_handle_stepOut(py_Ref arguments, c11_sbuf* buffer) {
+    c11_debugger_set_step_mode(C11_STEP_OUT);
+}
+
+void c11_dap_handle_continue(py_Ref arguments, c11_sbuf* buffer) {
+    c11_debugger_set_step_mode(C11_STEP_CONTINUE);
+}
+
+void c11_dap_handle_threads(py_Ref arguments, c11_sbuf* buffer) {
+    c11_sbuf__write_cstr(buffer,
+                         "\"body\":{\"threads\":["
+                         "{\"id\":1,\"name\":\"MainThread\"}"
+                         "]}");
+    c11_sbuf__write_char(buffer, ',');
+}
+
+void c11_dap_handle_configurationDone(py_Ref arguments, c11_sbuf* buffer) {
+    server.isconfiguredone = true;
+}
+
+inline static void c11_dap_build_Breakpoint(int id, int line, c11_sbuf* buffer) {
+    pk_sprintf(buffer, "{\"id\":%d,\"verified\":true,\"line\":%d}", id, line);
+}
+
+void c11_dap_handle_setBreakpoints(py_Ref arguments, c11_sbuf* buffer) {
+    if(!py_smarteval("_0['source']['path']", NULL, arguments)) {
+        py_printexc();
+        return;
+    }
+    const char* sourcename = c11_strdup(py_tostr(py_retval()));
+    if(!py_smarteval("[bp['line'] for bp in _0['breakpoints']]", NULL, arguments)) {
+        py_printexc();
+        return;
+    }
+    int bp_numbers = c11_debugger_reset_breakpoints_by_source(sourcename);
+    c11_sbuf__write_cstr(buffer, "\"body\":");
+    c11_sbuf__write_cstr(buffer, "{\"breakpoints\":[");
+    for(int i = 0; i < py_list_len(py_retval()); i++) {
+        if(i != 0) c11_sbuf__write_char(buffer, ',');
+        int line = py_toint(py_list_getitem(py_retval(), i));
+        c11_debugger_setbreakpoint(sourcename, line);
+        c11_dap_build_Breakpoint(i + bp_numbers, line, buffer);
+    }
+    c11_sbuf__write_cstr(buffer, "]}");
+    c11_sbuf__write_char(buffer, ',');
+    PK_FREE((void*)sourcename);
+}
+
+inline static void c11_dap_build_ExceptionInfo(const char* exc_type, const char* exc_message, c11_sbuf* buffer) {
+    const char* safe_type = exc_type ? exc_type : "UnknownException";
+    const char* safe_message = exc_message ? exc_message : "No additional details available";
+
+    c11_sv type_sv = {.data = safe_type, .size = strlen(safe_type)};
+    c11_sv message_sv = {.data = safe_message, .size = strlen(safe_message)};
+
+    c11_sbuf combined_buffer;
+    c11_sbuf__ctor(&combined_buffer);
+    pk_sprintf(&combined_buffer, "%s: %s", safe_type, safe_message);
+    c11_string* combined_details = c11_sbuf__submit(&combined_buffer);
+
+    pk_sprintf(buffer, 
+        "{\"exceptionId\":%Q,"
+        "\"description\":%Q,"
+        "\"breakMode\":\"unhandled\"}",
+        type_sv,
+        (c11_sv){.data = combined_details->data, .size = combined_details->size}
+    );
+
+    c11_string__delete(combined_details);
+}
+
+void c11_dap_handle_exceptionInfo(py_Ref arguments, c11_sbuf* buffer) {
+    const char* message;
+    const char* name = c11_debugger_excinfo(&message);
+    c11_sbuf__write_cstr(buffer, "\"body\":");
+    c11_dap_build_ExceptionInfo(name, message, buffer);
+    c11_sbuf__write_char(buffer, ',');
+}
+
+
+void c11_dap_handle_stackTrace(py_Ref arguments, c11_sbuf* buffer) {
+    c11_sbuf__write_cstr(buffer, "\"body\":");
+    c11_debugger_frames(buffer);
+    c11_sbuf__write_char(buffer, ',');
+}
+
+void c11_dap_handle_evaluate(py_Ref arguments, c11_sbuf* buffer) {
+    int res = py_dict_getitem_by_str(arguments, "expression");
+    if(res <= 0) {
+        py_printexc();
+        c11__abort("[DEBUGGER ERROR] no expression found in evaluate request");
+    }
+    // [eval, nil, expression,  globals, locals]
+    // vectorcall would pop the above 5 items
+    // so we don't need to pop them manually
+    py_Ref py_eval = py_pushtmp();
+    py_pushnil();
+    py_Ref expression = py_pushtmp();
+    py_assign(expression, py_retval());
+    py_assign(py_eval, py_getbuiltin(py_name("eval")));
+    py_newglobals(py_pushtmp());
+    py_newlocals(py_pushtmp());
+    bool ok = py_vectorcall(3, 0);
+
+    char* result = NULL;
+    c11_sbuf__write_cstr(buffer, "\"body\":");
+    if(!ok) {
+        result = py_formatexc();
+    } else {
+        py_str(py_retval());
+        result = c11_strdup(py_tostr(py_retval()));
+    }
+
+    c11_sv result_sv = {.data = result, .size = strlen(result)};
+    pk_sprintf(buffer, "{\"result\":%Q,\"variablesReference\":0}", result_sv);
+    PK_FREE((void*)result);
+    c11_sbuf__write_char(buffer, ',');
+}
+
+void c11_dap_handle_scopes(py_Ref arguments, c11_sbuf* buffer) {
+    int res = py_dict_getitem_by_str(arguments, "frameId");
+    if(res <= 0) {
+        if(res == 0) {
+            c11__abort("[DEBUGGER ERROR] no frameID found in scopes request");
+        } else {
+            py_printexc();
+            c11__abort("[DEBUGGER ERROR] an error occurred while parsing request frameId");
+        }
+        return;
+    }
+    int frameid = py_toint(py_retval());
+    c11_sbuf__write_cstr(buffer, "\"body\":");
+    c11_debugger_scopes(frameid, buffer);
+    c11_sbuf__write_char(buffer, ',');
+}
+
+void c11_dap_handle_variables(py_Ref arguments, c11_sbuf* buffer) {
+    int res = py_dict_getitem_by_str(arguments, "variablesReference");
+    if(res <= 0) {
+        if(res == 0) {
+            printf("[DEBUGGER ERROR] no frameID found\n");
+        } else {
+            py_printexc();
+        }
+        return;
+    }
+    int variablesReference = py_toint(py_retval());
+    c11_sbuf__write_cstr(buffer, "\"body\":");
+    c11_debugger_unfold_var(variablesReference, buffer);
+    c11_sbuf__write_char(buffer, ',');
+}
+
+const char* c11_dap_handle_request(const char* message) {
+    if(!py_json_loads(message)) {
+        py_printexc();
+        c11__abort("[DEBUGGER ERROR] invalid JSON request");
+    }
+    py_Ref py_request = py_pushtmp();
+    py_Ref py_arguments = py_pushtmp();
+    py_Ref py_command = py_pushtmp();
+    py_assign(py_request, py_retval());
+
+    int res = py_dict_getitem_by_str(py_request, "command");
+    if(res == -1) {
+        py_printexc();
+        c11__abort("[DEBUGGER ERROR] an error occurred while parsing request");
+    } else if(res == 0) {
+        c11__abort("[DEBUGGER ERROR] no command found in request");
+    }
+    py_assign(py_command, py_retval());
+    const char* command = py_tostr(py_command);
+
+    res = py_dict_getitem_by_str(py_request, "arguments");
+    if(res == -1) {
+        py_printexc();
+        c11__abort("[DEBUGGER ERROR] an error occurred while parsing request arguments");
+    }
+    py_assign(py_arguments, py_retval());
+
+    res = py_dict_getitem_by_str(py_request, "seq");
+    if(res == -1) {
+        py_printexc();
+        c11__abort("[DEBUGGER ERROR] an error occurred while parsing request sequence number");
+    }
+    int request_seq = (res == 1) ? py_toint(py_retval()) : 0;
+
+    c11_sbuf response_buffer;
+    c11_sbuf__ctor(&response_buffer);
+    pk_sprintf(&response_buffer,
+               "{\"seq\":%d,\"type\":\"response\",\"request_seq\":%d,\"command\":\"%s\",",
+               server.dap_next_seq++,
+               request_seq,
+               command);
+    for(dap_command_entry* entry = dap_command_table; entry->command != NULL; entry++) {
+        if(strcmp(entry->command, command) == 0) {
+            entry->parser(py_arguments, &response_buffer);
+            break;
+        }
+    }
+    c11_sbuf__write_cstr(&response_buffer, "\"success\":true}");
+
+    c11_string* c11_string_response = c11_sbuf__submit(&response_buffer);
+    const char* response = c11_strdup(c11_string_response->data);
+    c11_string__delete(c11_string_response);
+
+    py_pop();  // py_arguments
+    py_pop();  // py_request
+    py_pop();  // py_command
+
+    return response;
+}
+
+void c11_dap_send_event(const char* event_name, const char* body_json) {
+    c11_sbuf buffer;
+    char header[64];
+    c11_sbuf__ctor(&buffer);
+    pk_sprintf(&buffer,
+               "{\"seq\":%d,\"type\":\"event\",\"event\":\"%s\",\"body\":%s}",
+               server.dap_next_seq++,
+               event_name,
+               body_json);
+    c11_string* json = c11_sbuf__submit(&buffer);
+    int json_len = json->size;
+    int header_len = snprintf(header, sizeof(header), "Content-Length: %d\r\n\r\n", json_len);
+    c11_socket_send(server.toclient, header, header_len);
+    c11_socket_send(server.toclient, json->data, json_len);
+    c11_string__delete(json);
+}
+
+void c11_dap_send_output_event(const char* category, const char* fmt, ...) {
+    va_list args;
+    va_start(args, fmt);
+    c11_sbuf output;
+    c11_sbuf__ctor(&output);
+    pk_vsprintf(&output, fmt, args);
+    va_end(args);
+
+    c11_sbuf buffer;
+    c11_string* output_json = c11_sbuf__submit(&output);
+    c11_sv sv_output = {.data = output_json->data, .size = output_json->size};
+    c11_sbuf__ctor(&buffer);
+    pk_sprintf(&buffer, "{\"category\":\"%s\",\"output\":%Q}", category, sv_output);
+    c11_string* body_json = c11_sbuf__submit(&buffer);
+    c11_dap_send_event("output", body_json->data);
+    c11_string__delete(body_json);
+    c11_string__delete(output_json);
+}
+
+void c11_dap_send_stop_event(C11_STOP_REASON reason) {
+    if(reason == C11_DEBUGGER_NOSTOP) return;
+    const char* reason_str = "unknown";
+    switch(reason) {
+        case C11_DEBUGGER_STEP: reason_str = "step"; break;
+        case C11_DEBUGGER_EXCEPTION: reason_str = "exception"; break;
+        case C11_DEBUGGER_BP: reason_str = "breakpoint"; break;
+        default: break;
+    }
+    c11_sbuf buf;
+    c11_sbuf__ctor(&buf);
+    pk_sprintf(&buf, "{\"reason\":\"%s\",\"threadId\":1,\"allThreadsStopped\":true", reason_str);
+    c11_sbuf__write_char(&buf, '}');
+    c11_string* body_json = c11_sbuf__submit(&buf);
+    c11_dap_send_event("stopped", body_json->data);
+    c11_string__delete(body_json);
+}
+
+void c11_dap_send_exited_event(int exitCode) {
+    char body[64];
+    snprintf(body, sizeof(body), "{\"exitCode\":%d}", exitCode);
+    c11_dap_send_event("exited", body);
+}
+
+void c11_dap_send_fatal_event(const char* message) {
+    char body[128];
+    snprintf(body, sizeof(body), "{\"message\":\"%s\"}", message);
+    c11_dap_send_event("pkpy/fatalError", body);
+}
+
+void c11_dap_send_initialized_event() { c11_dap_send_event("initialized", "{}"); }
+
+int c11_dap_read_content_length(const char* buffer, int* header_length) {
+    const char* length_begin = strstr(buffer, "Content-Length: ");
+    if(!length_begin) {
+        printf("[DEBUGGER ERROR] : no Content-Length filed found\n");
+        *header_length = 0;
+        return -1;
+    }
+    length_begin += strlen("Content-Length: ");
+    const char* length_end = strstr(length_begin, "\r\n\r\n");
+    if(!length_end) {
+        printf("[DEBUGGER ERROR] : the seperator should br \\r\\n\\r\\n\n");
+        *header_length = 0;
+        return -1;
+    }
+    char* endptr = NULL;
+    long value = strtol(length_begin, &endptr, 10);
+    if(endptr == length_begin) {
+        printf("[DEBUGGER EORRO] : the length field is empty\n");
+        *header_length = 0;
+        return -1;
+    }
+    *header_length = (int)(endptr - buffer) + 4;
+    return (int)value;
+}
+
+const char* c11_dap_read_message() {
+    int message_length =
+        c11_socket_recv(server.toclient, server.buffer_begin, 1024 - server.buffer_length);
+    if(message_length == 0) {
+        printf("[DEBUGGER INFO] : client quit\n");
+        exit(0);
+    }
+    if(message_length < 0) { return NULL; }
+    server.buffer_length += message_length;
+    if(server.buffer_length == 0) return NULL;
+    int header_length;
+    int content_length = c11_dap_read_content_length(server.buffer_begin, &header_length);
+    if(content_length <= 0 || header_length <= 0) {
+        printf("[DEBUGGER ERROR]: invalid DAP header\n");
+        server.buffer_length = 0;
+        server.buffer_begin = server.buffer_data;
+        return NULL;
+    }
+    server.buffer_begin += header_length;
+    server.buffer_length -= header_length;
+    c11_sbuf result;
+    c11_sbuf__ctor(&result);
+    while(content_length > server.buffer_length) {
+        c11_sbuf__write_cstrn(&result, server.buffer_begin, server.buffer_length);
+        content_length -= server.buffer_length;
+        message_length = c11_socket_recv(server.toclient, server.buffer_data, 1024);
+        if(message_length == 0) {
+            printf("[DEBUGGER INFO] : client quit\n");
+            exit(0);
+        }
+        if(message_length < 0) continue;
+        server.buffer_begin = server.buffer_data;
+        server.buffer_length = message_length;
+    }
+    c11_sbuf__write_cstrn(&result, server.buffer_begin, content_length);
+    server.buffer_begin += content_length;
+    server.buffer_length -= content_length;
+    memmove(server.buffer_data, server.buffer_begin, server.buffer_length);
+    server.buffer_begin = server.buffer_data;
+    c11_string* tmp_result = c11_sbuf__submit(&result);
+    const char* dap_message = c11_strdup(tmp_result->data);
+    c11_string__delete(tmp_result);
+    return dap_message;
+}
+
+void c11_dap_init_server(const char* hostname, unsigned short port) {
+    server.dap_next_seq = 1;
+    server.isconfiguredone = false;
+    server.isclientready = false;
+    server.isfirstatttach = false;
+    server.isattach = false;
+    server.buffer_begin = server.buffer_data;
+    server.server = c11_socket_create(C11_AF_INET, C11_SOCK_STREAM, 0);
+    c11_socket_bind(server.server, hostname, port);
+    c11_socket_listen(server.server, 0);
+    // c11_dap_send_output_event("console", "[DEBUGGER INFO] : listen on %s:%hu\n",hostname,port);
+    printf("[DEBUGGER INFO] : listen on %s:%hu\n", hostname, port);
+}
+
+void c11_dap_waitforclient(const char* hostname, unsigned short port) {
+    server.toclient = c11_socket_accept(server.server, NULL, NULL);
+}
+
+inline static void c11_dap_handle_message() {
+    const char* message = c11_dap_read_message();
+    if(message == NULL) { return; }
+    // c11_dap_send_output_event("console", "[DEBUGGER LOG] : read request %s\n", message);
+    const char* response_content = c11_dap_handle_request(message);
+    if(response_content != NULL) {
+        // c11_dap_send_output_event("console",
+        //                           "[DEBUGGER LOG] : send response %s\n",
+        //                           response_content);
+    }
+    c11_sbuf buffer;
+    c11_sbuf__ctor(&buffer);
+    pk_sprintf(&buffer, "Content-Length: %d\r\n\r\n%s", strlen(response_content), response_content);
+    c11_string* response = c11_sbuf__submit(&buffer);
+    c11_socket_send(server.toclient, response->data, response->size);
+    PK_FREE((void*)message);
+    PK_FREE((void*)response_content);
+    c11_string__delete(response);
+}
+
+void c11_dap_configure_debugger() {
+    while(server.isconfiguredone == false) {
+        c11_dap_handle_message();
+        if(server.isfirstatttach) {
+            c11_dap_send_initialized_event();
+            server.isfirstatttach = false;
+            server.isattach = true;
+        } else if(server.isclientready) {
+            server.isclientready = false;
+            return;
+        }
+    }
+    // c11_dap_send_output_event("console", "[DEBUGGER INFO] : client configure done\n");
+}
+
+void c11_dap_tracefunc(py_Frame* frame, enum py_TraceEvent event) {
+    py_sys_settrace(NULL, false);
+    server.isattach = false;
+    C11_DEBUGGER_STATUS result = c11_debugger_on_trace(frame, event);
+    if(result == C11_DEBUGGER_EXIT) {
+        // c11_dap_send_output_event("console", "[DEBUGGER INFO] : program exit\n");
+        c11_dap_send_exited_event(0);
+        exit(0);
+    }
+    if(result != C11_DEBUGGER_SUCCESS) {
+        const char* message = NULL;
+        switch(result) {
+            case C11_DEBUGGER_FILEPATH_ERROR:
+                message = "Invalid py_file path: '..' forbidden, './' only allowed at start.";
+                break;
+            case C11_DEBUGGER_UNKNOW_ERROR:
+            default: message = "Unknown debugger failure."; break;
+        }
+        if(message) { c11_dap_send_fatal_event(message); }
+        c11_dap_send_exited_event(1);
+        exit(1);
+    }
+    c11_dap_handle_message();
+    C11_STOP_REASON reason = c11_debugger_should_pause();
+    if(reason == C11_DEBUGGER_NOSTOP) {
+        py_sys_settrace(c11_dap_tracefunc, false);
+        server.isattach = true;
+        return;
+    }
+    c11_dap_send_stop_event(reason);
+    while(c11_debugger_should_keep_pause()) {
+        c11_dap_handle_message();
+    }
+    server.isattach = true;
+    py_sys_settrace(c11_dap_tracefunc, false);
+}
+
+void py_debugger_waitforattach(const char* hostname, unsigned short port) {
+    c11_debugger_init();
+    c11_dap_init_server(hostname, port);
+    while(!server.isconfiguredone) {
+        c11_dap_waitforclient(hostname, port);
+        c11_dap_configure_debugger();
+        if(!server.isconfiguredone) {
+            c11_socket_close(server.toclient);
+            // c11_dap_send_output_event("console", "[DEBUGGER INFO] : An clinet is ready\n");
+        }
+    }
+    c11_socket_set_block(server.toclient, 0);
+    py_sys_settrace(c11_dap_tracefunc, true);
+}
+
+void py_debugger_exit(int exitCode) { c11_dap_send_exited_event(exitCode); }
+
+bool py_debugger_isattached() { return server.isattach; }
+
+void py_debugger_exceptionbreakpoint(py_Ref exc) {
+    assert(py_isinstance(exc, tp_BaseException));
+
+    py_sys_settrace(NULL, true);
+    server.isattach = false;
+
+    c11_debugger_exception_on_trace(exc);
+    for(;;) {
+        C11_STOP_REASON reason = c11_debugger_should_pause();
+        c11_dap_send_stop_event(reason);
+        while(c11_debugger_should_keep_pause()) {
+            c11_dap_handle_message();
+        }
+    }
+}
+
+#endif // PK_ENABLE_OS
+// src/debugger/core.c
+#include <ctype.h>
+
+#if PK_ENABLE_OS
+
+typedef struct c11_debugger_breakpoint {
+    const char* sourcename;
+    int lineno;
+} c11_debugger_breakpoint;
+
+typedef struct c11_debugger_scope_index {
+    int locals_ref;
+    int globals_ref;
+} c11_debugger_scope_index;
+
+#define SMALLMAP_T__HEADER
+#define SMALLMAP_T__SOURCE
+#define K int
+#define V c11_debugger_scope_index
+#define NAME c11_smallmap_d2index
+#if !defined(SMALLMAP_T__HEADER) && !defined(SMALLMAP_T__SOURCE)
+#include "pocketpy/common/vector.h"
+#include "pocketpy/common/utils.h"
+#include "pocketpy/config.h"
+
+#define SMALLMAP_T__HEADER
+#define SMALLMAP_T__SOURCE
+/* Input */
+#define K int
+#define V float
+#define NAME c11_smallmap_d2f
+#endif
+
+/* Optional Input */
+#ifndef less
+#define less(a, b) ((a) < (b))
+#endif
+
+#ifndef equal
+#define equal(a, b) ((a) == (b))
+#endif
+
+/* Temporary macros */
+#define partial_less(a, b) less((a).key, (b))
+#define CONCAT(A, B) CONCAT_(A, B)
+#define CONCAT_(A, B) A##B
+
+#define KV CONCAT(NAME, _KV)
+#define METHOD(name) CONCAT(NAME, CONCAT(__, name))
+
+#ifdef SMALLMAP_T__HEADER
+/* Declaration */
+typedef struct {
+    K key;
+    V value;
+} KV;
+
+typedef c11_vector NAME;
+
+void METHOD(ctor)(NAME* self);
+void METHOD(dtor)(NAME* self);
+NAME* METHOD(new)();
+void METHOD(delete)(NAME* self);
+void METHOD(set)(NAME* self, K key, V value);
+V* METHOD(try_get)(const NAME* self, K key);
+V METHOD(get)(const NAME* self, K key, V default_value);
+bool METHOD(contains)(const NAME* self, K key);
+bool METHOD(del)(NAME* self, K key);
+void METHOD(clear)(NAME* self);
+
+#endif
+
+#ifdef SMALLMAP_T__SOURCE
+/* Implementation */
+
+void METHOD(ctor)(NAME* self) {
+    c11_vector__ctor(self, sizeof(KV));
+    c11_vector__reserve(self, 4);
+}
+
+void METHOD(dtor)(NAME* self) { c11_vector__dtor(self); }
+
+NAME* METHOD(new)() {
+    NAME* self = PK_MALLOC(sizeof(NAME));
+    METHOD(ctor)(self);
+    return self;
+}
+
+void METHOD(delete)(NAME* self) {
+    METHOD(dtor)(self);
+    PK_FREE(self);
+}
+
+void METHOD(set)(NAME* self, K key, V value) {
+    int index;
+    c11__lower_bound(KV, self->data, self->length, key, partial_less, &index);
+    if(index != self->length) {
+        KV* it = c11__at(KV, self, index);
+        if(equal(it->key, key)) {
+            it->value = value;
+            return;
+        }
+    }
+    KV kv = {key, value};
+    c11_vector__insert(KV, self, index, kv);
+}
+
+V* METHOD(try_get)(const NAME* self, K key) {
+    int index;
+    c11__lower_bound(KV, self->data, self->length, key, partial_less, &index);
+    if(index != self->length) {
+        KV* it = c11__at(KV, self, index);
+        if(equal(it->key, key)) return &it->value;
+    }
+    return NULL;
+}
+
+V METHOD(get)(const NAME* self, K key, V default_value) {
+    V* p = METHOD(try_get)(self, key);
+    return p ? *p : default_value;
+}
+
+bool METHOD(contains)(const NAME* self, K key) { return METHOD(try_get)(self, key) != NULL; }
+
+bool METHOD(del)(NAME* self, K key) {
+    int index;
+    c11__lower_bound(KV, self->data, self->length, key, partial_less, &index);
+    if(index != self->length) {
+        KV* it = c11__at(KV, self, index);
+        if(equal(it->key, key)) {
+            c11_vector__erase(KV, self, index);
+            return true;
+        }
+    }
+    return false;
+}
+
+void METHOD(clear)(NAME* self) { c11_vector__clear(self); }
+
+#endif
+
+/* Undefine all macros */
+#undef KV
+#undef METHOD
+#undef CONCAT
+#undef CONCAT_
+
+#undef K
+#undef V
+#undef NAME
+#undef less
+#undef partial_less
+#undef equal
+
+#undef SMALLMAP_T__SOURCE
+#undef SMALLMAP_T__HEADER
+
+static struct c11_debugger {
+    py_Frame* current_frame;
+    const char* current_filename;
+    const char* current_excname;
+    const char* current_excmessage;
+    enum py_TraceEvent current_event;
+
+    int curr_stack_depth;
+    int current_line;
+    int pause_allowed_depth;
+    int step_line;
+    C11_STEP_MODE step_mode;
+    bool keep_suspend;
+    bool isexceptionmode;
+
+    c11_vector* exception_stacktrace;
+    c11_vector breakpoints;
+    c11_vector py_frames;
+    c11_smallmap_d2index scopes_query_cache;
+
+#define python_vars py_r7()
+
+} debugger;
+
+inline static void init_structures() {
+    c11_vector__ctor(&debugger.breakpoints, sizeof(c11_debugger_breakpoint));
+    c11_vector__ctor(&debugger.py_frames, sizeof(py_Frame*));
+    c11_smallmap_d2index__ctor(&debugger.scopes_query_cache);
+    py_newlist(python_vars);
+    py_newnone(py_list_emplace(python_vars));
+}
+
+inline static void clear_structures() {
+    c11_vector__clear(&debugger.py_frames);
+    c11_smallmap_d2index__clear(&debugger.scopes_query_cache);
+    py_list_clear(python_vars);
+    py_newnone(py_list_emplace(python_vars));
+}
+
+inline static py_Ref get_variable(int var_ref) {
+    assert(var_ref < py_list_len(python_vars) && var_ref > 0);
+    return py_list_getitem(python_vars, var_ref);
+}
+
+const inline static char* format_filepath(const char* path) {
+    if(strstr(path, "..")) { return NULL; }
+    if(strstr(path + 1, "./") || strstr(path + 1, ".\\")) { return NULL; }
+    if(path[0] == '.' && (path[1] == '/' || path[1] == '\\')) { return path + 2; }
+    return path;
+}
+
+void c11_debugger_init() {
+    debugger.curr_stack_depth = 0;
+    debugger.current_line = -1;
+    debugger.pause_allowed_depth = -1;
+    debugger.step_line = -1;
+    debugger.keep_suspend = false;
+    debugger.isexceptionmode = false;
+    debugger.step_mode = C11_STEP_CONTINUE;
+    init_structures();
+}
+
+C11_DEBUGGER_STATUS c11_debugger_on_trace(py_Frame* frame, enum py_TraceEvent event) {
+    debugger.current_frame = frame;
+    debugger.current_event = event;
+    const char* source_name = py_Frame_sourceloc(debugger.current_frame, &debugger.current_line);
+    debugger.current_filename = format_filepath(source_name);
+    if(debugger.current_filename == NULL) { return C11_DEBUGGER_FILEPATH_ERROR; }
+    clear_structures();
+    switch(event) {
+        case TRACE_EVENT_PUSH: debugger.curr_stack_depth++; break;
+        case TRACE_EVENT_POP: debugger.curr_stack_depth--; break;
+        default: break;
+    }
+    // if(debugger.curr_stack_depth == 0) return C11_DEBUGGER_EXIT;
+    return C11_DEBUGGER_SUCCESS;
+}
+
+void c11_debugger_exception_on_trace(py_Ref exc) {
+    BaseException* ud = py_touserdata(exc);
+    c11_vector* stacktrace = &ud->stacktrace;
+    const char* name = py_tpname(exc->type);
+    const char* message;
+    bool ok = py_str(exc);
+    if(!ok || !py_isstr(py_retval())) {
+        message = "<exception str() failed>";
+    } else {
+        message = c11_strdup(py_tostr(py_retval()));
+    }
+    debugger.exception_stacktrace = stacktrace;
+    debugger.isexceptionmode = true;
+    debugger.current_excname = name;
+    debugger.current_excmessage = message;
+    clear_structures();
+
+}
+
+const char* c11_debugger_excinfo(const char ** message){
+    *message = debugger.current_excmessage;
+    return debugger.current_excname;
+}
+
+void c11_debugger_set_step_mode(C11_STEP_MODE mode) {
+    switch(mode) {
+        case C11_STEP_IN: debugger.pause_allowed_depth = INT32_MAX; break;
+        case C11_STEP_OVER:
+            debugger.pause_allowed_depth = debugger.curr_stack_depth;
+            debugger.step_line = debugger.current_line;
+            break;
+        case C11_STEP_OUT: debugger.pause_allowed_depth = debugger.curr_stack_depth - 1; break;
+        case C11_STEP_CONTINUE: debugger.pause_allowed_depth = -1; break;
+        default: break;
+    }
+    debugger.step_mode = mode;
+    debugger.keep_suspend = false;
+}
+
+int c11_debugger_setbreakpoint(const char* filename, int lineno) {
+    c11_debugger_breakpoint breakpoint = {.sourcename = c11_strdup(filename), .lineno = lineno};
+    c11_vector__push(c11_debugger_breakpoint, &debugger.breakpoints, breakpoint);
+    return debugger.breakpoints.length;
+}
+
+int c11_debugger_reset_breakpoints_by_source(const char* sourcesname) {
+    c11_vector tmp_breakpoints;
+    c11_vector__ctor(&tmp_breakpoints, sizeof(c11_debugger_breakpoint));
+
+    c11__foreach(c11_debugger_breakpoint, &debugger.breakpoints, it) {
+        if(strcmp(it->sourcename, sourcesname) != 0) {
+            c11_debugger_breakpoint* dst =
+                (c11_debugger_breakpoint*)c11_vector__emplace(&tmp_breakpoints);
+            *dst = *it;
+        } else {
+            PK_FREE((void*)it->sourcename);
+        }
+    }
+
+    c11_vector__swap(&tmp_breakpoints, &debugger.breakpoints);
+    c11_vector__dtor(&tmp_breakpoints);
+    return debugger.breakpoints.length;
+}
+
+bool c11_debugger_path_equal(const char* path1, const char* path2) {
+    if(path1 == NULL || path2 == NULL) return false;
+    while(*path1 && *path2) {
+        char c1 = (*path1 == '\\') ? '/' : *path1;
+        char c2 = (*path2 == '\\') ? '/' : *path2;
+        c1 = (char)tolower((unsigned char)c1);
+        c2 = (char)tolower((unsigned char)c2);
+        if(c1 != c2) return false;
+        path1++;
+        path2++;
+    }
+    return *path1 == *path2;
+}
+
+C11_STOP_REASON c11_debugger_should_pause() {
+    if(debugger.current_event == TRACE_EVENT_POP && !debugger.isexceptionmode) return C11_DEBUGGER_NOSTOP;
+    C11_STOP_REASON pause_resaon = C11_DEBUGGER_NOSTOP;
+    int is_out = debugger.curr_stack_depth <= debugger.pause_allowed_depth;
+    int is_new_line = debugger.current_line != debugger.step_line;
+    switch(debugger.step_mode) {
+        case C11_STEP_IN: pause_resaon = C11_DEBUGGER_STEP; break;
+        case C11_STEP_OVER:
+            if(is_new_line && is_out) pause_resaon = C11_DEBUGGER_STEP;
+            break;
+        case C11_STEP_OUT:
+            if(is_out) pause_resaon = C11_DEBUGGER_STEP;
+            break;
+        case C11_STEP_CONTINUE:
+        default: break;
+    }
+    if(debugger.step_mode == C11_STEP_CONTINUE) {
+        c11__foreach(c11_debugger_breakpoint, &debugger.breakpoints, bp) {
+            if(c11_debugger_path_equal(debugger.current_filename, bp->sourcename) &&
+               debugger.current_line == bp->lineno) {
+                pause_resaon = C11_DEBUGGER_BP;
+                break;
+            }
+        }
+    }
+    if(debugger.isexceptionmode) pause_resaon = C11_DEBUGGER_EXCEPTION;
+    if(pause_resaon != C11_DEBUGGER_NOSTOP) { debugger.keep_suspend = true; }
+    return pause_resaon;
+}
+
+int c11_debugger_should_keep_pause(void) { return debugger.keep_suspend; }
+
+inline static c11_sv sv_from_cstr(const char* str) {
+    c11_sv sv = {.data = str, .size = strlen(str)};
+    return sv;
+}
+
+const inline static char* get_basename(const char* path) {
+    const char* last_slash = strrchr(path, '/');
+#if defined(_WIN32) || defined(_WIN64)
+    const char* last_backslash = strrchr(path, '\\');
+    if(!last_slash || (last_backslash && last_backslash > last_slash)) {
+        last_slash = last_backslash;
+    }
+#endif
+    return last_slash ? last_slash + 1 : path;
+}
+
+void c11_debugger_normal_frames(c11_sbuf* buffer) {
+    c11_sbuf__write_cstr(buffer, "{\"stackFrames\": [");
+    int idx = 0;
+    py_Frame* now_frame = debugger.current_frame;
+    debugger.py_frames.length = 0;
+    while(now_frame) {
+        if(idx > 0) c11_sbuf__write_char(buffer, ',');
+        int line;
+        const char* filename = py_Frame_sourceloc(now_frame, &line);
+        const char* basename = get_basename(filename);
+        const char* modname = now_frame->co->name->data;
+        pk_sprintf(
+            buffer,
+            "{\"id\": %d, \"name\": %Q, \"line\": %d, \"column\": 1, \"source\": {\"name\": %Q, \"path\": %Q}}",
+            idx,
+            sv_from_cstr(modname),
+            line,
+            sv_from_cstr(basename),
+            sv_from_cstr(filename));
+        c11_vector__push(py_Frame*, &debugger.py_frames, now_frame);
+        now_frame = now_frame->f_back;
+        idx++;
+    }
+    pk_sprintf(buffer, "], \"totalFrames\": %d}", idx);
+}
+
+void c11_debugger_exception_frames(c11_sbuf* buffer) {
+    c11_sbuf__write_cstr(buffer, "{\"stackFrames\": [");
+    int idx = 0;
+    c11__foreach(BaseExceptionFrame, debugger.exception_stacktrace, it) {
+        if(idx > 0) c11_sbuf__write_char(buffer, ',');
+        int line = it->lineno;
+        const char* filename = it->src->filename->data;
+        const char* basename = get_basename(filename);
+        const char* modname = it->name == NULL ? basename : it->name->data;
+        pk_sprintf(
+            buffer,
+            "{\"id\": %d, \"name\": %Q, \"line\": %d, \"column\": 1, \"source\": {\"name\": %Q, \"path\": %Q}}",
+            idx,
+            sv_from_cstr(modname),
+            line,
+            sv_from_cstr(basename),
+            sv_from_cstr(filename));
+        idx++;
+    }
+    pk_sprintf(buffer, "], \"totalFrames\": %d}", idx);
+}
+
+void c11_debugger_frames(c11_sbuf* buffer) {
+    debugger.isexceptionmode ? c11_debugger_exception_frames(buffer)
+                             : c11_debugger_normal_frames(buffer);
+}
+
+inline static c11_debugger_scope_index append_new_scope(int frameid) {
+    assert(frameid < debugger.py_frames.length);
+    py_Frame* requested_frame = c11__getitem(py_Frame*, &debugger.py_frames, frameid);
+    int base_index = py_list_len(python_vars);
+    py_Ref new_locals = py_list_emplace(python_vars);
+    py_Ref new_globals = py_list_emplace(python_vars);
+    py_Frame_newlocals(requested_frame, new_locals);
+    py_Frame_newglobals(requested_frame, new_globals);
+    c11_debugger_scope_index result = {.locals_ref = base_index, .globals_ref = base_index + 1};
+    return result;
+}
+
+inline static c11_debugger_scope_index append_new_exception_scope(int frameid) {
+    assert(frameid < debugger.exception_stacktrace->length);
+    BaseExceptionFrame* requested_frame =
+        c11__at(BaseExceptionFrame, debugger.exception_stacktrace, frameid);
+    int base_index = py_list_len(python_vars);
+    py_list_append(python_vars, &requested_frame->locals);
+    py_list_append(python_vars, &requested_frame->globals);
+    c11_debugger_scope_index result = {.locals_ref = base_index, .globals_ref = base_index + 1};
+    return result;
+}
+
+void c11_debugger_scopes(int frameid, c11_sbuf* buffer) {
+    // query cache
+    c11_debugger_scope_index* result =
+        c11_smallmap_d2index__try_get(&debugger.scopes_query_cache, frameid);
+
+    c11_sbuf__write_cstr(buffer, "{\"scopes\":");
+    const char* scopes_fmt =
+        "[{\"name\": \"locals\", \"variablesReference\": %d, \"expensive\": false}, "
+        "{\"name\": \"globals\", \"variablesReference\": %d, \"expensive\": true}]";
+    if(result != NULL) {
+        pk_sprintf(buffer, scopes_fmt, result->locals_ref, result->globals_ref);
+    } else {
+        c11_debugger_scope_index new_record = debugger.isexceptionmode
+                                                  ? append_new_exception_scope(frameid)
+                                                  : append_new_scope(frameid);
+        c11_smallmap_d2index__set(&debugger.scopes_query_cache, frameid, new_record);
+        pk_sprintf(buffer, scopes_fmt, new_record.locals_ref, new_record.globals_ref);
+    }
+    c11_sbuf__write_char(buffer, '}');
+}
+
+bool c11_debugger_unfold_var(int var_id, c11_sbuf* buffer) {
+    py_Ref var = get_variable(var_id);
+    if(!var) return false;
+
+    // 1. extend
+    const char* expand_code = NULL;
+    switch(py_typeof(var)) {
+        case tp_dict:
+        case tp_namedict: expand_code = "[(k,v) for k,v in _0.items()]"; break;
+        case tp_list:
+        case tp_tuple: expand_code = "[(f'[{i}]',v) for i,v in enumerate(_0)]"; break;
+        default: expand_code = "[(k,v) for k,v in _0.__dict__.items()]"; break;
+    }
+    if(!py_smarteval(expand_code, NULL, var)) {
+        py_printexc();
+        return false;
+    }
+    py_Ref kv_list = py_pushtmp();
+    py_assign(kv_list, py_retval());
+    // 2. prepare base_ref
+    int base_index = py_list_len(python_vars);
+    py_Ref base_var_ref = py_pushtmp();
+    py_newint(base_var_ref, base_index);
+
+    // 3. construct DAP JSON and extend python_vars
+    py_Ref dap_obj = py_pushtmp();
+    py_newdict(dap_obj);
+    const char* dap_code =
+        "_2['variables'] = []\n"
+        "var_ref = _1\n"
+        "for k, v in _0:\n"
+        "    has_children = isinstance(v, (dict, list, tuple)) or v.__dict__ is not None\n"
+        "    _2['variables'].append({\n"
+        "        'name': k if type(k) == str else str(k),\n"
+        "        'value': repr(v) if type(v) == str else str(v),\n"
+        "        'variablesReference': var_ref if has_children else 0,\n"
+        "        'type': type(v).__name__\n"
+        "    })\n"
+        "    if has_children: var_ref += 1\n";
+    if(!py_smartexec(dap_code, NULL, kv_list, base_var_ref, dap_obj)) {
+        py_printexc();
+        return false;
+    }
+
+    // 4. extend python_vars
+    if(!py_smartexec(
+           "_0.extend([v for k, v in _1 if isinstance(v, (dict, list, tuple)) or v.__dict__ is not None])",
+           NULL,
+           python_vars,
+           kv_list)) {
+        py_printexc();
+        return false;
+    }
+
+    // 5. dump & write
+    if(!py_json_dumps(dap_obj, 0)) {
+        // printf("dap_obj: %s\n", py_tpname(py_typeof(dap_obj)));
+        py_printexc();
+        return false;
+    }
+
+    c11_sbuf__write_cstr(buffer, py_tostr(py_retval()));
+
+    // 6. clear
+    py_pop();  // dap_obj
+    py_pop();  // base_var_ref
+    py_pop();  // kv_list
+    return true;
+}
+
+#undef python_vars
+
+#endif // PK_ENABLE_OS
+
 // src/modules/json.c
 #include <math.h>
 
@@ -12427,6 +15908,8 @@ bool py_pusheval(const char* expr, py_GlobalRef module) {
 }
 
 // src/modules/pkpy.c
+#include <time.h>
+
 #define DEF_TVALUE_METHODS(T, Field)                                                               \
     static bool TValue_##T##__new__(int argc, py_Ref argv) {                                       \
         PY_CHECK_ARGC(2);                                                                          \
@@ -12478,9 +15961,447 @@ static bool pkpy_memory_usage(int argc, py_Ref argv) {
 static bool pkpy_is_user_defined_type(int argc, py_Ref argv) {
     PY_CHECK_ARGC(1);
     PY_CHECK_ARG_TYPE(0, tp_type);
-    py_TypeInfo* ti = pk__type_info(py_totype(argv));
+    py_TypeInfo* ti = py_touserdata(argv);
     py_newbool(py_retval(), ti->is_python);
     return true;
+}
+
+static bool pkpy_enable_full_buffering_mode(int argc, py_Ref argv) {
+    PY_CHECK_ARGC(0);
+    static char buf[1024 * 128];
+    setvbuf(stdout, buf, _IOFBF, sizeof(buf));
+    py_newnone(py_retval());
+    return true;
+}
+
+static bool pkpy_currentvm(int argc, py_Ref argv) {
+    PY_CHECK_ARGC(0);
+    py_newint(py_retval(), py_currentvm());
+    return true;
+}
+
+#if PK_ENABLE_WATCHDOG
+void py_watchdog_begin(py_i64 timeout) {
+    WatchdogInfo* info = &pk_current_vm->watchdog_info;
+    info->max_reset_time = clock() + (timeout * (CLOCKS_PER_SEC / 1000));
+}
+
+void py_watchdog_end() {
+    WatchdogInfo* info = &pk_current_vm->watchdog_info;
+    info->max_reset_time = 0;
+}
+
+static bool pkpy_watchdog_begin(int argc, py_Ref argv) {
+    PY_CHECK_ARGC(1);
+    PY_CHECK_ARG_TYPE(0, tp_int);
+    py_watchdog_begin(py_toint(argv));
+    py_newnone(py_retval());
+    return true;
+}
+
+static bool pkpy_watchdog_end(int argc, py_Ref argv) {
+    PY_CHECK_ARGC(0);
+    py_watchdog_end();
+    py_newnone(py_retval());
+    return true;
+}
+#endif
+
+#if PK_ENABLE_THREADS
+
+typedef struct c11_ComputeThread c11_ComputeThread;
+
+typedef struct {
+    c11_ComputeThread* self;
+    char* eval_src;
+    unsigned char* args_data;
+    int args_size;
+    unsigned char* kwargs_data;
+    int kwargs_size;
+} ComputeThreadJobCall;
+
+typedef struct {
+    c11_ComputeThread* self;
+    char* source;
+    enum py_CompileMode mode;
+} ComputeThreadJobExec;
+
+static void ComputeThreadJobCall__dtor(void* arg) {
+    ComputeThreadJobCall* self = arg;
+    PK_FREE(self->eval_src);
+    PK_FREE(self->args_data);
+    PK_FREE(self->kwargs_data);
+}
+
+static void ComputeThreadJobExec__dtor(void* arg) {
+    ComputeThreadJobExec* self = arg;
+    PK_FREE(self->source);
+}
+
+typedef struct c11_ComputeThread {
+    int vm_index;
+    atomic_bool is_done;
+    unsigned char* last_retval_data;
+    int last_retval_size;
+    char* last_error;
+
+    c11_thrd_t thread;
+    void* job;
+    void (*job_dtor)(void*);
+} c11_ComputeThread;
+
+static void
+    c11_ComputeThread__reset_job(c11_ComputeThread* self, void* job, void (*job_dtor)(void*)) {
+    if(self->job) {
+        self->job_dtor(self->job);
+        PK_FREE(self->job);
+    }
+    self->job = job;
+    self->job_dtor = job_dtor;
+}
+
+static bool _pk_compute_thread_flags[16];
+
+static void c11_ComputeThread__dtor(c11_ComputeThread* self) {
+    if(!atomic_load(&self->is_done)) {
+        c11__abort("ComputeThread(%d) is not done yet!! But the object was deleted.",
+                   self->vm_index);
+    }
+    if(self->last_retval_data) PK_FREE(self->last_retval_data);
+    if(self->last_error) PK_FREE(self->last_error);
+    c11_ComputeThread__reset_job(self, NULL, NULL);
+    _pk_compute_thread_flags[self->vm_index] = false;
+}
+
+static void c11_ComputeThread__on_job_begin(c11_ComputeThread* self) {
+    if(self->last_retval_data) {
+        PK_FREE(self->last_retval_data);
+        self->last_retval_data = NULL;
+        self->last_retval_size = 0;
+    }
+    if(self->last_error) {
+        PK_FREE(self->last_error);
+        self->last_error = NULL;
+    }
+    py_switchvm(self->vm_index);
+}
+
+static bool ComputeThread__new__(int argc, py_Ref argv) {
+    c11_ComputeThread* self =
+        py_newobject(py_retval(), py_totype(argv), 0, sizeof(c11_ComputeThread));
+    self->vm_index = 0;
+    atomic_store(&self->is_done, true);
+    self->last_retval_data = NULL;
+    self->last_retval_size = 0;
+    self->last_error = NULL;
+    self->job = NULL;
+    self->job_dtor = NULL;
+    return true;
+}
+
+static bool ComputeThread__init__(int argc, py_Ref argv) {
+    PY_CHECK_ARGC(2);
+    PY_CHECK_ARG_TYPE(1, tp_int);
+    c11_ComputeThread* self = py_touserdata(py_arg(0));
+    int index = py_toint(py_arg(1));
+    if(index >= 1 && index < 16) {
+        if(_pk_compute_thread_flags[index]) {
+            return ValueError("vm_index %d is already in use", index);
+        }
+        _pk_compute_thread_flags[index] = true;
+        self->vm_index = index;
+    } else {
+        return ValueError("vm_index %d is out of range", index);
+    }
+    py_newnone(py_retval());
+    return true;
+}
+
+static bool ComputeThread_is_done(int argc, py_Ref argv) {
+    PY_CHECK_ARGC(1);
+    c11_ComputeThread* self = py_touserdata(argv);
+    bool value = atomic_load(&self->is_done);
+    py_newbool(py_retval(), value);
+    return true;
+}
+
+static bool ComputeThread_wait_for_done(int argc, py_Ref argv) {
+    PY_CHECK_ARGC(1);
+    c11_ComputeThread* self = py_touserdata(argv);
+    while(!atomic_load(&self->is_done)) {
+        c11_thrd_yield();
+    }
+    py_newnone(py_retval());
+    return true;
+}
+
+static bool ComputeThread_last_error(int argc, py_Ref argv) {
+    PY_CHECK_ARGC(1);
+    c11_ComputeThread* self = py_touserdata(argv);
+    if(!atomic_load(&self->is_done)) return OSError("thread is not done yet");
+    if(self->last_error) {
+        py_newstr(py_retval(), self->last_error);
+    } else {
+        py_newnone(py_retval());
+    }
+    return true;
+}
+
+static bool ComputeThread_last_retval(int argc, py_Ref argv) {
+    PY_CHECK_ARGC(1);
+    c11_ComputeThread* self = py_touserdata(argv);
+    if(!atomic_load(&self->is_done)) return OSError("thread is not done yet");
+    if(self->last_retval_data == NULL) return ValueError("no retval available");
+    return py_pickle_loads(self->last_retval_data, self->last_retval_size);
+}
+
+static c11_thrd_retval_t ComputeThreadJob_call(void* arg) {
+    ComputeThreadJobCall* job = arg;
+    c11_ComputeThread* self = job->self;
+    c11_ComputeThread__on_job_begin(self);
+
+    py_StackRef p0 = py_peek(0);
+
+    if(!py_pusheval(job->eval_src, NULL)) goto __ERROR;
+    // [callable]
+    if(!py_pickle_loads(job->args_data, job->args_size)) goto __ERROR;
+    py_push(py_retval());
+    // [callable, args]
+    if(!py_pickle_loads(job->kwargs_data, job->kwargs_size)) goto __ERROR;
+    py_push(py_retval());
+    // [callable, args, kwargs]
+    if(!py_smarteval("_0(*_1, **_2)", NULL, py_peek(-3), py_peek(-2), py_peek(-1))) goto __ERROR;
+
+    py_shrink(3);
+    if(!py_pickle_dumps(py_retval())) goto __ERROR;
+    int retval_size;
+    unsigned char* retval_data = py_tobytes(py_retval(), &retval_size);
+    self->last_retval_data = c11_memdup(retval_data, retval_size);
+    self->last_retval_size = retval_size;
+    atomic_store(&self->is_done, true);
+    return (c11_thrd_retval_t)0;
+
+__ERROR:
+    self->last_error = py_formatexc();
+    atomic_store(&self->is_done, true);
+    py_clearexc(p0);
+    py_newnone(py_retval());
+    return (c11_thrd_retval_t)0;
+}
+
+static c11_thrd_retval_t ComputeThreadJob_exec(void* arg) {
+    ComputeThreadJobExec* job = arg;
+    c11_ComputeThread* self = job->self;
+    c11_ComputeThread__on_job_begin(self);
+
+    py_StackRef p0 = py_peek(0);
+    if(!py_exec(job->source, "<job>", job->mode, NULL)) goto __ERROR;
+    if(!py_pickle_dumps(py_retval())) goto __ERROR;
+    int retval_size;
+    unsigned char* retval_data = py_tobytes(py_retval(), &retval_size);
+    self->last_retval_data = c11_memdup(retval_data, retval_size);
+    self->last_retval_size = retval_size;
+    atomic_store(&self->is_done, true);
+    return (c11_thrd_retval_t)0;
+
+__ERROR:
+    self->last_error = py_formatexc();
+    atomic_store(&self->is_done, true);
+    py_clearexc(p0);
+    return (c11_thrd_retval_t)0;
+}
+
+static bool ComputeThread_submit_exec(int argc, py_Ref argv) {
+    PY_CHECK_ARGC(2);
+    c11_ComputeThread* self = py_touserdata(py_arg(0));
+    if(!atomic_load(&self->is_done)) return OSError("thread is not done yet");
+    PY_CHECK_ARG_TYPE(1, tp_str);
+    const char* source = py_tostr(py_arg(1));
+    /**************************/
+    ComputeThreadJobExec* job = PK_MALLOC(sizeof(ComputeThreadJobExec));
+    job->self = self;
+    job->source = c11_strdup(source);
+    job->mode = EXEC_MODE;
+    c11_ComputeThread__reset_job(self, job, ComputeThreadJobExec__dtor);
+    /**************************/
+    atomic_store(&self->is_done, false);
+    bool ok = c11_thrd_create(&self->thread, ComputeThreadJob_exec, job);
+    if(!ok) {
+        atomic_store(&self->is_done, true);
+        return OSError("thrd_create() failed");
+    }
+    py_newnone(py_retval());
+    return true;
+}
+
+static bool ComputeThread_submit_eval(int argc, py_Ref argv) {
+    PY_CHECK_ARGC(2);
+    c11_ComputeThread* self = py_touserdata(py_arg(0));
+    if(!atomic_load(&self->is_done)) return OSError("thread is not done yet");
+    PY_CHECK_ARG_TYPE(1, tp_str);
+    const char* source = py_tostr(py_arg(1));
+    /**************************/
+    ComputeThreadJobExec* job = PK_MALLOC(sizeof(ComputeThreadJobExec));
+    job->self = self;
+    job->source = c11_strdup(source);
+    job->mode = EVAL_MODE;
+    c11_ComputeThread__reset_job(self, job, ComputeThreadJobExec__dtor);
+    /**************************/
+    atomic_store(&self->is_done, false);
+    bool ok = c11_thrd_create(&self->thread, ComputeThreadJob_exec, job);
+    if(!ok) {
+        atomic_store(&self->is_done, true);
+        return OSError("thrd_create() failed");
+    }
+    py_newnone(py_retval());
+    return true;
+}
+
+static bool ComputeThread_submit_call(int argc, py_Ref argv) {
+    PY_CHECK_ARGC(4);
+    c11_ComputeThread* self = py_touserdata(py_arg(0));
+    if(!atomic_load(&self->is_done)) return OSError("thread is not done yet");
+    PY_CHECK_ARG_TYPE(1, tp_str);
+    PY_CHECK_ARG_TYPE(2, tp_tuple);
+    PY_CHECK_ARG_TYPE(3, tp_dict);
+    // eval_src
+    const char* eval_src = py_tostr(py_arg(1));
+    // *args
+    if(!py_pickle_dumps(py_arg(2))) return false;
+    int args_size;
+    unsigned char* args_data = py_tobytes(py_retval(), &args_size);
+    // *kwargs
+    if(!py_pickle_dumps(py_arg(3))) return false;
+    int kwargs_size;
+    unsigned char* kwargs_data = py_tobytes(py_retval(), &kwargs_size);
+    /**************************/
+    ComputeThreadJobCall* job = PK_MALLOC(sizeof(ComputeThreadJobCall));
+    job->self = self;
+    job->eval_src = c11_strdup(eval_src);
+    job->args_data = c11_memdup(args_data, args_size);
+    job->args_size = args_size;
+    job->kwargs_data = c11_memdup(kwargs_data, kwargs_size);
+    job->kwargs_size = kwargs_size;
+    c11_ComputeThread__reset_job(self, job, ComputeThreadJobCall__dtor);
+    /**************************/
+    atomic_store(&self->is_done, false);
+    bool ok = c11_thrd_create(&self->thread, ComputeThreadJob_call, job);
+    if(!ok) {
+        atomic_store(&self->is_done, true);
+        return OSError("thrd_create() failed");
+    }
+    py_newnone(py_retval());
+    return true;
+}
+
+static bool c11_ComputeThread__exec_blocked(c11_ComputeThread* self,
+                                            const char* source,
+                                            enum py_CompileMode mode) {
+    if(!atomic_load(&self->is_done)) return OSError("thread is not done yet");
+    atomic_store(&self->is_done, false);
+    char* err = NULL;
+    int old_vm_index = py_currentvm();
+    py_switchvm(self->vm_index);
+    py_StackRef p0 = py_peek(0);
+    if(!py_exec(source, "<job_blocked>", mode, NULL)) goto __ERROR;
+    if(!py_pickle_dumps(py_retval())) goto __ERROR;
+
+    int retval_size;
+    unsigned char* retval_data = py_tobytes(py_retval(), &retval_size);
+    py_switchvm(old_vm_index);
+    bool ok = py_pickle_loads(retval_data, retval_size);
+    atomic_store(&self->is_done, true);
+    return ok;
+
+__ERROR:
+    err = py_formatexc();
+    py_clearexc(p0);
+    py_switchvm(old_vm_index);
+    atomic_store(&self->is_done, true);
+    RuntimeError("c11_ComputeThread__exec_blocked() failed:\n%s", err);
+    PK_FREE(err);
+    return false;
+}
+
+static bool ComputeThread_exec(int argc, py_Ref argv) {
+    PY_CHECK_ARGC(2);
+    c11_ComputeThread* self = py_touserdata(py_arg(0));
+    PY_CHECK_ARG_TYPE(1, tp_str);
+    const char* source = py_tostr(py_arg(1));
+    return c11_ComputeThread__exec_blocked(self, source, EXEC_MODE);
+}
+
+static bool ComputeThread_eval(int argc, py_Ref argv) {
+    PY_CHECK_ARGC(2);
+    c11_ComputeThread* self = py_touserdata(py_arg(0));
+    PY_CHECK_ARG_TYPE(1, tp_str);
+    const char* source = py_tostr(py_arg(1));
+    return c11_ComputeThread__exec_blocked(self, source, EVAL_MODE);
+}
+
+static void pk_ComputeThread__register(py_Ref mod) {
+    py_Type type = py_newtype("ComputeThread", tp_object, mod, (py_Dtor)c11_ComputeThread__dtor);
+
+    py_bindmagic(type, __new__, ComputeThread__new__);
+    py_bindmagic(type, __init__, ComputeThread__init__);
+    py_bindproperty(type, "is_done", ComputeThread_is_done, NULL);
+    py_bindmethod(type, "wait_for_done", ComputeThread_wait_for_done);
+    py_bindmethod(type, "last_error", ComputeThread_last_error);
+    py_bindmethod(type, "last_retval", ComputeThread_last_retval);
+
+    py_bindmethod(type, "submit_exec", ComputeThread_submit_exec);
+    py_bindmethod(type, "submit_eval", ComputeThread_submit_eval);
+    py_bind(py_tpobject(type),
+            "submit_call(self, eval_src, *args, **kwargs)",
+            ComputeThread_submit_call);
+
+    py_bindmethod(type, "exec", ComputeThread_exec);
+    py_bindmethod(type, "eval", ComputeThread_eval);
+}
+
+#endif  // PK_ENABLE_THREADS
+
+static void pkpy_configmacros_add(py_Ref dict, const char* key, int val) {
+    assert(dict->type == tp_dict);
+    py_TValue tmp;
+    py_newint(&tmp, val);
+    py_dict_setitem_by_str(dict, key, &tmp);
+}
+
+static bool pkpy_profiler_begin(int argc, py_Ref argv) {
+    PY_CHECK_ARGC(0);
+    TraceInfo* trace_info = &pk_current_vm->trace_info;
+    if(trace_info->func == NULL) py_sys_settrace(LineProfiler_tracefunc, true);
+    if(trace_info->func != LineProfiler_tracefunc) {
+        return RuntimeError("LineProfiler_tracefunc() should be set as the trace function");
+    }
+    LineProfiler__begin(&pk_current_vm->line_profiler);
+    py_newnone(py_retval());
+    return true;
+}
+
+static bool pkpy_profiler_end(int argc, py_Ref argv) {
+    PY_CHECK_ARGC(0);
+    LineProfiler__end(&pk_current_vm->line_profiler);
+    py_newnone(py_retval());
+    return true;
+}
+
+static bool pkpy_profiler_reset(int argc, py_Ref argv) {
+    PY_CHECK_ARGC(0);
+    LineProfiler__reset(&pk_current_vm->line_profiler);
+    py_newnone(py_retval());
+    return true;
+}
+
+static bool pkpy_profiler_report(int argc, py_Ref argv) {
+    PY_CHECK_ARGC(0);
+    LineProfiler* lp = &pk_current_vm->line_profiler;
+    if(lp->enabled) LineProfiler__end(lp);
+    c11_string* report = LineProfiler__get_report(lp);
+    bool ok = py_json_loads(report->data);
+    c11_string__delete(report);
+    return ok;
 }
 
 void pk__add_module_pkpy() {
@@ -12519,11 +16440,43 @@ void pk__add_module_pkpy() {
 
     py_bindfunc(mod, "memory_usage", pkpy_memory_usage);
     py_bindfunc(mod, "is_user_defined_type", pkpy_is_user_defined_type);
+    py_bindfunc(mod, "enable_full_buffering_mode", pkpy_enable_full_buffering_mode);
+
+    py_bindfunc(mod, "currentvm", pkpy_currentvm);
+
+#if PK_ENABLE_WATCHDOG
+    py_bindfunc(mod, "watchdog_begin", pkpy_watchdog_begin);
+    py_bindfunc(mod, "watchdog_end", pkpy_watchdog_end);
+#endif
+
+#if PK_ENABLE_THREADS
+    pk_ComputeThread__register(mod);
+#endif
+
+    py_bindfunc(mod, "profiler_begin", pkpy_profiler_begin);
+    py_bindfunc(mod, "profiler_end", pkpy_profiler_end);
+    py_bindfunc(mod, "profiler_reset", pkpy_profiler_reset);
+    py_bindfunc(mod, "profiler_report", pkpy_profiler_report);
+
+    py_Ref configmacros = py_emplacedict(mod, py_name("configmacros"));
+    py_newdict(configmacros);
+    pkpy_configmacros_add(configmacros, "PK_ENABLE_OS", PK_ENABLE_OS);
+    pkpy_configmacros_add(configmacros, "PK_ENABLE_THREADS", PK_ENABLE_THREADS);
+    pkpy_configmacros_add(configmacros, "PK_ENABLE_DETERMINISM", PK_ENABLE_DETERMINISM);
+    pkpy_configmacros_add(configmacros, "PK_ENABLE_WATCHDOG", PK_ENABLE_WATCHDOG);
+    pkpy_configmacros_add(configmacros, "PK_GC_MIN_THRESHOLD", PK_GC_MIN_THRESHOLD);
+    pkpy_configmacros_add(configmacros, "PK_VM_STACK_SIZE", PK_VM_STACK_SIZE);
 }
 
 #undef DEF_TVALUE_METHODS
 // src/modules/math.c
 #include <math.h>
+
+#if PK_ENABLE_DETERMINISM
+    #ifndef _DMATH_H
+        #error "_DMATH_H not defined"
+    #endif
+#endif
 
 #define ONE_ARG_FUNC(name, func)                                                                   \
     static bool math_##name(int argc, py_Ref argv) {                                               \
@@ -12721,7 +16674,787 @@ void pk__add_module_math() {
 
 #undef ONE_ARG_FUNC
 #undef TWO_ARG_FUNC
-// src/modules/linalg.c
+// src/modules/pickle.c
+#include <stdint.h>
+
+typedef enum {
+    // clang-format off
+    PKL_MEMO_GET,
+    PKL_MEMO_SET,
+    PKL_NIL, PKL_NONE, PKL_ELLIPSIS,
+    PKL_INT_0, PKL_INT_1, PKL_INT_2, PKL_INT_3, PKL_INT_4, PKL_INT_5, PKL_INT_6, PKL_INT_7,
+    PKL_INT_8, PKL_INT_9, PKL_INT_10, PKL_INT_11, PKL_INT_12, PKL_INT_13, PKL_INT_14, PKL_INT_15,
+    PKL_INT8, PKL_INT16, PKL_INT32, PKL_INT64,
+    PKL_FLOAT32, PKL_FLOAT64,
+    PKL_TRUE, PKL_FALSE,
+    PKL_STRING, PKL_BYTES,
+    PKL_BUILD_LIST,
+    PKL_BUILD_TUPLE,
+    PKL_BUILD_DICT,
+    PKL_VEC2, PKL_VEC3,
+    PKL_VEC2I, PKL_VEC3I,
+    PKL_TYPE,
+    PKL_ARRAY2D,
+    PKL_TVALUE,
+    PKL_CALL,
+    PKL_OBJECT,
+    PKL_EOF,
+    // clang-format on
+} PickleOp;
+
+typedef struct {
+    bool* used_types;
+    int used_types_length;
+    c11_smallmap_p2i memo;
+    c11_vector /*T=char*/ codes;
+} PickleObject;
+
+static void PickleObject__ctor(PickleObject* self) {
+    self->used_types_length = pk_current_vm->types.length;
+    self->used_types = PK_MALLOC(self->used_types_length);
+    memset(self->used_types, 0, self->used_types_length);
+    c11_smallmap_p2i__ctor(&self->memo);
+    c11_vector__ctor(&self->codes, sizeof(char));
+}
+
+static void PickleObject__dtor(PickleObject* self) {
+    PK_FREE(self->used_types);
+    c11_smallmap_p2i__dtor(&self->memo);
+    c11_vector__dtor(&self->codes);
+}
+
+static bool PickleObject__py_submit(PickleObject* self, py_OutRef out);
+
+static void PickleObject__write_bytes(PickleObject* buf, const void* data, int size) {
+    c11_vector__extend(char, &buf->codes, data, size);
+}
+
+static void c11_sbuf__write_type_path(c11_sbuf* path_buf, py_Type type) {
+    py_TypeInfo* ti = pk_typeinfo(type);
+    if(py_isnil(ti->module)) {
+        c11_sbuf__write_cstr(path_buf, py_name2str(ti->name));
+        return;
+    }
+    py_ModuleInfo* mi = py_touserdata(ti->module);
+    c11_sbuf__write_sv(path_buf, c11_string__sv(mi->path));
+    c11_sbuf__write_char(path_buf, '.');
+    c11_sbuf__write_sv(path_buf, py_name2sv(ti->name));
+}
+
+static void pkl__emit_op(PickleObject* buf, PickleOp op) {
+    c11_vector__push(char, &buf->codes, op);
+}
+
+static void pkl__emit_int(PickleObject* buf, py_i64 val) {
+    if(val >= 0 && val <= 15) {
+        pkl__emit_op(buf, PKL_INT_0 + val);
+        return;
+    }
+    if(INT8_MIN <= val && val <= INT8_MAX) {
+        pkl__emit_op(buf, PKL_INT8);
+        PickleObject__write_bytes(buf, &val, 1);
+    } else if(INT16_MIN <= val && val <= INT16_MAX) {
+        pkl__emit_op(buf, PKL_INT16);
+        PickleObject__write_bytes(buf, &val, 2);
+    } else if(INT32_MIN <= val && val <= INT32_MAX) {
+        pkl__emit_op(buf, PKL_INT32);
+        PickleObject__write_bytes(buf, &val, 4);
+    } else {
+        pkl__emit_op(buf, PKL_INT64);
+        PickleObject__write_bytes(buf, &val, 8);
+    }
+}
+
+#define UNALIGNED_READ(p_val, p_buf)                                                               \
+    do {                                                                                           \
+        memcpy((p_val), (p_buf), sizeof(*(p_val)));                                                \
+        (p_buf) += sizeof(*(p_val));                                                               \
+    } while(0)
+
+static py_i64 pkl__read_int(const unsigned char** p) {
+    PickleOp op = (PickleOp) * *p;
+    (*p)++;
+    switch(op) {
+            // clang-format off
+        case PKL_INT_0: return 0; case PKL_INT_1: return 1; case PKL_INT_2: return 2; case PKL_INT_3: return 3;
+        case PKL_INT_4: return 4; case PKL_INT_5: return 5; case PKL_INT_6: return 6; case PKL_INT_7: return 7;
+        case PKL_INT_8: return 8; case PKL_INT_9: return 9; case PKL_INT_10: return 10; case PKL_INT_11: return 11;
+        case PKL_INT_12: return 12; case PKL_INT_13: return 13; case PKL_INT_14: return 14; case PKL_INT_15: return 15;
+        // clang-format on
+        case PKL_INT8: {
+            int8_t val;
+            UNALIGNED_READ(&val, *p);
+            return val;
+        }
+        case PKL_INT16: {
+            int16_t val;
+            UNALIGNED_READ(&val, *p);
+            return val;
+        }
+        case PKL_INT32: {
+            int32_t val;
+            UNALIGNED_READ(&val, *p);
+            return val;
+        }
+        case PKL_INT64: {
+            int64_t val;
+            UNALIGNED_READ(&val, *p);
+            return val;
+        }
+        default: c11__abort("pkl__read_int(): invalid op: %d", op);
+    }
+}
+
+static bool pickle_loads(int argc, py_Ref argv) {
+    PY_CHECK_ARGC(1);
+    PY_CHECK_ARG_TYPE(0, tp_bytes);
+    int size;
+    const unsigned char* data = py_tobytes(argv, &size);
+    return py_pickle_loads(data, size);
+}
+
+static bool pickle_dumps(int argc, py_Ref argv) {
+    PY_CHECK_ARGC(1);
+    return py_pickle_dumps(argv);
+}
+
+void pk__add_module_pickle() {
+    py_Ref mod = py_newmodule("pickle");
+
+    py_bindfunc(mod, "loads", pickle_loads);
+    py_bindfunc(mod, "dumps", pickle_dumps);
+}
+
+static bool pkl__write_object(PickleObject* buf, py_TValue* obj);
+
+static bool pkl__write_array(PickleObject* buf, PickleOp op, py_TValue* arr, int length) {
+    for(int i = 0; i < length; i++) {
+        bool ok = pkl__write_object(buf, arr + i);
+        if(!ok) return false;
+    }
+    pkl__emit_op(buf, op);
+    pkl__emit_int(buf, length);
+    return true;
+}
+
+static bool pkl__write_dict_kv(py_Ref k, py_Ref v, void* ctx) {
+    PickleObject* buf = (PickleObject*)ctx;
+    if(!pkl__write_object(buf, k)) return false;
+    if(!pkl__write_object(buf, v)) return false;
+    return true;
+}
+
+static bool pkl__try_memo(PickleObject* buf, PyObject* memo_key) {
+    int index = c11_smallmap_p2i__get(&buf->memo, memo_key, -1);
+    if(index != -1) {
+        pkl__emit_op(buf, PKL_MEMO_GET);
+        pkl__emit_int(buf, index);
+        return true;
+    }
+    return false;
+}
+
+static void pkl__store_memo(PickleObject* buf, PyObject* memo_key) {
+    int index = buf->memo.length;
+    c11_smallmap_p2i__set(&buf->memo, memo_key, index);
+    pkl__emit_op(buf, PKL_MEMO_SET);
+    pkl__emit_int(buf, index);
+}
+
+static bool pkl__write_object(PickleObject* buf, py_TValue* obj) {
+    switch(obj->type) {
+        case tp_nil: {
+            return ValueError("'nil' object is not picklable");
+        }
+        case tp_NoneType: {
+            pkl__emit_op(buf, PKL_NONE);
+            return true;
+        }
+        case tp_ellipsis: {
+            pkl__emit_op(buf, PKL_ELLIPSIS);
+            return true;
+        }
+        case tp_int: {
+            py_i64 val = obj->_i64;
+            pkl__emit_int(buf, val);
+            return true;
+        }
+        case tp_float: {
+            py_f64 val = obj->_f64;
+            float val32 = (float)val;
+            if(val == val32) {
+                pkl__emit_op(buf, PKL_FLOAT32);
+                PickleObject__write_bytes(buf, &val32, 4);
+            } else {
+                pkl__emit_op(buf, PKL_FLOAT64);
+                PickleObject__write_bytes(buf, &val, 8);
+            }
+            return true;
+        }
+        case tp_bool: {
+            bool val = obj->_bool;
+            pkl__emit_op(buf, val ? PKL_TRUE : PKL_FALSE);
+            return true;
+        }
+        case tp_str: {
+            if(pkl__try_memo(buf, obj->_obj))
+                return true;
+            else {
+                pkl__emit_op(buf, PKL_STRING);
+                c11_sv sv = py_tosv(obj);
+                pkl__emit_int(buf, sv.size);
+                PickleObject__write_bytes(buf, sv.data, sv.size);
+            }
+            pkl__store_memo(buf, obj->_obj);
+            return true;
+        }
+        case tp_bytes: {
+            if(pkl__try_memo(buf, obj->_obj))
+                return true;
+            else {
+                pkl__emit_op(buf, PKL_BYTES);
+                int size;
+                unsigned char* data = py_tobytes(obj, &size);
+                pkl__emit_int(buf, size);
+                PickleObject__write_bytes(buf, data, size);
+            }
+            pkl__store_memo(buf, obj->_obj);
+            return true;
+        }
+        case tp_list: {
+            if(pkl__try_memo(buf, obj->_obj))
+                return true;
+            else {
+                bool ok =
+                    pkl__write_array(buf, PKL_BUILD_LIST, py_list_data(obj), py_list_len(obj));
+                if(!ok) return false;
+            }
+            pkl__store_memo(buf, obj->_obj);
+            return true;
+        }
+        case tp_tuple: {
+            if(pkl__try_memo(buf, obj->_obj))
+                return true;
+            else {
+                bool ok =
+                    pkl__write_array(buf, PKL_BUILD_TUPLE, py_tuple_data(obj), py_tuple_len(obj));
+                if(!ok) return false;
+            }
+            pkl__store_memo(buf, obj->_obj);
+            return true;
+        }
+        case tp_dict: {
+            if(pkl__try_memo(buf, obj->_obj))
+                return true;
+            else {
+                bool ok = py_dict_apply(obj, pkl__write_dict_kv, (void*)buf);
+                if(!ok) return false;
+                pkl__emit_op(buf, PKL_BUILD_DICT);
+                pkl__emit_int(buf, py_dict_len(obj));
+            }
+            pkl__store_memo(buf, obj->_obj);
+            return true;
+        }
+        case tp_vec2: {
+            c11_vec2 val = py_tovec2(obj);
+            pkl__emit_op(buf, PKL_VEC2);
+            PickleObject__write_bytes(buf, &val, sizeof(c11_vec2));
+            return true;
+        }
+        case tp_vec3: {
+            c11_vec3 val = py_tovec3(obj);
+            pkl__emit_op(buf, PKL_VEC3);
+            PickleObject__write_bytes(buf, &val, sizeof(c11_vec3));
+            return true;
+        }
+        case tp_vec2i: {
+            c11_vec2i val = py_tovec2i(obj);
+            pkl__emit_op(buf, PKL_VEC2I);
+            pkl__emit_int(buf, val.x);
+            pkl__emit_int(buf, val.y);
+            return true;
+        }
+        case tp_vec3i: {
+            c11_vec3i val = py_tovec3i(obj);
+            pkl__emit_op(buf, PKL_VEC3I);
+            pkl__emit_int(buf, val.x);
+            pkl__emit_int(buf, val.y);
+            pkl__emit_int(buf, val.z);
+            return true;
+        }
+        case tp_type: {
+            pkl__emit_op(buf, PKL_TYPE);
+            py_Type type = py_totype(obj);
+            buf->used_types[type] = true;
+            pkl__emit_int(buf, type);
+            return true;
+        }
+        case tp_array2d: {
+            if(pkl__try_memo(buf, obj->_obj))
+                return true;
+            else {
+                c11_array2d* arr = py_touserdata(obj);
+                for(int i = 0; i < arr->header.numel; i++) {
+                    if(arr->data[i].is_ptr)
+                        return TypeError(
+                            "'array2d' object is not picklable because it contains heap-allocated objects");
+                    buf->used_types[arr->data[i].type] = true;
+                }
+                pkl__emit_op(buf, PKL_ARRAY2D);
+                pkl__emit_int(buf, arr->header.n_cols);
+                pkl__emit_int(buf, arr->header.n_rows);
+                PickleObject__write_bytes(buf, arr->data, arr->header.numel * sizeof(py_TValue));
+            }
+            pkl__store_memo(buf, obj->_obj);
+            return true;
+        }
+        default: {
+            if(!obj->is_ptr) {
+                pkl__emit_op(buf, PKL_TVALUE);
+                PickleObject__write_bytes(buf, obj, sizeof(py_TValue));
+                buf->used_types[obj->type] = true;
+                return true;
+            }
+            // try memo for `is_ptr=true` objects
+            if(pkl__try_memo(buf, obj->_obj)) return true;
+
+            py_TypeInfo* ti = pk_typeinfo(obj->type);
+            py_Ref f_reduce = py_tpfindmagic(obj->type, __reduce__);
+            if(f_reduce != NULL) {
+                if(!py_call(f_reduce, 1, obj)) return false;
+                // expected: (callable, args)
+                py_Ref reduced = py_retval();
+                if(!py_istuple(reduced)) { return TypeError("__reduce__ must return a tuple"); }
+                if(py_tuple_len(reduced) != 2) {
+                    return TypeError("__reduce__ must return a tuple of length 2");
+                }
+                if(!pkl__write_object(buf, py_tuple_getitem(reduced, 0))) return false;
+                pkl__emit_op(buf, PKL_NIL);
+                py_Ref args_tuple = py_tuple_getitem(reduced, 1);
+                int args_length = py_tuple_len(args_tuple);
+                for(int i = 0; i < args_length; i++) {
+                    if(!pkl__write_object(buf, py_tuple_getitem(args_tuple, i))) return false;
+                }
+                pkl__emit_op(buf, PKL_CALL);
+                pkl__emit_int(buf, args_length);
+                // store memo
+                pkl__store_memo(buf, obj->_obj);
+                return true;
+            }
+            if(ti->is_python) {
+                NameDict* dict = PyObject__dict(obj->_obj);
+                for(int i = dict->capacity - 1; i >= 0; i--) {
+                    NameDict_KV* kv = &dict->items[i];
+                    if(kv->key == NULL) continue;
+                    if(!pkl__write_object(buf, &kv->value)) return false;
+                }
+                pkl__emit_op(buf, PKL_OBJECT);
+                pkl__emit_int(buf, obj->type);
+                buf->used_types[obj->type] = true;
+                pkl__emit_int(buf, dict->length);
+                for(int i = 0; i < dict->capacity; i++) {
+                    NameDict_KV* kv = &dict->items[i];
+                    if(kv->key == NULL) continue;
+                    c11_sv field = py_name2sv(kv->key);
+                    // include '\0'
+                    PickleObject__write_bytes(buf, field.data, field.size + 1);
+                }
+
+                // store memo
+                pkl__store_memo(buf, obj->_obj);
+                return true;
+            }
+            return TypeError("'%t' object is not picklable", obj->type);
+        }
+    }
+    c11__unreachable();
+}
+
+bool py_pickle_dumps(py_Ref val) {
+    PickleObject buf;
+    PickleObject__ctor(&buf);
+    bool ok = pkl__write_object(&buf, val);
+    if(!ok) {
+        PickleObject__dtor(&buf);
+        return false;
+    }
+    pkl__emit_op(&buf, PKL_EOF);
+    return PickleObject__py_submit(&buf, py_retval());
+}
+
+static py_Type pkl__header_find_type(c11_sv path) {
+    int sep_index = c11_sv__rindex(path, '.');
+    if(sep_index == -1) return py_gettype(NULL, py_namev(path));
+    c11_sv mod_name = c11_sv__slice2(path, 0, sep_index);
+    c11_sv name = c11_sv__slice(path, sep_index + 1);
+    char buf[PK_MAX_MODULE_PATH_LEN + 1];
+    memcpy(buf, mod_name.data, mod_name.size);
+    buf[mod_name.size] = '\0';
+    return py_gettype(buf, py_namev(name));
+}
+
+static c11_sv pkl__header_read_sv(const unsigned char** p, char sep) {
+    c11_sv text;
+    text.data = (const char*)*p;
+    const char* p_end = strchr(text.data, sep);
+    assert(p_end != NULL);
+    text.size = p_end - text.data;
+    *p = (const unsigned char*)p_end + 1;
+    return text;
+}
+
+static py_i64 pkl__header_read_int(const unsigned char** p, char sep) {
+    c11_sv text = pkl__header_read_sv(p, sep);
+    py_i64 out;
+    IntParsingResult res = c11__parse_uint(text, &out, 10);
+    assert(res == IntParsing_SUCCESS);
+    return out;
+}
+
+bool py_pickle_loads_body(const unsigned char* p, int memo_length, c11_smallmap_d2d* type_mapping);
+
+bool py_pickle_loads(const unsigned char* data, int size) {
+    const unsigned char* p = data;
+
+    // \xf0\x9f\xa5\x95
+    if(size < 4 || p[0] != 240 || p[1] != 159 || p[2] != 165 || p[3] != 149)
+        return ValueError("invalid pickle data");
+    p += 4;
+
+    c11_smallmap_d2d type_mapping;
+    c11_smallmap_d2d__ctor(&type_mapping);
+
+    while(true) {
+        if(*p == '\n') {
+            p++;
+            break;
+        }
+        py_Type type = pkl__header_read_int(&p, '(');
+        c11_sv path = pkl__header_read_sv(&p, ')');
+        py_Type new_type = pkl__header_find_type(path);
+        if(new_type == 0) {
+            c11_smallmap_d2d__dtor(&type_mapping);
+            return ImportError("cannot find type '%v'", path);
+        }
+        if(type != new_type) c11_smallmap_d2d__set(&type_mapping, type, new_type);
+    }
+
+    int memo_length = pkl__header_read_int(&p, '\n');
+    bool ok = py_pickle_loads_body(p, memo_length, &type_mapping);
+    c11_smallmap_d2d__dtor(&type_mapping);
+    return ok;
+}
+
+static py_Type pkl__fix_type(py_Type type, c11_smallmap_d2d* type_mapping) {
+    int new_type = c11_smallmap_d2d__get(type_mapping, type, -1);
+    if(new_type != -1) return (py_Type)new_type;
+    return type;
+}
+
+bool py_pickle_loads_body(const unsigned char* p, int memo_length, c11_smallmap_d2d* type_mapping) {
+    py_StackRef p0 = py_peek(0);
+    py_Ref p_memo = py_newtuple(py_pushtmp(), memo_length);
+    while(true) {
+        PickleOp op = (PickleOp)*p;
+        p++;
+        switch(op) {
+            case PKL_MEMO_GET: {
+                int index = pkl__read_int(&p);
+                py_Ref val = &p_memo[index];
+                assert(!py_isnil(val));
+                py_push(val);
+                break;
+            }
+            case PKL_MEMO_SET: {
+                int index = pkl__read_int(&p);
+                p_memo[index] = *py_peek(-1);
+                break;
+            }
+            case PKL_NIL: {
+                py_pushnil();
+                break;
+            }
+            case PKL_NONE: {
+                py_pushnone();
+                break;
+            }
+            case PKL_ELLIPSIS: {
+                py_newellipsis(py_pushtmp());
+                break;
+            }
+                // clang-format off
+            case PKL_INT_0: case PKL_INT_1: case PKL_INT_2: case PKL_INT_3:
+            case PKL_INT_4: case PKL_INT_5: case PKL_INT_6: case PKL_INT_7:
+            case PKL_INT_8: case PKL_INT_9: case PKL_INT_10: case PKL_INT_11:
+            case PKL_INT_12: case PKL_INT_13: case PKL_INT_14: case PKL_INT_15: {
+                py_newint(py_pushtmp(), op - PKL_INT_0);
+                break;
+            }
+            // clang-format on
+            case PKL_INT8: {
+                int8_t val;
+                UNALIGNED_READ(&val, p);
+                py_newint(py_pushtmp(), val);
+                break;
+            }
+            case PKL_INT16: {
+                int16_t val;
+                UNALIGNED_READ(&val, p);
+                py_newint(py_pushtmp(), val);
+                break;
+            }
+            case PKL_INT32: {
+                int32_t val;
+                UNALIGNED_READ(&val, p);
+                py_newint(py_pushtmp(), val);
+                break;
+            }
+            case PKL_INT64: {
+                int64_t val;
+                UNALIGNED_READ(&val, p);
+                py_newint(py_pushtmp(), val);
+                break;
+            }
+            case PKL_FLOAT32: {
+                float val;
+                UNALIGNED_READ(&val, p);
+                py_newfloat(py_pushtmp(), val);
+                break;
+            }
+            case PKL_FLOAT64: {
+                double val;
+                UNALIGNED_READ(&val, p);
+                py_newfloat(py_pushtmp(), val);
+                break;
+            }
+            case PKL_TRUE: {
+                py_newbool(py_pushtmp(), true);
+                break;
+            }
+            case PKL_FALSE: {
+                py_newbool(py_pushtmp(), false);
+                break;
+            }
+            case PKL_STRING: {
+                int size = pkl__read_int(&p);
+                char* dst = py_newstrn(py_pushtmp(), size);
+                memcpy(dst, p, size);
+                p += size;
+                break;
+            }
+            case PKL_BYTES: {
+                int size = pkl__read_int(&p);
+                unsigned char* dst = py_newbytes(py_pushtmp(), size);
+                memcpy(dst, p, size);
+                p += size;
+                break;
+            }
+            case PKL_BUILD_LIST: {
+                int length = pkl__read_int(&p);
+                py_Ref val = py_retval();
+                py_newlistn(val, length);
+                for(int i = length - 1; i >= 0; i--) {
+                    py_StackRef item = py_peek(-1);
+                    py_list_setitem(val, i, item);
+                    py_pop();
+                }
+                py_push(val);
+                break;
+            }
+            case PKL_BUILD_TUPLE: {
+                int length = pkl__read_int(&p);
+                py_Ref val = py_retval();
+                py_Ref p = py_newtuple(val, length);
+                for(int i = length - 1; i >= 0; i--) {
+                    p[i] = *py_peek(-1);
+                    py_pop();
+                }
+                py_push(val);
+                break;
+            }
+            case PKL_BUILD_DICT: {
+                int length = pkl__read_int(&p);
+                py_Ref val = py_pushtmp();
+                py_newdict(val);
+                py_StackRef begin = py_peek(-1) - 2 * length;
+                py_StackRef end = py_peek(-1);
+                for(py_StackRef i = begin; i < end; i += 2) {
+                    py_StackRef k = i;
+                    py_StackRef v = i + 1;
+                    bool ok = py_dict_setitem(val, k, v);
+                    if(!ok) return false;
+                }
+                py_assign(py_retval(), val);
+                py_shrink(2 * length + 1);
+                py_push(py_retval());
+                break;
+            }
+            case PKL_VEC2: {
+                c11_vec2 val;
+                UNALIGNED_READ(&val, p);
+                py_newvec2(py_pushtmp(), val);
+                break;
+            }
+            case PKL_VEC3: {
+                c11_vec3 val;
+                UNALIGNED_READ(&val, p);
+                py_newvec3(py_pushtmp(), val);
+                break;
+            }
+            case PKL_VEC2I: {
+                c11_vec2i val;
+                val.x = pkl__read_int(&p);
+                val.y = pkl__read_int(&p);
+                py_newvec2i(py_pushtmp(), val);
+                break;
+            }
+            case PKL_VEC3I: {
+                c11_vec3i val;
+                val.x = pkl__read_int(&p);
+                val.y = pkl__read_int(&p);
+                val.z = pkl__read_int(&p);
+                py_newvec3i(py_pushtmp(), val);
+                break;
+            }
+            case PKL_TYPE: {
+                py_Type type = (py_Type)pkl__read_int(&p);
+                type = pkl__fix_type(type, type_mapping);
+                py_push(py_tpobject(type));
+                break;
+            }
+            case PKL_ARRAY2D: {
+                int n_cols = pkl__read_int(&p);
+                int n_rows = pkl__read_int(&p);
+                c11_array2d* arr = c11_newarray2d(py_pushtmp(), n_cols, n_rows);
+                int total_size = arr->header.numel * sizeof(py_TValue);
+                memcpy(arr->data, p, total_size);
+                for(int i = 0; i < arr->header.numel; i++) {
+                    arr->data[i].type = pkl__fix_type(arr->data[i].type, type_mapping);
+                }
+                p += total_size;
+                break;
+            }
+            case PKL_TVALUE: {
+                py_TValue* tmp = py_pushtmp();
+                memcpy(tmp, p, sizeof(py_TValue));
+                tmp->type = pkl__fix_type(tmp->type, type_mapping);
+                p += sizeof(py_TValue);
+                break;
+            }
+            case PKL_CALL: {
+                int argc = pkl__read_int(&p);
+                if(!py_vectorcall(argc, 0)) return false;
+                py_push(py_retval());
+                break;
+            }
+            case PKL_OBJECT: {
+                py_Type type = (py_Type)pkl__read_int(&p);
+                type = pkl__fix_type(type, type_mapping);
+                py_newobject(py_retval(), type, -1, 0);
+                NameDict* dict = PyObject__dict(py_retval()->_obj);
+                int dict_length = pkl__read_int(&p);
+                for(int i = 0; i < dict_length; i++) {
+                    py_StackRef value = py_peek(-1);
+                    c11_sv field = {(const char*)p, strlen((const char*)p)};
+                    NameDict__set(dict, py_namev(field), value);
+                    py_pop();
+                    p += field.size + 1;
+                }
+                py_push(py_retval());
+                break;
+            }
+            case PKL_EOF: {
+                // [memo, obj]
+                if(py_peek(0) - p0 != 2) return ValueError("invalid pickle data");
+                py_assign(py_retval(), py_peek(-1));
+                py_shrink(2);
+                return true;
+            }
+            default: c11__unreachable();
+        }
+    }
+    c11__unreachable();
+}
+
+static bool PickleObject__py_submit(PickleObject* self, py_OutRef out) {
+    c11_sbuf cleartext;
+    c11_sbuf__ctor(&cleartext);
+    c11_sbuf__write_cstr(&cleartext, "\xf0\x9f\xa5\x95");
+    // line 1: type mapping
+    for(py_Type type = 0; type < self->used_types_length; type++) {
+        if(self->used_types[type]) {
+            c11_sbuf__write_int(&cleartext, type);
+            c11_sbuf__write_char(&cleartext, '(');
+            c11_sbuf__write_type_path(&cleartext, type);
+            c11_sbuf__write_char(&cleartext, ')');
+        }
+    }
+    c11_sbuf__write_char(&cleartext, '\n');
+    // line 2: memo length
+    c11_sbuf__write_int(&cleartext, self->memo.length);
+    c11_sbuf__write_char(&cleartext, '\n');
+    // -------------------------------------------------- //
+    c11_string* header = c11_sbuf__submit(&cleartext);
+    int total_size = header->size + self->codes.length;
+    unsigned char* p = py_newbytes(py_retval(), total_size);
+    memcpy(p, header->data, header->size);
+    memcpy(p + header->size, self->codes.data, self->codes.length);
+    c11_string__delete(header);
+    PickleObject__dtor(self);
+    return true;
+}
+
+#undef UNALIGNED_READ
+
+// src/modules/traceback.c
+static bool traceback_format_exc(int argc, py_Ref argv) {
+    PY_CHECK_ARGC(0);
+    char* s = py_formatexc();
+    if(!s) {
+        py_newnone(py_retval());
+    } else {
+        py_newstr(py_retval(), s);
+        PK_FREE(s);
+    }
+    return true;
+}
+
+static bool traceback_print_exc(int argc, py_Ref argv) {
+    PY_CHECK_ARGC(0);
+    py_printexc();
+    py_newnone(py_retval());
+    return true;
+}
+
+void pk__add_module_traceback() {
+    py_Ref mod = py_newmodule("traceback");
+
+    py_bindfunc(mod, "format_exc", traceback_format_exc);
+    py_bindfunc(mod, "print_exc", traceback_print_exc);
+}
+// src/modules/inspect.c
+static bool inspect_isgeneratorfunction(int argc, py_Ref argv) {
+    PY_CHECK_ARGC(1);
+    py_Ref obj = argv;
+    if(py_istype(argv, tp_boundmethod)) {
+        py_TValue* slots = PyObject__slots(argv->_obj);
+        obj = &slots[1];  // callable
+    }
+    if(py_istype(obj, tp_function)) {
+        Function* fn = py_touserdata(obj);
+        py_newbool(py_retval(), fn->decl->type == FuncType_GENERATOR);
+    } else {
+        py_newbool(py_retval(), false);
+    }
+    return true;
+}
+
+void pk__add_module_inspect() {
+    py_Ref mod = py_newmodule("inspect");
+
+    py_bindfunc(mod, "isgeneratorfunction", inspect_isgeneratorfunction);
+}
+// src/modules/vmath.c
 #include <math.h>
 
 static bool isclose(float a, float b) { return fabs(a - b) < 1e-4; }
@@ -12776,25 +17509,23 @@ c11_vec2i py_tovec2i(py_Ref self) {
 void py_newvec3(py_OutRef out, c11_vec3 v) {
     out->type = tp_vec3;
     out->is_ptr = false;
-    c11_vec3* data = (c11_vec3*)(&out->extra);
-    *data = v;
+    out->_vec3 = v;
 }
 
 c11_vec3 py_tovec3(py_Ref self) {
     assert(self->type == tp_vec3);
-    return *(c11_vec3*)(&self->extra);
+    return self->_vec3;
 }
 
 void py_newvec3i(py_OutRef out, c11_vec3i v) {
     out->type = tp_vec3i;
     out->is_ptr = false;
-    c11_vec3i* data = (c11_vec3i*)(&out->extra);
-    *data = v;
+    out->_vec3i = v;
 }
 
 c11_vec3i py_tovec3i(py_Ref self) {
     assert(self->type == tp_vec3i);
-    return *(c11_vec3i*)(&self->extra);
+    return self->_vec3i;
 }
 
 c11_mat3x3* py_newmat3x3(py_OutRef out) {
@@ -13261,7 +17992,7 @@ static bool mat3x3__eq__(int argc, py_Ref argv) {
 
 DEFINE_BOOL_NE(mat3x3, mat3x3__eq__)
 
-static void matmul(const c11_mat3x3* lhs, const c11_mat3x3* rhs, c11_mat3x3* out) {
+static void matmul(const c11_mat3x3* lhs, const c11_mat3x3* rhs, c11_mat3x3* restrict out) {
     out->_11 = lhs->_11 * rhs->_11 + lhs->_12 * rhs->_21 + lhs->_13 * rhs->_31;
     out->_12 = lhs->_11 * rhs->_12 + lhs->_12 * rhs->_22 + lhs->_13 * rhs->_32;
     out->_13 = lhs->_11 * rhs->_13 + lhs->_12 * rhs->_23 + lhs->_13 * rhs->_33;
@@ -13279,7 +18010,7 @@ static float determinant(const c11_mat3x3* m) {
            m->_13 * (m->_21 * m->_32 - m->_22 * m->_31);
 }
 
-static bool inverse(const c11_mat3x3* m, c11_mat3x3* out) {
+static bool inverse(const c11_mat3x3* m, c11_mat3x3* restrict out) {
     float det = determinant(m);
     if(isclose(det, 0)) return false;
     float invdet = 1.0f / det;
@@ -13295,7 +18026,7 @@ static bool inverse(const c11_mat3x3* m, c11_mat3x3* out) {
     return true;
 }
 
-static void trs(c11_vec2 t, float r, c11_vec2 s, c11_mat3x3* out) {
+static void trs(c11_vec2 t, float r, c11_vec2 s, c11_mat3x3* restrict out) {
     float cr = cosf(r);
     float sr = sinf(r);
     // clang-format off
@@ -13554,26 +18285,289 @@ static bool vec3__with_xy(int argc, py_Ref argv) {
     return true;
 }
 
-void pk__add_module_linalg() {
-    py_Ref mod = py_newmodule("linalg");
+/* Color32 */
+void py_newcolor32(py_OutRef out, c11_color32 color) {
+    out->type = tp_color32;
+    out->is_ptr = false;
+    out->_color32 = color;
+}
+
+c11_color32 py_tocolor32(py_Ref obj) {
+    assert(obj->type == tp_color32);
+    return obj->_color32;
+}
+
+static bool color32__new__(int argc, py_Ref argv) {
+    PY_CHECK_ARGC(5);
+    c11_color32 color;
+    for(int i = 1; i < 5; i++) {
+        PY_CHECK_ARG_TYPE(i, tp_int);
+        py_i64 val = py_toint(&argv[i]);
+        if(val < 0 || val > 255) return ValueError("color32 values must be between 0 and 255");
+        color.data[i - 1] = (unsigned char)val;
+    }
+    py_newcolor32(py_retval(), color);
+    return true;
+}
+
+#define DEFINE_COLOR32_FIELD(name)                                                                 \
+    static bool color32__##name(int argc, py_Ref argv) {                                           \
+        PY_CHECK_ARGC(1);                                                                          \
+        c11_color32 color = py_tocolor32(argv);                                                    \
+        py_newint(py_retval(), color.name);                                                        \
+        return true;                                                                               \
+    }                                                                                              \
+    static bool color32_with_##name(int argc, py_Ref argv) {                                       \
+        PY_CHECK_ARGC(2);                                                                          \
+        c11_color32 color = py_tocolor32(argv);                                                    \
+        PY_CHECK_ARG_TYPE(1, tp_int);                                                              \
+        py_i64 val = py_toint(&argv[1]);                                                           \
+        if(val < 0 || val > 255) {                                                                 \
+            return ValueError("color32 values must be between 0 and 255");                         \
+        }                                                                                          \
+        color.name = (unsigned char)val;                                                           \
+        py_newcolor32(py_retval(), color);                                                         \
+        return true;                                                                               \
+    }
+
+DEFINE_COLOR32_FIELD(r)
+DEFINE_COLOR32_FIELD(g)
+DEFINE_COLOR32_FIELD(b)
+DEFINE_COLOR32_FIELD(a)
+
+#undef DEFINE_COLOR32_FIELD
+
+static bool color32_from_hex_STATIC(int argc, py_Ref argv) {
+    PY_CHECK_ARGC(1);
+    PY_CHECK_ARG_TYPE(0, tp_str);
+    c11_sv hex = py_tosv(argv);
+    c11_color32 color;
+    int res;
+    if(hex.size == 7) {
+        res = sscanf(hex.data, "#%2hhx%2hhx%2hhx", &color.r, &color.g, &color.b);
+        if(res != 3) return ValueError("invalid hex color format");
+        color.a = 255;
+    } else {
+        res = sscanf(hex.data, "#%2hhx%2hhx%2hhx%2hhx", &color.r, &color.g, &color.b, &color.a);
+        if(res != 4) return ValueError("invalid hex color format");
+    }
+    py_newcolor32(py_retval(), color);
+    return true;
+}
+
+static bool color32_from_vec3_STATIC(int argc, py_Ref argv) {
+    PY_CHECK_ARGC(1);
+    PY_CHECK_ARG_TYPE(0, tp_vec3);
+    c11_vec3 v = py_tovec3(argv);
+    c11_color32 color;
+    color.r = (unsigned char)(v.x * 255);
+    color.g = (unsigned char)(v.y * 255);
+    color.b = (unsigned char)(v.z * 255);
+    color.a = 255;
+    py_newcolor32(py_retval(), color);
+    return true;
+}
+
+static bool color32_from_vec3i_STATIC(int argc, py_Ref argv) {
+    PY_CHECK_ARGC(1);
+    PY_CHECK_ARG_TYPE(0, tp_vec3i);
+    c11_vec3i v = py_tovec3i(argv);
+    c11_color32 color;
+    color.r = (unsigned char)v.x;
+    color.g = (unsigned char)v.y;
+    color.b = (unsigned char)v.z;
+    color.a = 255;
+    py_newcolor32(py_retval(), color);
+    return true;
+}
+
+static bool color32_to_hex(int argc, py_Ref argv) {
+    PY_CHECK_ARGC(1);
+    c11_color32 color = py_tocolor32(argv);
+    char buf[16];
+    int size;
+    if(color.a == 255) {
+        size = snprintf(buf, sizeof(buf), "#%02x%02x%02x", color.r, color.g, color.b);
+    } else {
+        size = snprintf(buf, sizeof(buf), "#%02x%02x%02x%02x", color.r, color.g, color.b, color.a);
+    }
+    py_newstrv(py_retval(), (c11_sv){buf, size});
+    return true;
+}
+
+static void c11_color32_premult(c11_color32* color) {
+    if(color->a == 255) return;
+    float alpha = color->a / 255.0f;
+    color->r = (unsigned char)(color->r * alpha);
+    color->g = (unsigned char)(color->g * alpha);
+    color->b = (unsigned char)(color->b * alpha);
+}
+
+static bool color32_to_vec3(int argc, py_Ref argv) {
+    PY_CHECK_ARGC(1);
+    c11_color32 color = py_tocolor32(argv);
+    c11_color32_premult(&color);
+    c11_vec3 v;
+    v.x = (float)color.r / 255;
+    v.y = (float)color.g / 255;
+    v.z = (float)color.b / 255;
+    py_newvec3(py_retval(), v);
+    return true;
+}
+
+static bool color32_to_vec3i(int argc, py_Ref argv) {
+    PY_CHECK_ARGC(1);
+    c11_color32 color = py_tocolor32(argv);
+    c11_color32_premult(&color);
+    c11_vec3i v;
+    v.x = (int)color.r;
+    v.y = (int)color.g;
+    v.z = (int)color.b;
+    py_newvec3i(py_retval(), v);
+    return true;
+}
+
+static bool color32__eq__(int argc, py_Ref argv) {
+    PY_CHECK_ARGC(2);
+    if(argv[1].type != tp_color32) {
+        py_newnotimplemented(py_retval());
+        return true;
+    }
+    c11_color32 lhs = py_tocolor32(&argv[0]);
+    c11_color32 rhs = py_tocolor32(&argv[1]);
+    bool eq = memcmp(&lhs, &rhs, sizeof(c11_color32)) == 0;
+    py_newbool(py_retval(), eq);
+    return true;
+}
+
+static bool color32__ne__(int argc, py_Ref argv) {
+    PY_CHECK_ARGC(2);
+    if(argv[1].type != tp_color32) {
+        py_newnotimplemented(py_retval());
+        return true;
+    }
+    c11_color32 lhs = py_tocolor32(&argv[0]);
+    c11_color32 rhs = py_tocolor32(&argv[1]);
+    bool eq = memcmp(&lhs, &rhs, sizeof(c11_color32)) != 0;
+    py_newbool(py_retval(), eq);
+    return true;
+}
+
+static bool color32__repr__(int argc, py_Ref argv) {
+    PY_CHECK_ARGC(1);
+    c11_color32 color = py_tocolor32(argv);
+    char buf[64];
+    int size = snprintf(buf, 64, "color32(%d, %d, %d, %d)", color.r, color.g, color.b, color.a);
+    py_newstrv(py_retval(), (c11_sv){buf, size});
+    return true;
+}
+
+static bool color32__hash__(int argc, py_Ref argv) {
+    PY_CHECK_ARGC(1);
+    c11_color32 color = py_tocolor32(argv);
+    uint32_t* color_int = (uint32_t*)&color;
+    py_newint(py_retval(), *color_int);
+    return true;
+}
+
+static bool color32_ansi_fg(int argc, py_Ref argv) {
+    PY_CHECK_ARGC(2);
+    c11_color32 color = py_tocolor32(argv);
+    c11_color32_premult(&color);
+    PY_CHECK_ARG_TYPE(1, tp_str);
+    c11_sv text = py_tosv(&argv[1]);
+    c11_sbuf buf;
+    c11_sbuf__ctor(&buf);
+    pk_sprintf(&buf, "\x1b[38;2;%d;%d;%dm%v\x1b[0m", color.r, color.g, color.b, text);
+    c11_sbuf__py_submit(&buf, py_retval());
+    return true;
+}
+
+static bool color32_ansi_bg(int argc, py_Ref argv) {
+    PY_CHECK_ARGC(2);
+    c11_color32 color = py_tocolor32(argv);
+    c11_color32_premult(&color);
+    PY_CHECK_ARG_TYPE(1, tp_str);
+    c11_sv text = py_tosv(&argv[1]);
+    c11_sbuf buf;
+    c11_sbuf__ctor(&buf);
+    pk_sprintf(&buf, "\x1b[48;2;%d;%d;%dm%v\x1b[0m", color.r, color.g, color.b, text);
+    c11_sbuf__py_submit(&buf, py_retval());
+    return true;
+}
+
+static bool vmath_rgb(int argc, py_Ref argv) {
+    PY_CHECK_ARGC(3);
+    PY_CHECK_ARG_TYPE(0, tp_int);
+    PY_CHECK_ARG_TYPE(1, tp_int);
+    PY_CHECK_ARG_TYPE(2, tp_int);
+    c11_color32 color;
+    color.r = (unsigned char)py_toint(&argv[0]);
+    color.g = (unsigned char)py_toint(&argv[1]);
+    color.b = (unsigned char)py_toint(&argv[2]);
+    color.a = 255;
+    py_newcolor32(py_retval(), color);
+    return true;
+}
+
+static bool vmath_rgba(int argc, py_Ref argv) {
+    PY_CHECK_ARGC(4);
+    PY_CHECK_ARG_TYPE(0, tp_int);
+    PY_CHECK_ARG_TYPE(1, tp_int);
+    PY_CHECK_ARG_TYPE(2, tp_int);
+    PY_CHECK_ARG_TYPE(3, tp_float);
+    c11_color32 color;
+    color.r = (unsigned char)py_toint(&argv[0]);
+    color.g = (unsigned char)py_toint(&argv[1]);
+    color.b = (unsigned char)py_toint(&argv[2]);
+    color.a = (unsigned char)(py_tofloat(&argv[3]) * 255);
+    py_newcolor32(py_retval(), color);
+    return true;
+}
+
+static bool color32_alpha_blend_STATIC(int argc, py_Ref argv) {
+    PY_CHECK_ARGC(2);
+    if(!py_checktype(&argv[0], tp_color32)) return false;
+    if(py_isnone(&argv[1])) {
+        py_assign(py_retval(), &argv[0]);
+        return true;
+    }
+    if(!py_checktype(&argv[1], tp_color32)) return false;
+    c11_color32 src = py_tocolor32(&argv[0]);
+    c11_color32 dst = py_tocolor32(&argv[1]);
+    float alpha = src.a / 255.0f;
+    c11_color32 res;
+    res.r = (unsigned char)(src.r * alpha + dst.r * (1 - alpha));
+    res.g = (unsigned char)(src.g * alpha + dst.g * (1 - alpha));
+    res.b = (unsigned char)(src.b * alpha + dst.b * (1 - alpha));
+    res.a = (unsigned char)(src.a * alpha + dst.a * (1 - alpha));
+    py_newcolor32(py_retval(), res);
+    return true;
+}
+
+void pk__add_module_vmath() {
+    py_Ref mod = py_newmodule("vmath");
 
     py_Type vec2 = pk_newtype("vec2", tp_object, mod, NULL, false, true);
     py_Type vec3 = pk_newtype("vec3", tp_object, mod, NULL, false, true);
     py_Type vec2i = pk_newtype("vec2i", tp_object, mod, NULL, false, true);
     py_Type vec3i = pk_newtype("vec3i", tp_object, mod, NULL, false, true);
     py_Type mat3x3 = pk_newtype("mat3x3", tp_object, mod, NULL, false, true);
+    py_Type color32 = pk_newtype("color32", tp_object, mod, NULL, false, true);
 
     py_setdict(mod, py_name("vec2"), py_tpobject(vec2));
     py_setdict(mod, py_name("vec3"), py_tpobject(vec3));
     py_setdict(mod, py_name("vec2i"), py_tpobject(vec2i));
     py_setdict(mod, py_name("vec3i"), py_tpobject(vec3i));
     py_setdict(mod, py_name("mat3x3"), py_tpobject(mat3x3));
+    py_setdict(mod, py_name("color32"), py_tpobject(color32));
 
     assert(vec2 == tp_vec2);
     assert(vec3 == tp_vec3);
     assert(vec2i == tp_vec2i);
     assert(vec3i == tp_vec3i);
     assert(mat3x3 == tp_mat3x3);
+    assert(color32 == tp_color32);
 
     /* vec2 */
     py_bindmagic(vec2, __new__, vec2__new__);
@@ -13715,6 +18709,32 @@ void pk__add_module_linalg() {
                (c11_vec3){
                    {1, 1, 1}
     });
+
+    /* color32 */
+    py_bindmagic(color32, __new__, color32__new__);
+    py_bindmagic(color32, __repr__, color32__repr__);
+    py_bindmagic(color32, __eq__, color32__eq__);
+    py_bindmagic(color32, __ne__, color32__ne__);
+    py_bindmagic(color32, __hash__, color32__hash__);
+    py_bindproperty(color32, "r", color32__r, NULL);
+    py_bindproperty(color32, "g", color32__g, NULL);
+    py_bindproperty(color32, "b", color32__b, NULL);
+    py_bindproperty(color32, "a", color32__a, NULL);
+    py_bindmethod(color32, "with_r", color32_with_r);
+    py_bindmethod(color32, "with_g", color32_with_g);
+    py_bindmethod(color32, "with_b", color32_with_b);
+    py_bindmethod(color32, "with_a", color32_with_a);
+    py_bindstaticmethod(color32, "from_hex", color32_from_hex_STATIC);
+    py_bindstaticmethod(color32, "from_vec3", color32_from_vec3_STATIC);
+    py_bindstaticmethod(color32, "from_vec3i", color32_from_vec3i_STATIC);
+    py_bindmethod(color32, "to_hex", color32_to_hex);
+    py_bindmethod(color32, "to_vec3", color32_to_vec3);
+    py_bindmethod(color32, "to_vec3i", color32_to_vec3i);
+    py_bindmethod(color32, "ansi_fg", color32_ansi_fg);
+    py_bindmethod(color32, "ansi_bg", color32_ansi_bg);
+    py_bindfunc(mod, "rgb", vmath_rgb);
+    py_bindfunc(mod, "rgba", vmath_rgba);
+    py_bindstaticmethod(color32, "alpha_blend", color32_alpha_blend_STATIC);
 }
 
 #undef DEFINE_VEC_FIELD
@@ -13722,786 +18742,6 @@ void pk__add_module_linalg() {
 #undef DEF_VECTOR_ELEMENT_WISE
 #undef DEF_VECTOR_OPS
 #undef DEF_VECTOR_INT_OPS
-// src/modules/pickle.c
-#include <stdint.h>
-
-typedef enum {
-    // clang-format off
-    PKL_MEMO_GET,
-    PKL_MEMO_SET,
-    PKL_NIL, PKL_NONE, PKL_ELLIPSIS,
-    PKL_INT_0, PKL_INT_1, PKL_INT_2, PKL_INT_3, PKL_INT_4, PKL_INT_5, PKL_INT_6, PKL_INT_7,
-    PKL_INT_8, PKL_INT_9, PKL_INT_10, PKL_INT_11, PKL_INT_12, PKL_INT_13, PKL_INT_14, PKL_INT_15,
-    PKL_INT8, PKL_INT16, PKL_INT32, PKL_INT64,
-    PKL_FLOAT32, PKL_FLOAT64,
-    PKL_TRUE, PKL_FALSE,
-    PKL_STRING, PKL_BYTES,
-    PKL_BUILD_LIST,
-    PKL_BUILD_TUPLE,
-    PKL_BUILD_DICT,
-    PKL_VEC2, PKL_VEC3,
-    PKL_VEC2I, PKL_VEC3I,
-    PKL_TYPE,
-    PKL_ARRAY2D,
-    PKL_TVALUE,
-    PKL_CALL,
-    PKL_OBJECT,
-    PKL_EOF,
-    // clang-format on
-} PickleOp;
-
-typedef struct {
-    bool* used_types;
-    int used_types_length;
-    c11_smallmap_p2i memo;
-    c11_vector /*T=char*/ codes;
-} PickleObject;
-
-static void PickleObject__ctor(PickleObject* self) {
-    self->used_types_length = pk_current_vm->types.length;
-    self->used_types = PK_MALLOC(self->used_types_length);
-    memset(self->used_types, 0, self->used_types_length);
-    c11_smallmap_p2i__ctor(&self->memo);
-    c11_vector__ctor(&self->codes, sizeof(char));
-}
-
-static void PickleObject__dtor(PickleObject* self) {
-    PK_FREE(self->used_types);
-    c11_smallmap_p2i__dtor(&self->memo);
-    c11_vector__dtor(&self->codes);
-}
-
-static bool PickleObject__py_submit(PickleObject* self, py_OutRef out);
-
-static void PickleObject__write_bytes(PickleObject* buf, const void* data, int size) {
-    c11_vector__extend(char, &buf->codes, data, size);
-}
-
-static void c11_sbuf__write_type_path(c11_sbuf* path_buf, py_Type type) {
-    py_TypeInfo* ti = pk__type_info(type);
-    if(py_isnil(&ti->module)) {
-        c11_sbuf__write_cstr(path_buf, py_name2str(ti->name));
-        return;
-    }
-    const char* mod_path = py_tostr(py_getdict(&ti->module, __path__));
-    c11_sbuf__write_cstr(path_buf, mod_path);
-    c11_sbuf__write_char(path_buf, '.');
-    c11_sbuf__write_cstr(path_buf, py_name2str(ti->name));
-}
-
-static void pkl__emit_op(PickleObject* buf, PickleOp op) {
-    c11_vector__push(char, &buf->codes, op);
-}
-
-static void pkl__emit_int(PickleObject* buf, py_i64 val) {
-    if(val >= 0 && val <= 15) {
-        pkl__emit_op(buf, PKL_INT_0 + val);
-        return;
-    }
-    if(INT8_MIN <= val && val <= INT8_MAX) {
-        pkl__emit_op(buf, PKL_INT8);
-        PickleObject__write_bytes(buf, &val, 1);
-    } else if(INT16_MIN <= val && val <= INT16_MAX) {
-        pkl__emit_op(buf, PKL_INT16);
-        PickleObject__write_bytes(buf, &val, 2);
-    } else if(INT32_MIN <= val && val <= INT32_MAX) {
-        pkl__emit_op(buf, PKL_INT32);
-        PickleObject__write_bytes(buf, &val, 4);
-    } else {
-        pkl__emit_op(buf, PKL_INT64);
-        PickleObject__write_bytes(buf, &val, 8);
-    }
-}
-
-#define UNALIGNED_READ(p_val, p_buf)                                                               \
-    do {                                                                                           \
-        memcpy((p_val), (p_buf), sizeof(*(p_val)));                                                \
-        (p_buf) += sizeof(*(p_val));                                                               \
-    } while(0)
-
-static py_i64 pkl__read_int(const unsigned char** p) {
-    PickleOp op = (PickleOp) * *p;
-    (*p)++;
-    switch(op) {
-            // clang-format off
-        case PKL_INT_0: return 0; case PKL_INT_1: return 1; case PKL_INT_2: return 2; case PKL_INT_3: return 3;
-        case PKL_INT_4: return 4; case PKL_INT_5: return 5; case PKL_INT_6: return 6; case PKL_INT_7: return 7;
-        case PKL_INT_8: return 8; case PKL_INT_9: return 9; case PKL_INT_10: return 10; case PKL_INT_11: return 11;
-        case PKL_INT_12: return 12; case PKL_INT_13: return 13; case PKL_INT_14: return 14; case PKL_INT_15: return 15;
-        // clang-format on
-        case PKL_INT8: {
-            int8_t val;
-            UNALIGNED_READ(&val, *p);
-            return val;
-        }
-        case PKL_INT16: {
-            int16_t val;
-            UNALIGNED_READ(&val, *p);
-            return val;
-        }
-        case PKL_INT32: {
-            int32_t val;
-            UNALIGNED_READ(&val, *p);
-            return val;
-        }
-        case PKL_INT64: {
-            int64_t val;
-            UNALIGNED_READ(&val, *p);
-            return val;
-        }
-        default: c11__abort("pkl__read_int(): invalid op: %d", op);
-    }
-}
-
-static bool pickle_loads(int argc, py_Ref argv) {
-    PY_CHECK_ARGC(1);
-    PY_CHECK_ARG_TYPE(0, tp_bytes);
-    int size;
-    const unsigned char* data = py_tobytes(argv, &size);
-    return py_pickle_loads(data, size);
-}
-
-static bool pickle_dumps(int argc, py_Ref argv) {
-    PY_CHECK_ARGC(1);
-    return py_pickle_dumps(argv);
-}
-
-void pk__add_module_pickle() {
-    py_Ref mod = py_newmodule("pickle");
-
-    py_bindfunc(mod, "loads", pickle_loads);
-    py_bindfunc(mod, "dumps", pickle_dumps);
-}
-
-static bool pkl__write_object(PickleObject* buf, py_TValue* obj);
-
-static bool pkl__write_array(PickleObject* buf, PickleOp op, py_TValue* arr, int length) {
-    for(int i = 0; i < length; i++) {
-        bool ok = pkl__write_object(buf, arr + i);
-        if(!ok) return false;
-    }
-    pkl__emit_op(buf, op);
-    pkl__emit_int(buf, length);
-    return true;
-}
-
-static bool pkl__write_dict_kv(py_Ref k, py_Ref v, void* ctx) {
-    PickleObject* buf = (PickleObject*)ctx;
-    if(!pkl__write_object(buf, k)) return false;
-    if(!pkl__write_object(buf, v)) return false;
-    return true;
-}
-
-static bool pkl__try_memo(PickleObject* buf, PyObject* memo_key) {
-    int index = c11_smallmap_p2i__get(&buf->memo, memo_key, -1);
-    if(index != -1) {
-        pkl__emit_op(buf, PKL_MEMO_GET);
-        pkl__emit_int(buf, index);
-        return true;
-    }
-    return false;
-}
-
-static void pkl__store_memo(PickleObject* buf, PyObject* memo_key) {
-    int index = buf->memo.length;
-    c11_smallmap_p2i__set(&buf->memo, memo_key, index);
-    pkl__emit_op(buf, PKL_MEMO_SET);
-    pkl__emit_int(buf, index);
-}
-
-static bool pkl__write_object(PickleObject* buf, py_TValue* obj) {
-    switch(obj->type) {
-        case tp_nil: {
-            return ValueError("'nil' object is not picklable");
-        }
-        case tp_NoneType: {
-            pkl__emit_op(buf, PKL_NONE);
-            return true;
-        }
-        case tp_ellipsis: {
-            pkl__emit_op(buf, PKL_ELLIPSIS);
-            return true;
-        }
-        case tp_int: {
-            py_i64 val = obj->_i64;
-            pkl__emit_int(buf, val);
-            return true;
-        }
-        case tp_float: {
-            py_f64 val = obj->_f64;
-            float val32 = (float)val;
-            if(val == val32) {
-                pkl__emit_op(buf, PKL_FLOAT32);
-                PickleObject__write_bytes(buf, &val32, 4);
-            } else {
-                pkl__emit_op(buf, PKL_FLOAT64);
-                PickleObject__write_bytes(buf, &val, 8);
-            }
-            return true;
-        }
-        case tp_bool: {
-            bool val = obj->_bool;
-            pkl__emit_op(buf, val ? PKL_TRUE : PKL_FALSE);
-            return true;
-        }
-        case tp_str: {
-            if(pkl__try_memo(buf, obj->_obj))
-                return true;
-            else {
-                pkl__emit_op(buf, PKL_STRING);
-                c11_sv sv = py_tosv(obj);
-                pkl__emit_int(buf, sv.size);
-                PickleObject__write_bytes(buf, sv.data, sv.size);
-            }
-            pkl__store_memo(buf, obj->_obj);
-            return true;
-        }
-        case tp_bytes: {
-            if(pkl__try_memo(buf, obj->_obj))
-                return true;
-            else {
-                pkl__emit_op(buf, PKL_BYTES);
-                int size;
-                unsigned char* data = py_tobytes(obj, &size);
-                pkl__emit_int(buf, size);
-                PickleObject__write_bytes(buf, data, size);
-            }
-            pkl__store_memo(buf, obj->_obj);
-            return true;
-        }
-        case tp_list: {
-            if(pkl__try_memo(buf, obj->_obj))
-                return true;
-            else {
-                bool ok =
-                    pkl__write_array(buf, PKL_BUILD_LIST, py_list_data(obj), py_list_len(obj));
-                if(!ok) return false;
-            }
-            pkl__store_memo(buf, obj->_obj);
-            return true;
-        }
-        case tp_tuple: {
-            if(pkl__try_memo(buf, obj->_obj))
-                return true;
-            else {
-                bool ok =
-                    pkl__write_array(buf, PKL_BUILD_TUPLE, py_tuple_data(obj), py_tuple_len(obj));
-                if(!ok) return false;
-            }
-            pkl__store_memo(buf, obj->_obj);
-            return true;
-        }
-        case tp_dict: {
-            if(pkl__try_memo(buf, obj->_obj))
-                return true;
-            else {
-                bool ok = py_dict_apply(obj, pkl__write_dict_kv, (void*)buf);
-                if(!ok) return false;
-                pkl__emit_op(buf, PKL_BUILD_DICT);
-                pkl__emit_int(buf, py_dict_len(obj));
-            }
-            pkl__store_memo(buf, obj->_obj);
-            return true;
-        }
-        case tp_vec2: {
-            c11_vec2 val = py_tovec2(obj);
-            pkl__emit_op(buf, PKL_VEC2);
-            PickleObject__write_bytes(buf, &val, sizeof(c11_vec2));
-            return true;
-        }
-        case tp_vec3: {
-            c11_vec3 val = py_tovec3(obj);
-            pkl__emit_op(buf, PKL_VEC3);
-            PickleObject__write_bytes(buf, &val, sizeof(c11_vec3));
-            return true;
-        }
-        case tp_vec2i: {
-            c11_vec2i val = py_tovec2i(obj);
-            pkl__emit_op(buf, PKL_VEC2I);
-            pkl__emit_int(buf, val.x);
-            pkl__emit_int(buf, val.y);
-            return true;
-        }
-        case tp_vec3i: {
-            c11_vec3i val = py_tovec3i(obj);
-            pkl__emit_op(buf, PKL_VEC3I);
-            pkl__emit_int(buf, val.x);
-            pkl__emit_int(buf, val.y);
-            pkl__emit_int(buf, val.z);
-            return true;
-        }
-        case tp_type: {
-            pkl__emit_op(buf, PKL_TYPE);
-            py_Type type = py_totype(obj);
-            buf->used_types[type] = true;
-            pkl__emit_int(buf, type);
-            return true;
-        }
-        case tp_array2d: {
-            if(pkl__try_memo(buf, obj->_obj))
-                return true;
-            else {
-                c11_array2d* arr = py_touserdata(obj);
-                for(int i = 0; i < arr->header.numel; i++) {
-                    if(arr->data[i].is_ptr)
-                        return TypeError(
-                            "'array2d' object is not picklable because it contains heap-allocated objects");
-                    buf->used_types[arr->data[i].type] = true;
-                }
-                pkl__emit_op(buf, PKL_ARRAY2D);
-                pkl__emit_int(buf, arr->header.n_cols);
-                pkl__emit_int(buf, arr->header.n_rows);
-                PickleObject__write_bytes(buf, arr->data, arr->header.numel * sizeof(py_TValue));
-            }
-            pkl__store_memo(buf, obj->_obj);
-            return true;
-        }
-        default: {
-            if(!obj->is_ptr) {
-                pkl__emit_op(buf, PKL_TVALUE);
-                PickleObject__write_bytes(buf, obj, sizeof(py_TValue));
-                buf->used_types[obj->type] = true;
-                return true;
-            }
-            // try memo for `is_ptr=true` objects
-            if(pkl__try_memo(buf, obj->_obj)) return true;
-
-            py_TypeInfo* ti = pk__type_info(obj->type);
-            py_Ref f_reduce = py_tpfindmagic(obj->type, __reduce__);
-            if(f_reduce != NULL) {
-                if(!py_call(f_reduce, 1, obj)) return false;
-                // expected: (callable, args)
-                py_Ref reduced = py_retval();
-                if(!py_istuple(reduced)) { return TypeError("__reduce__ must return a tuple"); }
-                if(py_tuple_len(reduced) != 2) {
-                    return TypeError("__reduce__ must return a tuple of length 2");
-                }
-                if(!pkl__write_object(buf, py_tuple_getitem(reduced, 0))) return false;
-                pkl__emit_op(buf, PKL_NIL);
-                py_Ref args_tuple = py_tuple_getitem(reduced, 1);
-                int args_length = py_tuple_len(args_tuple);
-                for(int i = 0; i < args_length; i++) {
-                    if(!pkl__write_object(buf, py_tuple_getitem(args_tuple, i))) return false;
-                }
-                pkl__emit_op(buf, PKL_CALL);
-                pkl__emit_int(buf, args_length);
-                // store memo
-                pkl__store_memo(buf, obj->_obj);
-                return true;
-            }
-            if(ti->is_python) {
-                NameDict* dict = PyObject__dict(obj->_obj);
-                for(int i = dict->length - 1; i >= 0; i--) {
-                    NameDict_KV* kv = c11__at(NameDict_KV, dict, i);
-                    if(!pkl__write_object(buf, &kv->value)) return false;
-                }
-                pkl__emit_op(buf, PKL_OBJECT);
-                pkl__emit_int(buf, obj->type);
-                buf->used_types[obj->type] = true;
-                pkl__emit_int(buf, dict->length);
-                for(int i = 0; i < dict->length; i++) {
-                    NameDict_KV* kv = c11__at(NameDict_KV, dict, i);
-                    c11_sv field = py_name2sv(kv->key);
-                    // include '\0'
-                    PickleObject__write_bytes(buf, field.data, field.size + 1);
-                }
-
-                // store memo
-                pkl__store_memo(buf, obj->_obj);
-                return true;
-            }
-            return TypeError("'%t' object is not picklable", obj->type);
-        }
-    }
-    c11__unreachable();
-}
-
-bool py_pickle_dumps(py_Ref val) {
-    PickleObject buf;
-    PickleObject__ctor(&buf);
-    bool ok = pkl__write_object(&buf, val);
-    if(!ok) {
-        PickleObject__dtor(&buf);
-        return false;
-    }
-    pkl__emit_op(&buf, PKL_EOF);
-    return PickleObject__py_submit(&buf, py_retval());
-}
-
-static py_Type pkl__header_find_type(c11_sv path) {
-    int sep_index = c11_sv__rindex(path, '.');
-    if(sep_index == -1) return py_gettype(NULL, py_namev(path));
-    c11_sv mod_name = c11_sv__slice2(path, 0, sep_index);
-    c11_sv name = c11_sv__slice(path, sep_index + 1);
-    char buf[PK_MAX_MODULE_PATH_LEN + 1];
-    memcpy(buf, mod_name.data, mod_name.size);
-    buf[mod_name.size] = '\0';
-    return py_gettype(buf, py_namev(name));
-}
-
-static c11_sv pkl__header_read_sv(const unsigned char** p, char sep) {
-    c11_sv text;
-    text.data = (const char*)*p;
-    const char* p_end = strchr(text.data, sep);
-    assert(p_end != NULL);
-    text.size = p_end - text.data;
-    *p = (const unsigned char*)p_end + 1;
-    return text;
-}
-
-static py_i64 pkl__header_read_int(const unsigned char** p, char sep) {
-    c11_sv text = pkl__header_read_sv(p, sep);
-    py_i64 out;
-    IntParsingResult res = c11__parse_uint(text, &out, 10);
-    assert(res == IntParsing_SUCCESS);
-    return out;
-}
-
-bool py_pickle_loads_body(const unsigned char* p, int memo_length, c11_smallmap_n2i* type_mapping);
-
-bool py_pickle_loads(const unsigned char* data, int size) {
-    const unsigned char* p = data;
-
-    // \xf0\x9f\xa5\x95
-    if(size < 4 || p[0] != 240 || p[1] != 159 || p[2] != 165 || p[3] != 149)
-        return ValueError("invalid pickle data");
-    p += 4;
-
-    c11_smallmap_n2i type_mapping;
-    c11_smallmap_n2i__ctor(&type_mapping);
-
-    while(true) {
-        if(*p == '\n') {
-            p++;
-            break;
-        }
-        py_Type type = pkl__header_read_int(&p, '(');
-        c11_sv path = pkl__header_read_sv(&p, ')');
-        py_Type new_type = pkl__header_find_type(path);
-        if(new_type == 0) {
-            c11_smallmap_n2i__dtor(&type_mapping);
-            return ImportError("cannot find type '%v'", path);
-        }
-        if(type != new_type) c11_smallmap_n2i__set(&type_mapping, type, new_type);
-    }
-
-    int memo_length = pkl__header_read_int(&p, '\n');
-    bool ok = py_pickle_loads_body(p, memo_length, &type_mapping);
-    c11_smallmap_n2i__dtor(&type_mapping);
-    return ok;
-}
-
-static py_Type pkl__fix_type(py_Type type, c11_smallmap_n2i* type_mapping) {
-    int new_type = c11_smallmap_n2i__get(type_mapping, type, -1);
-    if(new_type != -1) return (py_Type)new_type;
-    return type;
-}
-
-bool py_pickle_loads_body(const unsigned char* p, int memo_length, c11_smallmap_n2i* type_mapping) {
-    py_StackRef p0 = py_peek(0);
-    py_Ref p_memo = py_newtuple(py_pushtmp(), memo_length);
-    while(true) {
-        PickleOp op = (PickleOp)*p;
-        p++;
-        switch(op) {
-            case PKL_MEMO_GET: {
-                int index = pkl__read_int(&p);
-                py_Ref val = &p_memo[index];
-                assert(!py_isnil(val));
-                py_push(val);
-                break;
-            }
-            case PKL_MEMO_SET: {
-                int index = pkl__read_int(&p);
-                p_memo[index] = *py_peek(-1);
-                break;
-            }
-            case PKL_NIL: {
-                py_pushnil();
-                break;
-            }
-            case PKL_NONE: {
-                py_pushnone();
-                break;
-            }
-            case PKL_ELLIPSIS: {
-                py_newellipsis(py_pushtmp());
-                break;
-            }
-                // clang-format off
-            case PKL_INT_0: case PKL_INT_1: case PKL_INT_2: case PKL_INT_3:
-            case PKL_INT_4: case PKL_INT_5: case PKL_INT_6: case PKL_INT_7:
-            case PKL_INT_8: case PKL_INT_9: case PKL_INT_10: case PKL_INT_11:
-            case PKL_INT_12: case PKL_INT_13: case PKL_INT_14: case PKL_INT_15: {
-                py_newint(py_pushtmp(), op - PKL_INT_0);
-                break;
-            }
-            // clang-format on
-            case PKL_INT8: {
-                int8_t val;
-                UNALIGNED_READ(&val, p);
-                py_newint(py_pushtmp(), val);
-                break;
-            }
-            case PKL_INT16: {
-                int16_t val;
-                UNALIGNED_READ(&val, p);
-                py_newint(py_pushtmp(), val);
-                break;
-            }
-            case PKL_INT32: {
-                int32_t val;
-                UNALIGNED_READ(&val, p);
-                py_newint(py_pushtmp(), val);
-                break;
-            }
-            case PKL_INT64: {
-                int64_t val;
-                UNALIGNED_READ(&val, p);
-                py_newint(py_pushtmp(), val);
-                break;
-            }
-            case PKL_FLOAT32: {
-                float val;
-                UNALIGNED_READ(&val, p);
-                py_newfloat(py_pushtmp(), val);
-                break;
-            }
-            case PKL_FLOAT64: {
-                double val;
-                UNALIGNED_READ(&val, p);
-                py_newfloat(py_pushtmp(), val);
-                break;
-            }
-            case PKL_TRUE: {
-                py_newbool(py_pushtmp(), true);
-                break;
-            }
-            case PKL_FALSE: {
-                py_newbool(py_pushtmp(), false);
-                break;
-            }
-            case PKL_STRING: {
-                int size = pkl__read_int(&p);
-                char* dst = py_newstrn(py_pushtmp(), size);
-                memcpy(dst, p, size);
-                p += size;
-                break;
-            }
-            case PKL_BYTES: {
-                int size = pkl__read_int(&p);
-                unsigned char* dst = py_newbytes(py_pushtmp(), size);
-                memcpy(dst, p, size);
-                p += size;
-                break;
-            }
-            case PKL_BUILD_LIST: {
-                int length = pkl__read_int(&p);
-                py_OutRef val = py_retval();
-                py_newlistn(val, length);
-                for(int i = length - 1; i >= 0; i--) {
-                    py_StackRef item = py_peek(-1);
-                    py_list_setitem(val, i, item);
-                    py_pop();
-                }
-                py_push(val);
-                break;
-            }
-            case PKL_BUILD_TUPLE: {
-                int length = pkl__read_int(&p);
-                py_OutRef val = py_retval();
-                py_Ref p = py_newtuple(val, length);
-                for(int i = length - 1; i >= 0; i--) {
-                    p[i] = *py_peek(-1);
-                    py_pop();
-                }
-                py_push(val);
-                break;
-            }
-            case PKL_BUILD_DICT: {
-                int length = pkl__read_int(&p);
-                py_OutRef val = py_pushtmp();
-                py_newdict(val);
-                py_StackRef begin = py_peek(-1) - 2 * length;
-                py_StackRef end = py_peek(-1);
-                for(py_StackRef i = begin; i < end; i += 2) {
-                    py_StackRef k = i;
-                    py_StackRef v = i + 1;
-                    bool ok = py_dict_setitem(val, k, v);
-                    if(!ok) return false;
-                }
-                py_assign(py_retval(), val);
-                py_shrink(2 * length + 1);
-                py_push(py_retval());
-                break;
-            }
-            case PKL_VEC2: {
-                c11_vec2 val;
-                UNALIGNED_READ(&val, p);
-                py_newvec2(py_pushtmp(), val);
-                break;
-            }
-            case PKL_VEC3: {
-                c11_vec3 val;
-                UNALIGNED_READ(&val, p);
-                py_newvec3(py_pushtmp(), val);
-                break;
-            }
-            case PKL_VEC2I: {
-                c11_vec2i val;
-                val.x = pkl__read_int(&p);
-                val.y = pkl__read_int(&p);
-                py_newvec2i(py_pushtmp(), val);
-                break;
-            }
-            case PKL_VEC3I: {
-                c11_vec3i val;
-                val.x = pkl__read_int(&p);
-                val.y = pkl__read_int(&p);
-                val.z = pkl__read_int(&p);
-                py_newvec3i(py_pushtmp(), val);
-                break;
-            }
-            case PKL_TYPE: {
-                py_Type type = (py_Type)pkl__read_int(&p);
-                type = pkl__fix_type(type, type_mapping);
-                py_push(py_tpobject(type));
-                break;
-            }
-            case PKL_ARRAY2D: {
-                int n_cols = pkl__read_int(&p);
-                int n_rows = pkl__read_int(&p);
-                c11_array2d* arr = py_newarray2d(py_pushtmp(), n_cols, n_rows);
-                int total_size = arr->header.numel * sizeof(py_TValue);
-                memcpy(arr->data, p, total_size);
-                for(int i = 0; i < arr->header.numel; i++) {
-                    arr->data[i].type = pkl__fix_type(arr->data[i].type, type_mapping);
-                }
-                p += total_size;
-                break;
-            }
-            case PKL_TVALUE: {
-                py_TValue* tmp = py_pushtmp();
-                memcpy(tmp, p, sizeof(py_TValue));
-                tmp->type = pkl__fix_type(tmp->type, type_mapping);
-                p += sizeof(py_TValue);
-                break;
-            }
-            case PKL_CALL: {
-                int argc = pkl__read_int(&p);
-                if(!py_vectorcall(argc, 0)) return false;
-                py_push(py_retval());
-                break;
-            }
-            case PKL_OBJECT: {
-                py_Type type = (py_Type)pkl__read_int(&p);
-                type = pkl__fix_type(type, type_mapping);
-                py_newobject(py_retval(), type, -1, 0);
-                NameDict* dict = PyObject__dict(py_retval()->_obj);
-                int dict_length = pkl__read_int(&p);
-                for(int i = 0; i < dict_length; i++) {
-                    py_StackRef value = py_peek(-1);
-                    c11_sv field = {(const char*)p, strlen((const char*)p)};
-                    NameDict__set(dict, py_namev(field), *value);
-                    py_pop();
-                    p += field.size + 1;
-                }
-                py_push(py_retval());
-                break;
-            }
-            case PKL_EOF: {
-                // [memo, obj]
-                if(py_peek(0) - p0 != 2) return ValueError("invalid pickle data");
-                py_assign(py_retval(), py_peek(-1));
-                py_shrink(2);
-                return true;
-            }
-            default: c11__unreachable();
-        }
-    }
-    c11__unreachable();
-}
-
-static bool PickleObject__py_submit(PickleObject* self, py_OutRef out) {
-    c11_sbuf cleartext;
-    c11_sbuf__ctor(&cleartext);
-    c11_sbuf__write_cstr(&cleartext, "\xf0\x9f\xa5\x95");
-    // line 1: type mapping
-    for(py_Type type = 0; type < self->used_types_length; type++) {
-        if(self->used_types[type]) {
-            c11_sbuf__write_int(&cleartext, type);
-            c11_sbuf__write_char(&cleartext, '(');
-            c11_sbuf__write_type_path(&cleartext, type);
-            c11_sbuf__write_char(&cleartext, ')');
-        }
-    }
-    c11_sbuf__write_char(&cleartext, '\n');
-    // line 2: memo length
-    c11_sbuf__write_int(&cleartext, self->memo.length);
-    c11_sbuf__write_char(&cleartext, '\n');
-    // -------------------------------------------------- //
-    c11_string* header = c11_sbuf__submit(&cleartext);
-    int total_size = header->size + self->codes.length;
-    unsigned char* p = py_newbytes(py_retval(), total_size);
-    memcpy(p, header->data, header->size);
-    memcpy(p + header->size, self->codes.data, self->codes.length);
-    c11_string__delete(header);
-    PickleObject__dtor(self);
-    return true;
-}
-
-#undef UNALIGNED_READ
-
-// src/modules/traceback.c
-#include <stdlib.h>
-
-static bool traceback_format_exc(int argc, py_Ref argv) {
-    PY_CHECK_ARGC(0);
-    char* s = py_formatexc();
-    if(!s) {
-        py_newnone(py_retval());
-    } else {
-        py_newstr(py_retval(), s);
-        PK_FREE(s);
-    }
-    return true;
-}
-
-static bool traceback_print_exc(int argc, py_Ref argv) {
-    PY_CHECK_ARGC(0);
-    py_printexc();
-    py_newnone(py_retval());
-    return true;
-}
-
-void pk__add_module_traceback() {
-    py_Ref mod = py_newmodule("traceback");
-
-    py_bindfunc(mod, "format_exc", traceback_format_exc);
-    py_bindfunc(mod, "print_exc", traceback_print_exc);
-}
-// src/modules/inspect.c
-static bool inspect_isgeneratorfunction(int argc, py_Ref argv) {
-    PY_CHECK_ARGC(1);
-    py_Ref obj = argv;
-    if(py_istype(argv, tp_boundmethod)) {
-        py_TValue* slots = PyObject__slots(argv->_obj);
-        obj = &slots[1];  // callable
-    }
-    if(py_istype(obj, tp_function)) {
-        Function* fn = py_touserdata(obj);
-        py_newbool(py_retval(), fn->decl->type == FuncType_GENERATOR);
-    } else {
-        py_newbool(py_retval(), false);
-    }
-    return true;
-}
-
-void pk__add_module_inspect() {
-    py_Ref mod = py_newmodule("inspect");
-
-    py_bindfunc(mod, "isgeneratorfunction", inspect_isgeneratorfunction);
-}
 // src/modules/random.c
 #include <time.h>
 
@@ -14648,7 +18888,7 @@ static bool Random__init__(int argc, py_Ref argv) {
         // do nothing
     } else if(argc == 2) {
         mt19937* ud = py_touserdata(py_arg(0));
-        if(!py_isnone(&argv[1])){
+        if(!py_isnone(&argv[1])) {
             PY_CHECK_ARG_TYPE(1, tp_int);
             py_i64 seed = py_toint(py_arg(1));
             mt19937__seed(ud, (uint32_t)seed);
@@ -14662,10 +18902,15 @@ static bool Random__init__(int argc, py_Ref argv) {
 
 static bool Random_seed(int argc, py_Ref argv) {
     PY_CHECK_ARGC(2);
-    PY_CHECK_ARG_TYPE(1, tp_int);
     mt19937* ud = py_touserdata(py_arg(0));
-    py_i64 seed = py_toint(py_arg(1));
-    mt19937__seed(ud, seed);
+    py_i64 seed;
+    if(py_isnone(&argv[1])) {
+        seed = time_ns();
+    } else {
+        PY_CHECK_ARG_TYPE(1, tp_int);
+        seed = py_toint(py_arg(1));
+    }
+    mt19937__seed(ud, (uint32_t)seed);
     py_newnone(py_retval());
     return true;
 }
@@ -14768,9 +19013,9 @@ static bool Random_choices(int argc, py_Ref argv) {
     }
 
     py_f64 total = cum_weights[length - 1];
-    if(total <= 0) {
+    if(total <= 1e-6) {
         PK_FREE(cum_weights);
-        return ValueError("total of weights must be greater than zero");
+        return ValueError("total of weights must be greater than 1e-6");
     }
 
     py_newlistn(py_retval(), k);
@@ -14832,6 +19077,34 @@ __ERROR:
 #undef UPPER_MASK
 #undef LOWER_MASK
 #undef ADD_INST_BOUNDMETHOD
+
+void py_newRandom(py_OutRef out) {
+    py_Type type = py_gettype("random", py_name("Random"));
+    assert(type != 0);
+    mt19937* ud = py_newobject(out, type, 0, sizeof(mt19937));
+    mt19937__ctor(ud);
+}
+
+void py_Random_seed(py_Ref self, py_i64 seed) {
+    mt19937* ud = py_touserdata(self);
+    mt19937__seed(ud, (uint32_t)seed);
+}
+
+py_f64 py_Random_random(py_Ref self) {
+    mt19937* ud = py_touserdata(self);
+    return mt19937__random(ud);
+}
+
+py_f64 py_Random_uniform(py_Ref self, py_f64 a, py_f64 b) {
+    mt19937* ud = py_touserdata(self);
+    return mt19937__uniform(ud, a, b);
+}
+
+py_i64 py_Random_randint(py_Ref self, py_i64 a, py_i64 b) {
+    mt19937* ud = py_touserdata(self);
+    if(a > b) { c11__abort("randint(a, b): a must be less than or equal to b"); }
+    return mt19937__randint(ud, a, b);
+}
 // src/modules/array2d.c
 #include <limits.h>
 
@@ -14848,7 +19121,7 @@ static bool c11_array2d__set(c11_array2d* self, int col, int row, py_Ref value) 
     return true;
 }
 
-c11_array2d* py_newarray2d(py_OutRef out, int n_cols, int n_rows) {
+c11_array2d* c11_newarray2d(py_OutRef out, int n_cols, int n_rows) {
     int numel = n_cols * n_rows;
     c11_array2d* ud = py_newobject(out, tp_array2d, numel, sizeof(c11_array2d));
     ud->header.n_cols = n_cols;
@@ -14934,6 +19207,27 @@ static bool array2d_like_get(int argc, py_Ref argv) {
     return true;
 }
 
+static bool array2d_like_index(int argc, py_Ref argv) {
+    PY_CHECK_ARGC(2);
+    c11_array2d_like* self = py_touserdata(argv);
+    py_Ref value = py_arg(1);
+    for(int j = 0; j < self->n_rows; j++) {
+        for(int i = 0; i < self->n_cols; i++) {
+            py_Ref item = self->f_get(self, i, j);
+            int code = py_equal(item, value);
+            if(code == -1) return false;
+            if(code == 1) {
+                py_newvec2i(py_retval(),
+                            (c11_vec2i){
+                                {i, j}
+                });
+                return true;
+            }
+        }
+    }
+    return ValueError("value not found");
+}
+
 static bool array2d_like_render(int argc, py_Ref argv) {
     PY_CHECK_ARGC(1);
     c11_sbuf buf;
@@ -14990,7 +19284,7 @@ static bool array2d_like_map(int argc, py_Ref argv) {
     PY_CHECK_ARGC(2);
     c11_array2d_like* self = py_touserdata(argv);
     py_Ref f = py_arg(1);
-    c11_array2d* res = py_newarray2d(py_pushtmp(), self->n_cols, self->n_rows);
+    c11_array2d* res = c11_newarray2d(py_pushtmp(), self->n_cols, self->n_rows);
     for(int j = 0; j < self->n_rows; j++) {
         for(int i = 0; i < self->n_cols; i++) {
             py_Ref item = self->f_get(self, i, j);
@@ -15042,7 +19336,7 @@ static bool _array2d_like_broadcasted_zip_with(int argc, py_Ref argv, py_Name op
     } else {
         other = NULL;
     }
-    c11_array2d* res = py_newarray2d(py_pushtmp(), self->n_cols, self->n_rows);
+    c11_array2d* res = c11_newarray2d(py_pushtmp(), self->n_cols, self->n_rows);
     for(int j = 0; j < self->n_rows; j++) {
         for(int i = 0; i < self->n_cols; i++) {
             py_Ref lhs = self->f_get(self, i, j);
@@ -15068,7 +19362,7 @@ static bool array2d_like_zip_with(int argc, py_Ref argv) {
     c11_array2d_like* other = py_touserdata(py_arg(1));
     py_Ref f = py_arg(2);
     if(!_array2d_like_check_same_shape(self, other)) return false;
-    c11_array2d* res = py_newarray2d(py_pushtmp(), self->n_cols, self->n_rows);
+    c11_array2d* res = c11_newarray2d(py_pushtmp(), self->n_cols, self->n_rows);
     for(int j = 0; j < self->n_rows; j++) {
         for(int i = 0; i < self->n_cols; i++) {
             py_push(f);
@@ -15113,7 +19407,7 @@ DEF_ARRAY2D_LIKE__MAGIC_ZIP_WITH(__xor__, __xor__, 0)
 static bool array2d_like__invert__(int argc, py_Ref argv) {
     PY_CHECK_ARGC(1);
     c11_array2d_like* self = py_touserdata(argv);
-    c11_array2d* res = py_newarray2d(py_pushtmp(), self->n_cols, self->n_rows);
+    c11_array2d* res = c11_newarray2d(py_pushtmp(), self->n_cols, self->n_rows);
     for(int j = 0; j < self->n_rows; j++) {
         for(int i = 0; i < self->n_cols; i++) {
             py_Ref item = self->f_get(self, i, j);
@@ -15130,7 +19424,7 @@ static bool array2d_like_copy(int argc, py_Ref argv) {
     // def copy(self) -> 'array2d': ...
     PY_CHECK_ARGC(1);
     c11_array2d_like* self = py_touserdata(argv);
-    c11_array2d* res = py_newarray2d(py_retval(), self->n_cols, self->n_rows);
+    c11_array2d* res = c11_newarray2d(py_retval(), self->n_cols, self->n_rows);
     for(int j = 0; j < self->n_rows; j++) {
         for(int i = 0; i < self->n_cols; i++) {
             py_Ref item = self->f_get(self, i, j);
@@ -15451,7 +19745,7 @@ static bool array2d_like_get_bounding_rect(int argc, py_Ref argv) {
 static bool array2d_like_count_neighbors(int argc, py_Ref argv) {
     PY_CHECK_ARGC(3);
     c11_array2d_like* self = py_touserdata(argv);
-    c11_array2d* res = py_newarray2d(py_pushtmp(), self->n_cols, self->n_rows);
+    c11_array2d* res = c11_newarray2d(py_pushtmp(), self->n_cols, self->n_rows);
     py_Ref value = py_arg(1);
     const char* neighborhood = py_tostr(py_arg(2));
 
@@ -15517,7 +19811,7 @@ static bool array2d_like_convolve(int argc, py_Ref argv) {
     int ksize = kernel->n_cols;
     if(ksize % 2 == 0) return ValueError("kernel size must be odd");
     int ksize_half = ksize / 2;
-    c11_array2d* res = py_newarray2d(py_pushtmp(), self->n_cols, self->n_rows);
+    c11_array2d* res = c11_newarray2d(py_pushtmp(), self->n_cols, self->n_rows);
     for(int j = 0; j < self->n_rows; j++) {
         for(int i = 0; i < self->n_cols; i++) {
             py_i64 sum = 0;
@@ -15562,6 +19856,7 @@ static void register_array2d_like(py_Ref mod) {
 
     py_bindmethod(type, "is_valid", array2d_like_is_valid);
     py_bindmethod(type, "get", array2d_like_get);
+    py_bindmethod(type, "index", array2d_like_index);
 
     py_bindmethod(type, "render", array2d_like_render);
 
@@ -15606,14 +19901,14 @@ static void register_array2d_like(py_Ref mod) {
     py_bindmethod(type, "convolve", array2d_like_convolve);
 
     const char* scc =
-        "\ndef get_connected_components(self, value: T, neighborhood: Neighborhood) -> tuple[array2d[int], int]:\n    from collections import deque\n    from linalg import vec2i\n\n    DIRS = [vec2i.LEFT, vec2i.RIGHT, vec2i.UP, vec2i.DOWN]\n    assert neighborhood in ['Moore', 'von Neumann']\n\n    if neighborhood == 'Moore':\n        DIRS.extend([\n            vec2i.LEFT+vec2i.UP,\n            vec2i.RIGHT+vec2i.UP,\n            vec2i.LEFT+vec2i.DOWN,\n            vec2i.RIGHT+vec2i.DOWN\n            ])\n\n    visited = array2d[int](self.width, self.height, default=0)\n    queue = deque()\n    count = 0\n    for y in range(self.height):\n        for x in range(self.width):\n            if visited[x, y] or self[x, y] != value:\n                continue\n            count += 1\n            queue.append((x, y))\n            visited[x, y] = count\n            while queue:\n                cx, cy = queue.popleft()\n                for dx, dy in DIRS:\n                    nx, ny = cx+dx, cy+dy\n                    if self.is_valid(nx, ny) and not visited[nx, ny] and self[nx, ny] == value:\n                        queue.append((nx, ny))\n                        visited[nx, ny] = count\n    return visited, count\n\narray2d_like.get_connected_components = get_connected_components\ndel get_connected_components\n";
+        "\ndef get_connected_components(self, value: T, neighborhood: Neighborhood) -> tuple[array2d[int], int]:\n    from collections import deque\n    from vmath import vec2i\n\n    DIRS = [vec2i.LEFT, vec2i.RIGHT, vec2i.UP, vec2i.DOWN]\n    assert neighborhood in ['Moore', 'von Neumann']\n\n    if neighborhood == 'Moore':\n        DIRS.extend([\n            vec2i.LEFT+vec2i.UP,\n            vec2i.RIGHT+vec2i.UP,\n            vec2i.LEFT+vec2i.DOWN,\n            vec2i.RIGHT+vec2i.DOWN\n            ])\n\n    visited = array2d[int](self.width, self.height, default=0)\n    queue = deque()\n    count = 0\n    for y in range(self.height):\n        for x in range(self.width):\n            if visited[x, y] or self[x, y] != value:\n                continue\n            count += 1\n            queue.append((x, y))\n            visited[x, y] = count\n            while queue:\n                cx, cy = queue.popleft()\n                for dx, dy in DIRS:\n                    nx, ny = cx+dx, cy+dy\n                    if self.is_valid(nx, ny) and not visited[nx, ny] and self[nx, ny] == value:\n                        queue.append((nx, ny))\n                        visited[nx, ny] = count\n    return visited, count\n\narray2d_like.get_connected_components = get_connected_components\ndel get_connected_components\n";
     if(!py_exec(scc, "array2d.py", EXEC_MODE, mod)) {
         py_printexc();
         c11__abort("failed to execute array2d.py");
     }
 }
 
-static bool array2d_like_iterator__next__(int argc, py_Ref argv) {
+bool array2d_like_iterator__next__(int argc, py_Ref argv) {
     PY_CHECK_ARGC(1);
     c11_array2d_like_iterator* self = py_touserdata(argv);
     if(self->j >= self->array->n_rows) return StopIteration();
@@ -15647,7 +19942,7 @@ static bool array2d__new__(int argc, py_Ref argv) {
     int n_cols = argv[1]._i64;
     int n_rows = argv[2]._i64;
     if(n_cols <= 0 || n_rows <= 0) return ValueError("array2d() expected positive dimensions");
-    c11_array2d* ud = py_newarray2d(py_pushtmp(), n_cols, n_rows);
+    c11_array2d* ud = c11_newarray2d(py_pushtmp(), n_cols, n_rows);
     // setup initial values
     if(py_callable(default_)) {
         for(int j = 0; j < n_rows; j++) {
@@ -15689,7 +19984,7 @@ static bool array2d_fromlist_STATIC(int argc, py_Ref argv) {
             return ValueError("fromlist() expected a list of lists with the same length");
         }
     }
-    c11_array2d* res = py_newarray2d(py_retval(), n_cols, n_rows);
+    c11_array2d* res = c11_newarray2d(py_retval(), n_cols, n_rows);
     for(int j = 0; j < n_rows; j++) {
         py_Ref row_j = py_list_getitem(argv, j);
         for(int i = 0; i < n_cols; i++) {
@@ -15730,13 +20025,15 @@ static void register_array2d_view(py_Ref mod) {
 #define equal(a, b) (a._i64 == b._i64)
 #if !defined(SMALLMAP_T__HEADER) && !defined(SMALLMAP_T__SOURCE)
 #include "pocketpy/common/vector.h"
+#include "pocketpy/common/utils.h"
+#include "pocketpy/config.h"
 
 #define SMALLMAP_T__HEADER
 #define SMALLMAP_T__SOURCE
 /* Input */
 #define K int
 #define V float
-#define NAME c11_smallmap_i2f
+#define NAME c11_smallmap_d2f
 #endif
 
 /* Optional Input */
@@ -15872,7 +20169,10 @@ static py_TValue* c11_chunked_array2d__new_chunk(c11_chunked_array2d* self, c11_
     if(!py_isnone(&self->context_builder)) {
         py_newvec2i(&data[0], pos);
         bool ok = py_call(&self->context_builder, 1, &data[0]);
-        if(!ok) return NULL;
+        if(!ok) {
+            PK_FREE(data);
+            return NULL;
+        }
         data[0] = *py_retval();
     } else {
         data[0] = *py_None();
@@ -16066,6 +20366,7 @@ static bool chunked_array2d__len__(int argc, py_Ref argv) {
 static bool chunked_array2d_clear(int argc, py_Ref argv) {
     PY_CHECK_ARGC(1);
     c11_chunked_array2d* self = py_touserdata(argv);
+    c11__foreach(c11_chunked_array2d_chunks_KV, &self->chunks, p_kv) PK_FREE(p_kv->value);
     c11_chunked_array2d_chunks__clear(&self->chunks);
     self->last_visited.value = NULL;
     py_newnone(py_retval());
@@ -16129,9 +20430,16 @@ static bool chunked_array2d_remove_chunk(int argc, py_Ref argv) {
     PY_CHECK_ARG_TYPE(1, tp_vec2i);
     c11_chunked_array2d* self = py_touserdata(argv);
     c11_vec2i pos = py_tovec2i(&argv[1]);
-    bool ok = c11_chunked_array2d_chunks__del(&self->chunks, pos);
-    self->last_visited.value = NULL;
-    py_newbool(py_retval(), ok);
+    py_TValue* data = c11_chunked_array2d_chunks__get(&self->chunks, pos, NULL);
+    if(data != NULL) {
+        PK_FREE(data);
+        bool ok = c11_chunked_array2d_chunks__del(&self->chunks, pos);
+        assert(ok);
+        self->last_visited.value = NULL;
+        py_newbool(py_retval(), ok);
+    } else {
+        py_newbool(py_retval(), false);
+    }
     return true;
 }
 
@@ -16174,7 +20482,7 @@ void c11_chunked_array2d__dtor(c11_chunked_array2d* self) {
     c11_chunked_array2d_chunks__dtor(&self->chunks);
 }
 
-void c11_chunked_array2d__mark(void* ud) {
+void c11_chunked_array2d__mark(void* ud, c11_vector* p_stack) {
     c11_chunked_array2d* self = ud;
     pk__mark_value(&self->default_T);
     pk__mark_value(&self->context_builder);
@@ -16292,6 +20600,32 @@ void pk__add_module_array2d() {
     register_array2d(mod);
     register_array2d_view(mod);
     register_chunked_array2d(mod);
+}
+
+void py_newarray2d(py_OutRef out, int width, int height) { c11_newarray2d(out, width, height); }
+
+int py_array2d_getwidth(py_Ref self) {
+    assert(self->type == tp_array2d);
+    c11_array2d* ud = py_touserdata(self);
+    return ud->header.n_cols;
+}
+
+int py_array2d_getheight(py_Ref self) {
+    assert(self->type == tp_array2d);
+    c11_array2d* ud = py_touserdata(self);
+    return ud->header.n_rows;
+}
+
+py_ObjectRef py_array2d_getitem(py_Ref self, int x, int y) {
+    assert(self->type == tp_array2d);
+    c11_array2d* ud = py_touserdata(self);
+    return c11_array2d__get(ud, x, y);
+}
+
+void py_array2d_setitem(py_Ref self, int x, int y, py_Ref value) {
+    assert(self->type == tp_array2d);
+    c11_array2d* ud = py_touserdata(self);
+    c11_array2d__set(ud, x, y, value);
 }
 // src/modules/easing.c
 #include <math.h>
@@ -16543,6 +20877,1055 @@ void pk__add_module_easing() {
     py_bindfunc(mod, "InOutBounce", easing_InOutBounce);
 }
 
+// src/modules/unicodedata.c
+const static c11_u32_range kEastAsianWidthRanges[] = {
+    {32,      126,     "Na\0"},
+    {161,     161,     "A\0" },
+    {162,     163,     "Na\0"},
+    {164,     164,     "A\0" },
+    {165,     166,     "Na\0"},
+    {167,     168,     "A\0" },
+    {170,     170,     "A\0" },
+    {172,     172,     "Na\0"},
+    {173,     174,     "A\0" },
+    {175,     175,     "Na\0"},
+    {176,     180,     "A\0" },
+    {182,     186,     "A\0" },
+    {188,     191,     "A\0" },
+    {198,     198,     "A\0" },
+    {208,     208,     "A\0" },
+    {215,     216,     "A\0" },
+    {222,     225,     "A\0" },
+    {230,     230,     "A\0" },
+    {232,     234,     "A\0" },
+    {236,     237,     "A\0" },
+    {240,     240,     "A\0" },
+    {242,     243,     "A\0" },
+    {247,     250,     "A\0" },
+    {252,     252,     "A\0" },
+    {254,     254,     "A\0" },
+    {257,     257,     "A\0" },
+    {273,     273,     "A\0" },
+    {275,     275,     "A\0" },
+    {283,     283,     "A\0" },
+    {294,     295,     "A\0" },
+    {299,     299,     "A\0" },
+    {305,     307,     "A\0" },
+    {312,     312,     "A\0" },
+    {319,     322,     "A\0" },
+    {324,     324,     "A\0" },
+    {328,     331,     "A\0" },
+    {333,     333,     "A\0" },
+    {338,     339,     "A\0" },
+    {358,     359,     "A\0" },
+    {363,     363,     "A\0" },
+    {462,     462,     "A\0" },
+    {464,     464,     "A\0" },
+    {466,     466,     "A\0" },
+    {468,     468,     "A\0" },
+    {470,     470,     "A\0" },
+    {472,     472,     "A\0" },
+    {474,     474,     "A\0" },
+    {476,     476,     "A\0" },
+    {593,     593,     "A\0" },
+    {609,     609,     "A\0" },
+    {708,     708,     "A\0" },
+    {711,     711,     "A\0" },
+    {713,     715,     "A\0" },
+    {717,     717,     "A\0" },
+    {720,     720,     "A\0" },
+    {728,     731,     "A\0" },
+    {733,     733,     "A\0" },
+    {735,     735,     "A\0" },
+    {768,     879,     "A\0" },
+    {888,     889,     "F\0" },
+    {896,     899,     "F\0" },
+    {907,     907,     "F\0" },
+    {909,     909,     "F\0" },
+    {913,     929,     "A\0" },
+    {930,     930,     "F\0" },
+    {931,     937,     "A\0" },
+    {945,     961,     "A\0" },
+    {963,     969,     "A\0" },
+    {1025,    1025,    "A\0" },
+    {1040,    1103,    "A\0" },
+    {1105,    1105,    "A\0" },
+    {1328,    1328,    "F\0" },
+    {1367,    1368,    "F\0" },
+    {1419,    1420,    "F\0" },
+    {1424,    1424,    "F\0" },
+    {1480,    1487,    "F\0" },
+    {1515,    1518,    "F\0" },
+    {1525,    1535,    "F\0" },
+    {1806,    1806,    "F\0" },
+    {1867,    1868,    "F\0" },
+    {1970,    1983,    "F\0" },
+    {2043,    2044,    "F\0" },
+    {2094,    2095,    "F\0" },
+    {2111,    2111,    "F\0" },
+    {2140,    2141,    "F\0" },
+    {2143,    2143,    "F\0" },
+    {2155,    2159,    "F\0" },
+    {2191,    2191,    "F\0" },
+    {2194,    2199,    "F\0" },
+    {2436,    2436,    "F\0" },
+    {2445,    2446,    "F\0" },
+    {2449,    2450,    "F\0" },
+    {2473,    2473,    "F\0" },
+    {2481,    2481,    "F\0" },
+    {2483,    2485,    "F\0" },
+    {2490,    2491,    "F\0" },
+    {2501,    2502,    "F\0" },
+    {2505,    2506,    "F\0" },
+    {2511,    2518,    "F\0" },
+    {2520,    2523,    "F\0" },
+    {2526,    2526,    "F\0" },
+    {2532,    2533,    "F\0" },
+    {2559,    2560,    "F\0" },
+    {2564,    2564,    "F\0" },
+    {2571,    2574,    "F\0" },
+    {2577,    2578,    "F\0" },
+    {2601,    2601,    "F\0" },
+    {2609,    2609,    "F\0" },
+    {2612,    2612,    "F\0" },
+    {2615,    2615,    "F\0" },
+    {2618,    2619,    "F\0" },
+    {2621,    2621,    "F\0" },
+    {2627,    2630,    "F\0" },
+    {2633,    2634,    "F\0" },
+    {2638,    2640,    "F\0" },
+    {2642,    2648,    "F\0" },
+    {2653,    2653,    "F\0" },
+    {2655,    2661,    "F\0" },
+    {2679,    2688,    "F\0" },
+    {2692,    2692,    "F\0" },
+    {2702,    2702,    "F\0" },
+    {2706,    2706,    "F\0" },
+    {2729,    2729,    "F\0" },
+    {2737,    2737,    "F\0" },
+    {2740,    2740,    "F\0" },
+    {2746,    2747,    "F\0" },
+    {2758,    2758,    "F\0" },
+    {2762,    2762,    "F\0" },
+    {2766,    2767,    "F\0" },
+    {2769,    2783,    "F\0" },
+    {2788,    2789,    "F\0" },
+    {2802,    2808,    "F\0" },
+    {2816,    2816,    "F\0" },
+    {2820,    2820,    "F\0" },
+    {2829,    2830,    "F\0" },
+    {2833,    2834,    "F\0" },
+    {2857,    2857,    "F\0" },
+    {2865,    2865,    "F\0" },
+    {2868,    2868,    "F\0" },
+    {2874,    2875,    "F\0" },
+    {2885,    2886,    "F\0" },
+    {2889,    2890,    "F\0" },
+    {2894,    2900,    "F\0" },
+    {2904,    2907,    "F\0" },
+    {2910,    2910,    "F\0" },
+    {2916,    2917,    "F\0" },
+    {2936,    2945,    "F\0" },
+    {2948,    2948,    "F\0" },
+    {2955,    2957,    "F\0" },
+    {2961,    2961,    "F\0" },
+    {2966,    2968,    "F\0" },
+    {2971,    2971,    "F\0" },
+    {2973,    2973,    "F\0" },
+    {2976,    2978,    "F\0" },
+    {2981,    2983,    "F\0" },
+    {2987,    2989,    "F\0" },
+    {3002,    3005,    "F\0" },
+    {3011,    3013,    "F\0" },
+    {3017,    3017,    "F\0" },
+    {3022,    3023,    "F\0" },
+    {3025,    3030,    "F\0" },
+    {3032,    3045,    "F\0" },
+    {3067,    3071,    "F\0" },
+    {3085,    3085,    "F\0" },
+    {3089,    3089,    "F\0" },
+    {3113,    3113,    "F\0" },
+    {3130,    3131,    "F\0" },
+    {3141,    3141,    "F\0" },
+    {3145,    3145,    "F\0" },
+    {3150,    3156,    "F\0" },
+    {3159,    3159,    "F\0" },
+    {3163,    3164,    "F\0" },
+    {3166,    3167,    "F\0" },
+    {3172,    3173,    "F\0" },
+    {3184,    3190,    "F\0" },
+    {3213,    3213,    "F\0" },
+    {3217,    3217,    "F\0" },
+    {3241,    3241,    "F\0" },
+    {3252,    3252,    "F\0" },
+    {3258,    3259,    "F\0" },
+    {3269,    3269,    "F\0" },
+    {3273,    3273,    "F\0" },
+    {3278,    3284,    "F\0" },
+    {3287,    3292,    "F\0" },
+    {3295,    3295,    "F\0" },
+    {3300,    3301,    "F\0" },
+    {3312,    3312,    "F\0" },
+    {3315,    3327,    "F\0" },
+    {3341,    3341,    "F\0" },
+    {3345,    3345,    "F\0" },
+    {3397,    3397,    "F\0" },
+    {3401,    3401,    "F\0" },
+    {3408,    3411,    "F\0" },
+    {3428,    3429,    "F\0" },
+    {3456,    3456,    "F\0" },
+    {3460,    3460,    "F\0" },
+    {3479,    3481,    "F\0" },
+    {3506,    3506,    "F\0" },
+    {3516,    3516,    "F\0" },
+    {3518,    3519,    "F\0" },
+    {3527,    3529,    "F\0" },
+    {3531,    3534,    "F\0" },
+    {3541,    3541,    "F\0" },
+    {3543,    3543,    "F\0" },
+    {3552,    3557,    "F\0" },
+    {3568,    3569,    "F\0" },
+    {3573,    3584,    "F\0" },
+    {3643,    3646,    "F\0" },
+    {3676,    3712,    "F\0" },
+    {3715,    3715,    "F\0" },
+    {3717,    3717,    "F\0" },
+    {3723,    3723,    "F\0" },
+    {3748,    3748,    "F\0" },
+    {3750,    3750,    "F\0" },
+    {3774,    3775,    "F\0" },
+    {3781,    3781,    "F\0" },
+    {3783,    3783,    "F\0" },
+    {3790,    3791,    "F\0" },
+    {3802,    3803,    "F\0" },
+    {3808,    3839,    "F\0" },
+    {3912,    3912,    "F\0" },
+    {3949,    3952,    "F\0" },
+    {3992,    3992,    "F\0" },
+    {4029,    4029,    "F\0" },
+    {4045,    4045,    "F\0" },
+    {4059,    4095,    "F\0" },
+    {4294,    4294,    "F\0" },
+    {4296,    4300,    "F\0" },
+    {4302,    4303,    "F\0" },
+    {4352,    4447,    "W\0" },
+    {4681,    4681,    "F\0" },
+    {4686,    4687,    "F\0" },
+    {4695,    4695,    "F\0" },
+    {4697,    4697,    "F\0" },
+    {4702,    4703,    "F\0" },
+    {4745,    4745,    "F\0" },
+    {4750,    4751,    "F\0" },
+    {4785,    4785,    "F\0" },
+    {4790,    4791,    "F\0" },
+    {4799,    4799,    "F\0" },
+    {4801,    4801,    "F\0" },
+    {4806,    4807,    "F\0" },
+    {4823,    4823,    "F\0" },
+    {4881,    4881,    "F\0" },
+    {4886,    4887,    "F\0" },
+    {4955,    4956,    "F\0" },
+    {4989,    4991,    "F\0" },
+    {5018,    5023,    "F\0" },
+    {5110,    5111,    "F\0" },
+    {5118,    5119,    "F\0" },
+    {5789,    5791,    "F\0" },
+    {5881,    5887,    "F\0" },
+    {5910,    5918,    "F\0" },
+    {5943,    5951,    "F\0" },
+    {5972,    5983,    "F\0" },
+    {5997,    5997,    "F\0" },
+    {6001,    6001,    "F\0" },
+    {6004,    6015,    "F\0" },
+    {6110,    6111,    "F\0" },
+    {6122,    6127,    "F\0" },
+    {6138,    6143,    "F\0" },
+    {6170,    6175,    "F\0" },
+    {6265,    6271,    "F\0" },
+    {6315,    6319,    "F\0" },
+    {6390,    6399,    "F\0" },
+    {6431,    6431,    "F\0" },
+    {6444,    6447,    "F\0" },
+    {6460,    6463,    "F\0" },
+    {6465,    6467,    "F\0" },
+    {6510,    6511,    "F\0" },
+    {6517,    6527,    "F\0" },
+    {6572,    6575,    "F\0" },
+    {6602,    6607,    "F\0" },
+    {6619,    6621,    "F\0" },
+    {6684,    6685,    "F\0" },
+    {6751,    6751,    "F\0" },
+    {6781,    6782,    "F\0" },
+    {6794,    6799,    "F\0" },
+    {6810,    6815,    "F\0" },
+    {6830,    6831,    "F\0" },
+    {6863,    6911,    "F\0" },
+    {6989,    6991,    "F\0" },
+    {7039,    7039,    "F\0" },
+    {7156,    7163,    "F\0" },
+    {7224,    7226,    "F\0" },
+    {7242,    7244,    "F\0" },
+    {7305,    7311,    "F\0" },
+    {7355,    7356,    "F\0" },
+    {7368,    7375,    "F\0" },
+    {7419,    7423,    "F\0" },
+    {7958,    7959,    "F\0" },
+    {7966,    7967,    "F\0" },
+    {8006,    8007,    "F\0" },
+    {8014,    8015,    "F\0" },
+    {8024,    8024,    "F\0" },
+    {8026,    8026,    "F\0" },
+    {8028,    8028,    "F\0" },
+    {8030,    8030,    "F\0" },
+    {8062,    8063,    "F\0" },
+    {8117,    8117,    "F\0" },
+    {8133,    8133,    "F\0" },
+    {8148,    8149,    "F\0" },
+    {8156,    8156,    "F\0" },
+    {8176,    8177,    "F\0" },
+    {8181,    8181,    "F\0" },
+    {8191,    8191,    "F\0" },
+    {8208,    8208,    "A\0" },
+    {8211,    8214,    "A\0" },
+    {8216,    8217,    "A\0" },
+    {8220,    8221,    "A\0" },
+    {8224,    8226,    "A\0" },
+    {8228,    8231,    "A\0" },
+    {8240,    8240,    "A\0" },
+    {8242,    8243,    "A\0" },
+    {8245,    8245,    "A\0" },
+    {8251,    8251,    "A\0" },
+    {8254,    8254,    "A\0" },
+    {8293,    8293,    "F\0" },
+    {8306,    8307,    "F\0" },
+    {8308,    8308,    "A\0" },
+    {8319,    8319,    "A\0" },
+    {8321,    8324,    "A\0" },
+    {8335,    8335,    "F\0" },
+    {8349,    8351,    "F\0" },
+    {8361,    8361,    "H\0" },
+    {8364,    8364,    "A\0" },
+    {8385,    8399,    "F\0" },
+    {8433,    8447,    "F\0" },
+    {8451,    8451,    "A\0" },
+    {8453,    8453,    "A\0" },
+    {8457,    8457,    "A\0" },
+    {8467,    8467,    "A\0" },
+    {8470,    8470,    "A\0" },
+    {8481,    8482,    "A\0" },
+    {8486,    8486,    "A\0" },
+    {8491,    8491,    "A\0" },
+    {8531,    8532,    "A\0" },
+    {8539,    8542,    "A\0" },
+    {8544,    8555,    "A\0" },
+    {8560,    8569,    "A\0" },
+    {8585,    8585,    "A\0" },
+    {8588,    8591,    "F\0" },
+    {8592,    8601,    "A\0" },
+    {8632,    8633,    "A\0" },
+    {8658,    8658,    "A\0" },
+    {8660,    8660,    "A\0" },
+    {8679,    8679,    "A\0" },
+    {8704,    8704,    "A\0" },
+    {8706,    8707,    "A\0" },
+    {8711,    8712,    "A\0" },
+    {8715,    8715,    "A\0" },
+    {8719,    8719,    "A\0" },
+    {8721,    8721,    "A\0" },
+    {8725,    8725,    "A\0" },
+    {8730,    8730,    "A\0" },
+    {8733,    8736,    "A\0" },
+    {8739,    8739,    "A\0" },
+    {8741,    8741,    "A\0" },
+    {8743,    8748,    "A\0" },
+    {8750,    8750,    "A\0" },
+    {8756,    8759,    "A\0" },
+    {8764,    8765,    "A\0" },
+    {8776,    8776,    "A\0" },
+    {8780,    8780,    "A\0" },
+    {8786,    8786,    "A\0" },
+    {8800,    8801,    "A\0" },
+    {8804,    8807,    "A\0" },
+    {8810,    8811,    "A\0" },
+    {8814,    8815,    "A\0" },
+    {8834,    8835,    "A\0" },
+    {8838,    8839,    "A\0" },
+    {8853,    8853,    "A\0" },
+    {8857,    8857,    "A\0" },
+    {8869,    8869,    "A\0" },
+    {8895,    8895,    "A\0" },
+    {8978,    8978,    "A\0" },
+    {8986,    8987,    "W\0" },
+    {9001,    9002,    "W\0" },
+    {9193,    9196,    "W\0" },
+    {9200,    9200,    "W\0" },
+    {9203,    9203,    "W\0" },
+    {9255,    9279,    "F\0" },
+    {9291,    9311,    "F\0" },
+    {9312,    9449,    "A\0" },
+    {9451,    9547,    "A\0" },
+    {9552,    9587,    "A\0" },
+    {9600,    9615,    "A\0" },
+    {9618,    9621,    "A\0" },
+    {9632,    9633,    "A\0" },
+    {9635,    9641,    "A\0" },
+    {9650,    9651,    "A\0" },
+    {9654,    9655,    "A\0" },
+    {9660,    9661,    "A\0" },
+    {9664,    9665,    "A\0" },
+    {9670,    9672,    "A\0" },
+    {9675,    9675,    "A\0" },
+    {9678,    9681,    "A\0" },
+    {9698,    9701,    "A\0" },
+    {9711,    9711,    "A\0" },
+    {9725,    9726,    "W\0" },
+    {9733,    9734,    "A\0" },
+    {9737,    9737,    "A\0" },
+    {9742,    9743,    "A\0" },
+    {9748,    9749,    "W\0" },
+    {9756,    9756,    "A\0" },
+    {9758,    9758,    "A\0" },
+    {9792,    9792,    "A\0" },
+    {9794,    9794,    "A\0" },
+    {9800,    9811,    "W\0" },
+    {9824,    9825,    "A\0" },
+    {9827,    9829,    "A\0" },
+    {9831,    9834,    "A\0" },
+    {9836,    9837,    "A\0" },
+    {9839,    9839,    "A\0" },
+    {9855,    9855,    "W\0" },
+    {9875,    9875,    "W\0" },
+    {9886,    9887,    "A\0" },
+    {9889,    9889,    "W\0" },
+    {9898,    9899,    "W\0" },
+    {9917,    9918,    "W\0" },
+    {9919,    9919,    "A\0" },
+    {9924,    9925,    "W\0" },
+    {9926,    9933,    "A\0" },
+    {9934,    9934,    "W\0" },
+    {9935,    9939,    "A\0" },
+    {9940,    9940,    "W\0" },
+    {9941,    9953,    "A\0" },
+    {9955,    9955,    "A\0" },
+    {9960,    9961,    "A\0" },
+    {9962,    9962,    "W\0" },
+    {9963,    9969,    "A\0" },
+    {9970,    9971,    "W\0" },
+    {9972,    9972,    "A\0" },
+    {9973,    9973,    "W\0" },
+    {9974,    9977,    "A\0" },
+    {9978,    9978,    "W\0" },
+    {9979,    9980,    "A\0" },
+    {9981,    9981,    "W\0" },
+    {9982,    9983,    "A\0" },
+    {9989,    9989,    "W\0" },
+    {9994,    9995,    "W\0" },
+    {10024,   10024,   "W\0" },
+    {10045,   10045,   "A\0" },
+    {10060,   10060,   "W\0" },
+    {10062,   10062,   "W\0" },
+    {10067,   10069,   "W\0" },
+    {10071,   10071,   "W\0" },
+    {10102,   10111,   "A\0" },
+    {10133,   10135,   "W\0" },
+    {10160,   10160,   "W\0" },
+    {10175,   10175,   "W\0" },
+    {10214,   10221,   "Na\0"},
+    {10629,   10630,   "Na\0"},
+    {11035,   11036,   "W\0" },
+    {11088,   11088,   "W\0" },
+    {11093,   11093,   "W\0" },
+    {11094,   11097,   "A\0" },
+    {11124,   11125,   "F\0" },
+    {11158,   11158,   "F\0" },
+    {11508,   11512,   "F\0" },
+    {11558,   11558,   "F\0" },
+    {11560,   11564,   "F\0" },
+    {11566,   11567,   "F\0" },
+    {11624,   11630,   "F\0" },
+    {11633,   11646,   "F\0" },
+    {11671,   11679,   "F\0" },
+    {11687,   11687,   "F\0" },
+    {11695,   11695,   "F\0" },
+    {11703,   11703,   "F\0" },
+    {11711,   11711,   "F\0" },
+    {11719,   11719,   "F\0" },
+    {11727,   11727,   "F\0" },
+    {11735,   11735,   "F\0" },
+    {11743,   11743,   "F\0" },
+    {11870,   11903,   "F\0" },
+    {11904,   11929,   "W\0" },
+    {11930,   11930,   "F\0" },
+    {11931,   12019,   "W\0" },
+    {12020,   12031,   "F\0" },
+    {12032,   12245,   "W\0" },
+    {12246,   12271,   "F\0" },
+    {12272,   12283,   "W\0" },
+    {12284,   12288,   "F\0" },
+    {12289,   12350,   "W\0" },
+    {12352,   12352,   "F\0" },
+    {12353,   12438,   "W\0" },
+    {12439,   12440,   "F\0" },
+    {12441,   12543,   "W\0" },
+    {12544,   12548,   "F\0" },
+    {12549,   12591,   "W\0" },
+    {12592,   12592,   "F\0" },
+    {12593,   12686,   "W\0" },
+    {12687,   12687,   "F\0" },
+    {12688,   12771,   "W\0" },
+    {12772,   12783,   "F\0" },
+    {12784,   12830,   "W\0" },
+    {12831,   12831,   "F\0" },
+    {12832,   12871,   "W\0" },
+    {12872,   12879,   "A\0" },
+    {12880,   19903,   "W\0" },
+    {19968,   42124,   "W\0" },
+    {42125,   42127,   "F\0" },
+    {42128,   42182,   "W\0" },
+    {42183,   42191,   "F\0" },
+    {42540,   42559,   "F\0" },
+    {42744,   42751,   "F\0" },
+    {42955,   42959,   "F\0" },
+    {42962,   42962,   "F\0" },
+    {42964,   42964,   "F\0" },
+    {42970,   42993,   "F\0" },
+    {43053,   43055,   "F\0" },
+    {43066,   43071,   "F\0" },
+    {43128,   43135,   "F\0" },
+    {43206,   43213,   "F\0" },
+    {43226,   43231,   "F\0" },
+    {43348,   43358,   "F\0" },
+    {43360,   43388,   "W\0" },
+    {43389,   43391,   "F\0" },
+    {43470,   43470,   "F\0" },
+    {43482,   43485,   "F\0" },
+    {43519,   43519,   "F\0" },
+    {43575,   43583,   "F\0" },
+    {43598,   43599,   "F\0" },
+    {43610,   43611,   "F\0" },
+    {43715,   43738,   "F\0" },
+    {43767,   43776,   "F\0" },
+    {43783,   43784,   "F\0" },
+    {43791,   43792,   "F\0" },
+    {43799,   43807,   "F\0" },
+    {43815,   43815,   "F\0" },
+    {43823,   43823,   "F\0" },
+    {43884,   43887,   "F\0" },
+    {44014,   44015,   "F\0" },
+    {44026,   44031,   "F\0" },
+    {44032,   55203,   "W\0" },
+    {55204,   55215,   "F\0" },
+    {55239,   55242,   "F\0" },
+    {55292,   55295,   "F\0" },
+    {57344,   63743,   "A\0" },
+    {63744,   64109,   "W\0" },
+    {64110,   64111,   "F\0" },
+    {64112,   64217,   "W\0" },
+    {64218,   64255,   "F\0" },
+    {64263,   64274,   "F\0" },
+    {64280,   64284,   "F\0" },
+    {64311,   64311,   "F\0" },
+    {64317,   64317,   "F\0" },
+    {64319,   64319,   "F\0" },
+    {64322,   64322,   "F\0" },
+    {64325,   64325,   "F\0" },
+    {64451,   64466,   "F\0" },
+    {64912,   64913,   "F\0" },
+    {64968,   64974,   "F\0" },
+    {64976,   65007,   "F\0" },
+    {65024,   65039,   "A\0" },
+    {65040,   65049,   "W\0" },
+    {65050,   65055,   "F\0" },
+    {65072,   65106,   "W\0" },
+    {65107,   65107,   "F\0" },
+    {65108,   65126,   "W\0" },
+    {65127,   65127,   "F\0" },
+    {65128,   65131,   "W\0" },
+    {65132,   65135,   "F\0" },
+    {65141,   65141,   "F\0" },
+    {65277,   65278,   "F\0" },
+    {65280,   65376,   "F\0" },
+    {65377,   65470,   "H\0" },
+    {65471,   65473,   "F\0" },
+    {65474,   65479,   "H\0" },
+    {65480,   65481,   "F\0" },
+    {65482,   65487,   "H\0" },
+    {65488,   65489,   "F\0" },
+    {65490,   65495,   "H\0" },
+    {65496,   65497,   "F\0" },
+    {65498,   65500,   "H\0" },
+    {65501,   65511,   "F\0" },
+    {65512,   65518,   "H\0" },
+    {65519,   65528,   "F\0" },
+    {65533,   65533,   "A\0" },
+    {65534,   65535,   "F\0" },
+    {65548,   65548,   "F\0" },
+    {65575,   65575,   "F\0" },
+    {65595,   65595,   "F\0" },
+    {65598,   65598,   "F\0" },
+    {65614,   65615,   "F\0" },
+    {65630,   65663,   "F\0" },
+    {65787,   65791,   "F\0" },
+    {65795,   65798,   "F\0" },
+    {65844,   65846,   "F\0" },
+    {65935,   65935,   "F\0" },
+    {65949,   65951,   "F\0" },
+    {65953,   65999,   "F\0" },
+    {66046,   66175,   "F\0" },
+    {66205,   66207,   "F\0" },
+    {66257,   66271,   "F\0" },
+    {66300,   66303,   "F\0" },
+    {66340,   66348,   "F\0" },
+    {66379,   66383,   "F\0" },
+    {66427,   66431,   "F\0" },
+    {66462,   66462,   "F\0" },
+    {66500,   66503,   "F\0" },
+    {66518,   66559,   "F\0" },
+    {66718,   66719,   "F\0" },
+    {66730,   66735,   "F\0" },
+    {66772,   66775,   "F\0" },
+    {66812,   66815,   "F\0" },
+    {66856,   66863,   "F\0" },
+    {66916,   66926,   "F\0" },
+    {66939,   66939,   "F\0" },
+    {66955,   66955,   "F\0" },
+    {66963,   66963,   "F\0" },
+    {66966,   66966,   "F\0" },
+    {66978,   66978,   "F\0" },
+    {66994,   66994,   "F\0" },
+    {67002,   67002,   "F\0" },
+    {67005,   67071,   "F\0" },
+    {67383,   67391,   "F\0" },
+    {67414,   67423,   "F\0" },
+    {67432,   67455,   "F\0" },
+    {67462,   67462,   "F\0" },
+    {67505,   67505,   "F\0" },
+    {67515,   67583,   "F\0" },
+    {67590,   67591,   "F\0" },
+    {67593,   67593,   "F\0" },
+    {67638,   67638,   "F\0" },
+    {67641,   67643,   "F\0" },
+    {67645,   67646,   "F\0" },
+    {67670,   67670,   "F\0" },
+    {67743,   67750,   "F\0" },
+    {67760,   67807,   "F\0" },
+    {67827,   67827,   "F\0" },
+    {67830,   67834,   "F\0" },
+    {67868,   67870,   "F\0" },
+    {67898,   67902,   "F\0" },
+    {67904,   67967,   "F\0" },
+    {68024,   68027,   "F\0" },
+    {68048,   68049,   "F\0" },
+    {68100,   68100,   "F\0" },
+    {68103,   68107,   "F\0" },
+    {68116,   68116,   "F\0" },
+    {68120,   68120,   "F\0" },
+    {68150,   68151,   "F\0" },
+    {68155,   68158,   "F\0" },
+    {68169,   68175,   "F\0" },
+    {68185,   68191,   "F\0" },
+    {68256,   68287,   "F\0" },
+    {68327,   68330,   "F\0" },
+    {68343,   68351,   "F\0" },
+    {68406,   68408,   "F\0" },
+    {68438,   68439,   "F\0" },
+    {68467,   68471,   "F\0" },
+    {68498,   68504,   "F\0" },
+    {68509,   68520,   "F\0" },
+    {68528,   68607,   "F\0" },
+    {68681,   68735,   "F\0" },
+    {68787,   68799,   "F\0" },
+    {68851,   68857,   "F\0" },
+    {68904,   68911,   "F\0" },
+    {68922,   69215,   "F\0" },
+    {69247,   69247,   "F\0" },
+    {69290,   69290,   "F\0" },
+    {69294,   69295,   "F\0" },
+    {69298,   69375,   "F\0" },
+    {69416,   69423,   "F\0" },
+    {69466,   69487,   "F\0" },
+    {69514,   69551,   "F\0" },
+    {69580,   69599,   "F\0" },
+    {69623,   69631,   "F\0" },
+    {69710,   69713,   "F\0" },
+    {69750,   69758,   "F\0" },
+    {69827,   69836,   "F\0" },
+    {69838,   69839,   "F\0" },
+    {69865,   69871,   "F\0" },
+    {69882,   69887,   "F\0" },
+    {69941,   69941,   "F\0" },
+    {69960,   69967,   "F\0" },
+    {70007,   70015,   "F\0" },
+    {70112,   70112,   "F\0" },
+    {70133,   70143,   "F\0" },
+    {70162,   70162,   "F\0" },
+    {70207,   70271,   "F\0" },
+    {70279,   70279,   "F\0" },
+    {70281,   70281,   "F\0" },
+    {70286,   70286,   "F\0" },
+    {70302,   70302,   "F\0" },
+    {70314,   70319,   "F\0" },
+    {70379,   70383,   "F\0" },
+    {70394,   70399,   "F\0" },
+    {70404,   70404,   "F\0" },
+    {70413,   70414,   "F\0" },
+    {70417,   70418,   "F\0" },
+    {70441,   70441,   "F\0" },
+    {70449,   70449,   "F\0" },
+    {70452,   70452,   "F\0" },
+    {70458,   70458,   "F\0" },
+    {70469,   70470,   "F\0" },
+    {70473,   70474,   "F\0" },
+    {70478,   70479,   "F\0" },
+    {70481,   70486,   "F\0" },
+    {70488,   70492,   "F\0" },
+    {70500,   70501,   "F\0" },
+    {70509,   70511,   "F\0" },
+    {70517,   70655,   "F\0" },
+    {70748,   70748,   "F\0" },
+    {70754,   70783,   "F\0" },
+    {70856,   70863,   "F\0" },
+    {70874,   71039,   "F\0" },
+    {71094,   71095,   "F\0" },
+    {71134,   71167,   "F\0" },
+    {71237,   71247,   "F\0" },
+    {71258,   71263,   "F\0" },
+    {71277,   71295,   "F\0" },
+    {71354,   71359,   "F\0" },
+    {71370,   71423,   "F\0" },
+    {71451,   71452,   "F\0" },
+    {71468,   71471,   "F\0" },
+    {71495,   71679,   "F\0" },
+    {71740,   71839,   "F\0" },
+    {71923,   71934,   "F\0" },
+    {71943,   71944,   "F\0" },
+    {71946,   71947,   "F\0" },
+    {71956,   71956,   "F\0" },
+    {71959,   71959,   "F\0" },
+    {71990,   71990,   "F\0" },
+    {71993,   71994,   "F\0" },
+    {72007,   72015,   "F\0" },
+    {72026,   72095,   "F\0" },
+    {72104,   72105,   "F\0" },
+    {72152,   72153,   "F\0" },
+    {72165,   72191,   "F\0" },
+    {72264,   72271,   "F\0" },
+    {72355,   72367,   "F\0" },
+    {72441,   72703,   "F\0" },
+    {72713,   72713,   "F\0" },
+    {72759,   72759,   "F\0" },
+    {72774,   72783,   "F\0" },
+    {72813,   72815,   "F\0" },
+    {72848,   72849,   "F\0" },
+    {72872,   72872,   "F\0" },
+    {72887,   72959,   "F\0" },
+    {72967,   72967,   "F\0" },
+    {72970,   72970,   "F\0" },
+    {73015,   73017,   "F\0" },
+    {73019,   73019,   "F\0" },
+    {73022,   73022,   "F\0" },
+    {73032,   73039,   "F\0" },
+    {73050,   73055,   "F\0" },
+    {73062,   73062,   "F\0" },
+    {73065,   73065,   "F\0" },
+    {73103,   73103,   "F\0" },
+    {73106,   73106,   "F\0" },
+    {73113,   73119,   "F\0" },
+    {73130,   73439,   "F\0" },
+    {73465,   73647,   "F\0" },
+    {73649,   73663,   "F\0" },
+    {73714,   73726,   "F\0" },
+    {74650,   74751,   "F\0" },
+    {74863,   74863,   "F\0" },
+    {74869,   74879,   "F\0" },
+    {75076,   77711,   "F\0" },
+    {77811,   77823,   "F\0" },
+    {78895,   78895,   "F\0" },
+    {78905,   82943,   "F\0" },
+    {83527,   92159,   "F\0" },
+    {92729,   92735,   "F\0" },
+    {92767,   92767,   "F\0" },
+    {92778,   92781,   "F\0" },
+    {92863,   92863,   "F\0" },
+    {92874,   92879,   "F\0" },
+    {92910,   92911,   "F\0" },
+    {92918,   92927,   "F\0" },
+    {92998,   93007,   "F\0" },
+    {93018,   93018,   "F\0" },
+    {93026,   93026,   "F\0" },
+    {93048,   93052,   "F\0" },
+    {93072,   93759,   "F\0" },
+    {93851,   93951,   "F\0" },
+    {94027,   94030,   "F\0" },
+    {94088,   94094,   "F\0" },
+    {94112,   94175,   "F\0" },
+    {94176,   94180,   "W\0" },
+    {94181,   94191,   "F\0" },
+    {94192,   94193,   "W\0" },
+    {94194,   94207,   "F\0" },
+    {94208,   100343,  "W\0" },
+    {100344,  100351,  "F\0" },
+    {100352,  101589,  "W\0" },
+    {101590,  101631,  "F\0" },
+    {101632,  101640,  "W\0" },
+    {101641,  110575,  "F\0" },
+    {110576,  110579,  "W\0" },
+    {110580,  110580,  "F\0" },
+    {110581,  110587,  "W\0" },
+    {110588,  110588,  "F\0" },
+    {110589,  110590,  "W\0" },
+    {110591,  110591,  "F\0" },
+    {110592,  110882,  "W\0" },
+    {110883,  110927,  "F\0" },
+    {110928,  110930,  "W\0" },
+    {110931,  110947,  "F\0" },
+    {110948,  110951,  "W\0" },
+    {110952,  110959,  "F\0" },
+    {110960,  111355,  "W\0" },
+    {111356,  113663,  "F\0" },
+    {113771,  113775,  "F\0" },
+    {113789,  113791,  "F\0" },
+    {113801,  113807,  "F\0" },
+    {113818,  113819,  "F\0" },
+    {113828,  118527,  "F\0" },
+    {118574,  118575,  "F\0" },
+    {118599,  118607,  "F\0" },
+    {118724,  118783,  "F\0" },
+    {119030,  119039,  "F\0" },
+    {119079,  119080,  "F\0" },
+    {119275,  119295,  "F\0" },
+    {119366,  119519,  "F\0" },
+    {119540,  119551,  "F\0" },
+    {119639,  119647,  "F\0" },
+    {119673,  119807,  "F\0" },
+    {119893,  119893,  "F\0" },
+    {119965,  119965,  "F\0" },
+    {119968,  119969,  "F\0" },
+    {119971,  119972,  "F\0" },
+    {119975,  119976,  "F\0" },
+    {119981,  119981,  "F\0" },
+    {119994,  119994,  "F\0" },
+    {119996,  119996,  "F\0" },
+    {120004,  120004,  "F\0" },
+    {120070,  120070,  "F\0" },
+    {120075,  120076,  "F\0" },
+    {120085,  120085,  "F\0" },
+    {120093,  120093,  "F\0" },
+    {120122,  120122,  "F\0" },
+    {120127,  120127,  "F\0" },
+    {120133,  120133,  "F\0" },
+    {120135,  120137,  "F\0" },
+    {120145,  120145,  "F\0" },
+    {120486,  120487,  "F\0" },
+    {120780,  120781,  "F\0" },
+    {121484,  121498,  "F\0" },
+    {121504,  121504,  "F\0" },
+    {121520,  122623,  "F\0" },
+    {122655,  122879,  "F\0" },
+    {122887,  122887,  "F\0" },
+    {122905,  122906,  "F\0" },
+    {122914,  122914,  "F\0" },
+    {122917,  122917,  "F\0" },
+    {122923,  123135,  "F\0" },
+    {123181,  123183,  "F\0" },
+    {123198,  123199,  "F\0" },
+    {123210,  123213,  "F\0" },
+    {123216,  123535,  "F\0" },
+    {123567,  123583,  "F\0" },
+    {123642,  123646,  "F\0" },
+    {123648,  124895,  "F\0" },
+    {124903,  124903,  "F\0" },
+    {124908,  124908,  "F\0" },
+    {124911,  124911,  "F\0" },
+    {124927,  124927,  "F\0" },
+    {125125,  125126,  "F\0" },
+    {125143,  125183,  "F\0" },
+    {125260,  125263,  "F\0" },
+    {125274,  125277,  "F\0" },
+    {125280,  126064,  "F\0" },
+    {126133,  126208,  "F\0" },
+    {126270,  126463,  "F\0" },
+    {126468,  126468,  "F\0" },
+    {126496,  126496,  "F\0" },
+    {126499,  126499,  "F\0" },
+    {126501,  126502,  "F\0" },
+    {126504,  126504,  "F\0" },
+    {126515,  126515,  "F\0" },
+    {126520,  126520,  "F\0" },
+    {126522,  126522,  "F\0" },
+    {126524,  126529,  "F\0" },
+    {126531,  126534,  "F\0" },
+    {126536,  126536,  "F\0" },
+    {126538,  126538,  "F\0" },
+    {126540,  126540,  "F\0" },
+    {126544,  126544,  "F\0" },
+    {126547,  126547,  "F\0" },
+    {126549,  126550,  "F\0" },
+    {126552,  126552,  "F\0" },
+    {126554,  126554,  "F\0" },
+    {126556,  126556,  "F\0" },
+    {126558,  126558,  "F\0" },
+    {126560,  126560,  "F\0" },
+    {126563,  126563,  "F\0" },
+    {126565,  126566,  "F\0" },
+    {126571,  126571,  "F\0" },
+    {126579,  126579,  "F\0" },
+    {126584,  126584,  "F\0" },
+    {126589,  126589,  "F\0" },
+    {126591,  126591,  "F\0" },
+    {126602,  126602,  "F\0" },
+    {126620,  126624,  "F\0" },
+    {126628,  126628,  "F\0" },
+    {126634,  126634,  "F\0" },
+    {126652,  126703,  "F\0" },
+    {126706,  126975,  "F\0" },
+    {126980,  126980,  "W\0" },
+    {127020,  127023,  "F\0" },
+    {127124,  127135,  "F\0" },
+    {127151,  127152,  "F\0" },
+    {127168,  127168,  "F\0" },
+    {127183,  127183,  "W\0" },
+    {127184,  127184,  "F\0" },
+    {127222,  127231,  "F\0" },
+    {127232,  127242,  "A\0" },
+    {127248,  127277,  "A\0" },
+    {127280,  127337,  "A\0" },
+    {127344,  127373,  "A\0" },
+    {127374,  127374,  "W\0" },
+    {127375,  127376,  "A\0" },
+    {127377,  127386,  "W\0" },
+    {127387,  127404,  "A\0" },
+    {127406,  127461,  "F\0" },
+    {127488,  127490,  "W\0" },
+    {127491,  127503,  "F\0" },
+    {127504,  127547,  "W\0" },
+    {127548,  127551,  "F\0" },
+    {127552,  127560,  "W\0" },
+    {127561,  127567,  "F\0" },
+    {127568,  127569,  "W\0" },
+    {127570,  127583,  "F\0" },
+    {127584,  127589,  "W\0" },
+    {127590,  127743,  "F\0" },
+    {127744,  127776,  "W\0" },
+    {127789,  127797,  "W\0" },
+    {127799,  127868,  "W\0" },
+    {127870,  127891,  "W\0" },
+    {127904,  127946,  "W\0" },
+    {127951,  127955,  "W\0" },
+    {127968,  127984,  "W\0" },
+    {127988,  127988,  "W\0" },
+    {127992,  128062,  "W\0" },
+    {128064,  128064,  "W\0" },
+    {128066,  128252,  "W\0" },
+    {128255,  128317,  "W\0" },
+    {128331,  128334,  "W\0" },
+    {128336,  128359,  "W\0" },
+    {128378,  128378,  "W\0" },
+    {128405,  128406,  "W\0" },
+    {128420,  128420,  "W\0" },
+    {128507,  128591,  "W\0" },
+    {128640,  128709,  "W\0" },
+    {128716,  128716,  "W\0" },
+    {128720,  128722,  "W\0" },
+    {128725,  128727,  "W\0" },
+    {128728,  128732,  "F\0" },
+    {128733,  128735,  "W\0" },
+    {128747,  128748,  "W\0" },
+    {128749,  128751,  "F\0" },
+    {128756,  128764,  "W\0" },
+    {128765,  128767,  "F\0" },
+    {128884,  128895,  "F\0" },
+    {128985,  128991,  "F\0" },
+    {128992,  129003,  "W\0" },
+    {129004,  129007,  "F\0" },
+    {129008,  129008,  "W\0" },
+    {129009,  129023,  "F\0" },
+    {129036,  129039,  "F\0" },
+    {129096,  129103,  "F\0" },
+    {129114,  129119,  "F\0" },
+    {129160,  129167,  "F\0" },
+    {129198,  129199,  "F\0" },
+    {129202,  129279,  "F\0" },
+    {129292,  129338,  "W\0" },
+    {129340,  129349,  "W\0" },
+    {129351,  129535,  "W\0" },
+    {129620,  129631,  "F\0" },
+    {129646,  129647,  "F\0" },
+    {129648,  129652,  "W\0" },
+    {129653,  129655,  "F\0" },
+    {129656,  129660,  "W\0" },
+    {129661,  129663,  "F\0" },
+    {129664,  129670,  "W\0" },
+    {129671,  129679,  "F\0" },
+    {129680,  129708,  "W\0" },
+    {129709,  129711,  "F\0" },
+    {129712,  129722,  "W\0" },
+    {129723,  129727,  "F\0" },
+    {129728,  129733,  "W\0" },
+    {129734,  129743,  "F\0" },
+    {129744,  129753,  "W\0" },
+    {129754,  129759,  "F\0" },
+    {129760,  129767,  "W\0" },
+    {129768,  129775,  "F\0" },
+    {129776,  129782,  "W\0" },
+    {129783,  129791,  "F\0" },
+    {129939,  129939,  "F\0" },
+    {129995,  130031,  "F\0" },
+    {130042,  131071,  "F\0" },
+    {131072,  173791,  "W\0" },
+    {173792,  173823,  "F\0" },
+    {173824,  177976,  "W\0" },
+    {177977,  177983,  "F\0" },
+    {177984,  178205,  "W\0" },
+    {178206,  178207,  "F\0" },
+    {178208,  183969,  "W\0" },
+    {183970,  183983,  "F\0" },
+    {183984,  191456,  "W\0" },
+    {191457,  194559,  "F\0" },
+    {194560,  195101,  "W\0" },
+    {195102,  196607,  "F\0" },
+    {196608,  201546,  "W\0" },
+    {201547,  917504,  "F\0" },
+    {917506,  917535,  "F\0" },
+    {917632,  917759,  "F\0" },
+    {917760,  917999,  "A\0" },
+    {918000,  983039,  "F\0" },
+    {983040,  1048573, "A\0" },
+    {1048574, 1048575, "F\0" },
+    {1048576, 1114109, "A\0" },
+    {1114110, 1114111, "F\0" },
+};
+
+const static char* c11__u32_east_asian_width(int c) {
+    const char* data =
+        c11__search_u32_ranges(c,
+                               kEastAsianWidthRanges,
+                               sizeof(kEastAsianWidthRanges) / sizeof(c11_u32_range));
+    if(data == NULL) return "N";
+    return data;
+}
+
+static bool unicodedata_east_asian_width(int argc, py_Ref argv) {
+    PY_CHECK_ARGC(1);
+    PY_CHECK_ARG_TYPE(0, tp_str);
+    c11_sv sv = py_tosv(py_arg(0));
+    if(c11_sv__u8_length(sv) != 1) {
+        return TypeError("east_asian_width() expected a character, but string of length %d found",
+                         c11_sv__u8_length(sv));
+    }
+    int u8bytes = c11__u8_header(sv.data[0], true);
+    if(u8bytes == 0) return ValueError("invalid utf-8 char: %c", sv.data[0]);
+    int value = c11__u8_value(u8bytes, sv.data);
+    const char* width = c11__u32_east_asian_width(value);
+    py_newstr(py_retval(), width);
+    return true;
+}
+
+void pk__add_module_unicodedata() {
+    py_Ref mod = py_newmodule("unicodedata");
+
+    py_bindfunc(mod, "east_asian_width", unicodedata_east_asian_width);
+}
 // src/modules/time.c
 #include <time.h>
 #include <assert.h>
@@ -16667,7 +22050,7 @@ static bool Enum__wrapper_field(py_Name name, py_Ref value, void* ctx) {
 }
 
 static void Enum__on_end_subclass(py_TypeInfo* derived_ti) {
-    derived_ti->is_sealed = true;
+    derived_ti->is_final = true;
     py_applydict(&derived_ti->self, Enum__wrapper_field, &derived_ti->self);
 }
 
@@ -16737,7 +22120,7 @@ void pk__add_module_enum() {
     py_bindproperty(type, "name", Enum__name, NULL);
     py_bindproperty(type, "value", Enum__value, NULL);
 
-    pk__type_info(type)->on_end_subclass = Enum__on_end_subclass;
+    pk_typeinfo(type)->on_end_subclass = Enum__on_end_subclass;
 }
 // src/modules/base64.c
 #include <limits.h>
@@ -16954,6 +22337,7 @@ void pk__add_module_importlib() {
 
     py_bindfunc(mod, "reload", importlib_reload);
 }
+
 // src/modules/dis.c
 #include <stdbool.h>
 
@@ -16998,7 +22382,7 @@ static bool disassemble(CodeObject* co) {
         c11_sbuf__write_cstr(&ss, buf);
 
         c11_sbuf__write_cstr(&ss, pk_opname(byte.op));
-        c11_sbuf__write_char(&ss, ex.is_virtual ? '*' : ' ');
+        c11_sbuf__write_char(&ss, ' ');
         int padding = 24 - strlen(pk_opname(byte.op));
         for(int j = 0; j < padding; j++)
             c11_sbuf__write_char(&ss, ' ');
@@ -17038,7 +22422,8 @@ static bool disassemble(CodeObject* co) {
                 case OP_BEGIN_CLASS:
                 case OP_DELETE_GLOBAL:
                 case OP_STORE_CLASS_ATTR: {
-                    pk_sprintf(&ss, " (%n)", byte.arg);
+                    py_Name name = c11__getitem(py_Name, &co->names, byte.arg);
+                    pk_sprintf(&ss, " (%n)", name);
                     break;
                 }
                 case OP_LOAD_FAST:
@@ -17053,11 +22438,31 @@ static bool disassemble(CodeObject* co) {
                     pk_sprintf(&ss, " (%s)", decl->code.name->data);
                     break;
                 }
-                case OP_BINARY_OP: {
-                    py_Name name = byte.arg & 0xFF;
-                    pk_sprintf(&ss, " (%s)", pk_op2str(name));
-                    break;
-                }
+#define CASE_BINARY_OP(label, op, rop)                                                             \
+    case label: {                                                                                  \
+        pk_sprintf(&ss, " (%s)", pk_op2str(op));                                                   \
+        break;                                                                                     \
+    }
+                    CASE_BINARY_OP(OP_BINARY_ADD, __add__, __radd__)
+                    CASE_BINARY_OP(OP_BINARY_SUB, __sub__, __rsub__)
+                    CASE_BINARY_OP(OP_BINARY_MUL, __mul__, __rmul__)
+                    CASE_BINARY_OP(OP_BINARY_TRUEDIV, __truediv__, __rtruediv__)
+                    CASE_BINARY_OP(OP_BINARY_FLOORDIV, __floordiv__, __rfloordiv__)
+                    CASE_BINARY_OP(OP_BINARY_MOD, __mod__, __rmod__)
+                    CASE_BINARY_OP(OP_BINARY_POW, __pow__, __rpow__)
+                    CASE_BINARY_OP(OP_BINARY_LSHIFT, __lshift__, 0)
+                    CASE_BINARY_OP(OP_BINARY_RSHIFT, __rshift__, 0)
+                    CASE_BINARY_OP(OP_BINARY_AND, __and__, 0)
+                    CASE_BINARY_OP(OP_BINARY_OR, __or__, 0)
+                    CASE_BINARY_OP(OP_BINARY_XOR, __xor__, 0)
+                    CASE_BINARY_OP(OP_BINARY_MATMUL, __matmul__, 0)
+                    CASE_BINARY_OP(OP_COMPARE_LT, __lt__, __gt__)
+                    CASE_BINARY_OP(OP_COMPARE_LE, __le__, __ge__)
+                    CASE_BINARY_OP(OP_COMPARE_EQ, __eq__, __eq__)
+                    CASE_BINARY_OP(OP_COMPARE_NE, __ne__, __ne__)
+                    CASE_BINARY_OP(OP_COMPARE_GT, __gt__, __lt__)
+                    CASE_BINARY_OP(OP_COMPARE_GE, __ge__, __le__)
+#undef CASE_BINARY_OP
             }
         } while(0);
 
@@ -17095,7 +22500,7 @@ void pk__add_module_dis() {
     py_bindfunc(mod, "dis", dis_dis);
 }
 // src/modules/os.c
-#if PK_ENABLE_OS == 1
+#if PK_ENABLE_OS
 
 #include <errno.h>
 
@@ -17190,6 +22595,8 @@ void pk__add_module_os() {
     py_ItemRef path_object = py_emplacedict(mod, py_name("path"));
     py_newobject(path_object, tp_object, -1, 0);
     py_bindfunc(path_object, "exists", os_path_exists);
+
+    py_newdict(py_emplacedict(mod, py_name("environ")));
 }
 
 typedef struct {
@@ -17322,7 +22729,7 @@ void pk__add_module_io() {
     py_newint(py_emplacedict(mod, py_name("SEEK_CUR")), SEEK_CUR);
     py_newint(py_emplacedict(mod, py_name("SEEK_END")), SEEK_END);
 
-    py_setdict(&pk_current_vm->builtins, py_name("open"), py_tpobject(FileIO));
+    py_setdict(pk_current_vm->builtins, py_name("open"), py_tpobject(FileIO));
 }
 
 #else
@@ -17587,7 +22994,6 @@ void pk__add_module_colorcvt() {
 // src/modules/lz4.c
 #ifdef PK_BUILD_MODULE_LZ4
 
-#include <stdlib.h>
 #include <string.h>
 #include <assert.h>
 #include "lz4/lib/lz4.h"
@@ -17636,8 +23042,6 @@ void pk__add_module_lz4() {}
 #endif
 
 // src/modules/conio.c
-#include <stdlib.h>
-
 #if PY_SYS_PLATFORM == 0
 
 #define WIN32_LEAN_AND_MEAN
@@ -17766,7 +23170,7 @@ void pk__add_module_conio() {}
 #endif
 
 // src/modules/gc.c
-static bool gc_collect(int argc, py_Ref argv){
+static bool gc_collect(int argc, py_Ref argv) {
     PY_CHECK_ARGC(0);
     ManagedHeap* heap = &pk_current_vm->heap;
     int res = ManagedHeap__collect(heap);
@@ -17774,7 +23178,7 @@ static bool gc_collect(int argc, py_Ref argv){
     return true;
 }
 
-static bool gc_enable(int argc, py_Ref argv){
+static bool gc_enable(int argc, py_Ref argv) {
     PY_CHECK_ARGC(0);
     ManagedHeap* heap = &pk_current_vm->heap;
     heap->gc_enabled = true;
@@ -17782,7 +23186,7 @@ static bool gc_enable(int argc, py_Ref argv){
     return true;
 }
 
-static bool gc_disable(int argc, py_Ref argv){
+static bool gc_disable(int argc, py_Ref argv) {
     PY_CHECK_ARGC(0);
     ManagedHeap* heap = &pk_current_vm->heap;
     heap->gc_enabled = false;
@@ -17790,7 +23194,7 @@ static bool gc_disable(int argc, py_Ref argv){
     return true;
 }
 
-static bool gc_isenabled(int argc, py_Ref argv){
+static bool gc_isenabled(int argc, py_Ref argv) {
     PY_CHECK_ARGC(0);
     ManagedHeap* heap = &pk_current_vm->heap;
     py_newbool(py_retval(), heap->gc_enabled);
@@ -17804,6 +23208,11 @@ void pk__add_module_gc() {
     py_bindfunc(mod, "enable", gc_enable);
     py_bindfunc(mod, "disable", gc_disable);
     py_bindfunc(mod, "isenabled", gc_isenabled);
+}
+
+int py_gc_collect() {
+    ManagedHeap* heap = &pk_current_vm->heap;
+    return ManagedHeap__collect(heap);
 }
 // src/compiler/lexer.c
 #include <ctype.h>
@@ -18083,20 +23492,20 @@ static Error* _eat_string(Lexer* self, c11_sbuf* buff, char quote, enum StringTy
                 case 'x': {
                     char hex[3] = {eatchar(self), eatchar(self), '\0'};
                     int code;
-                    if (sscanf(hex, "%x", &code) != 1 || code > 0xFF) {
+                    if(sscanf(hex, "%x", &code) != 1 || code > 0xFF) {
                         return LexerError(self, "invalid hex escape");
                     }
-                    if (type == NORMAL_BYTES) {
+                    if(type == NORMAL_BYTES) {
                         // Bytes literals: write raw byte
                         c11_sbuf__write_char(buff, (char)code);
                     } else {
                         // Regular strings: encode as UTF-8
-                        if (code <= 0x7F) {
+                        if(code <= 0x7F) {
                             c11_sbuf__write_char(buff, (char)code);
                         } else {
                             // Encode as 2-byte UTF-8 for code points 0x80-0xFF
-                            c11_sbuf__write_char(buff, 0xC0 | (code >> 6));        // Leading byte
-                            c11_sbuf__write_char(buff, 0x80 | (code & 0x3F));      // Continuation byte
+                            c11_sbuf__write_char(buff, 0xC0 | (code >> 6));    // Leading byte
+                            c11_sbuf__write_char(buff, 0x80 | (code & 0x3F));  // Continuation byte
                         }
                     }
                 } break;
@@ -18515,6 +23924,7 @@ const char* TokenSymbols[] = {
     "in",
     "is",
     "lambda",
+    "match",
     "not",
     "or",
     "pass",
@@ -18550,6 +23960,7 @@ typedef struct ExprVt {
     bool is_subscr;   // SubscrExpr
     bool is_starred;  // StarredExpr
     bool is_binary;   // BinaryExpr
+    bool is_ternary;  // TernaryExpr
     void (*dtor)(Expr*);
 } ExprVt;
 
@@ -18584,9 +23995,9 @@ typedef struct Ctx {
     int level;
     int curr_iblock;
     bool is_compiling_class;
-    c11_vector /*T=Expr* */ s_expr;
-    c11_smallmap_n2i global_names;
-    c11_smallmap_s2n co_consts_string_dedup_map;
+    c11_vector /*T=Expr_p*/ s_expr;
+    c11_smallmap_n2d global_names;
+    c11_smallmap_v2d co_consts_string_dedup_map;  // this stores 0-based index instead of pointer
 } Ctx;
 
 typedef struct Expr Expr;
@@ -18597,12 +24008,12 @@ static int Ctx__prepare_loop_divert(Ctx* self, int line, bool is_break);
 static int Ctx__enter_block(Ctx* self, CodeBlockType type);
 static void Ctx__exit_block(Ctx* self);
 static int Ctx__emit_(Ctx* self, Opcode opcode, uint16_t arg, int line);
-static int Ctx__emit_virtual(Ctx* self, Opcode opcode, uint16_t arg, int line, bool virtual);
-static void Ctx__revert_last_emit_(Ctx* self);
+// static void Ctx__revert_last_emit_(Ctx* self);
 static int Ctx__emit_int(Ctx* self, int64_t value, int line);
 static void Ctx__patch_jump(Ctx* self, int index);
 static void Ctx__emit_jump(Ctx* self, int target, int line);
 static int Ctx__add_varname(Ctx* self, py_Name name);
+static int Ctx__add_name(Ctx* self, py_Name name);
 static int Ctx__add_const(Ctx* self, py_Ref);
 static int Ctx__add_const_string(Ctx* self, c11_sv);
 static void Ctx__emit_store_name(Ctx* self, NameScope scope, py_Name name, int line);
@@ -18623,7 +24034,7 @@ typedef struct NameExpr {
 
 void NameExpr__emit_(Expr* self_, Ctx* ctx) {
     NameExpr* self = (NameExpr*)self_;
-    int index = c11_smallmap_n2i__get(&ctx->co->varnames_inv, self->name, -1);
+    int index = c11_smallmap_n2d__get(&ctx->co->varnames_inv, self->name, -1);
     if(self->scope == NAME_LOCAL && index >= 0) {
         // we know this is a local variable
         Ctx__emit_(ctx, OP_LOAD_FAST, index, self->line);
@@ -18640,7 +24051,7 @@ void NameExpr__emit_(Expr* self_, Ctx* ctx) {
                 }
             }
         }
-        Ctx__emit_(ctx, op, self->name, self->line);
+        Ctx__emit_(ctx, op, Ctx__add_name(ctx, self->name), self->line);
     }
 }
 
@@ -18652,7 +24063,7 @@ bool NameExpr__emit_del(Expr* self_, Ctx* ctx) {
             break;
         case NAME_GLOBAL: {
             Opcode op = ctx->co->src->is_dynamic ? OP_DELETE_NAME : OP_DELETE_GLOBAL;
-            Ctx__emit_(ctx, op, self->name, self->line);
+            Ctx__emit_(ctx, op, Ctx__add_name(ctx, self->name), self->line);
             break;
         }
         default: c11__unreachable();
@@ -18663,7 +24074,7 @@ bool NameExpr__emit_del(Expr* self_, Ctx* ctx) {
 bool NameExpr__emit_store(Expr* self_, Ctx* ctx) {
     NameExpr* self = (NameExpr*)self_;
     if(ctx->is_compiling_class) {
-        Ctx__emit_(ctx, OP_STORE_CLASS_ATTR, self->name, self->line);
+        Ctx__emit_(ctx, OP_STORE_CLASS_ATTR, Ctx__add_name(ctx, self->name), self->line);
         return true;
     }
     Ctx__emit_store_name(ctx, self->scope, self->name, self->line);
@@ -18889,6 +24300,25 @@ Literal0Expr* Literal0Expr__new(int line, TokenIndex token) {
     return self;
 }
 
+typedef struct LoadConstExpr {
+    EXPR_COMMON_HEADER
+    int index;
+} LoadConstExpr;
+
+void LoadConstExpr__emit_(Expr* self_, Ctx* ctx) {
+    LoadConstExpr* self = (LoadConstExpr*)self_;
+    Ctx__emit_(ctx, OP_LOAD_CONST, self->index, self->line);
+}
+
+LoadConstExpr* LoadConstExpr__new(int line, int index) {
+    const static ExprVt Vt = {.emit_ = LoadConstExpr__emit_};
+    LoadConstExpr* self = PK_MALLOC(sizeof(LoadConstExpr));
+    self->vt = &Vt;
+    self->line = line;
+    self->index = index;
+    return self;
+}
+
 typedef struct SliceExpr {
     EXPR_COMMON_HEADER
     Expr* start;
@@ -19002,13 +24432,7 @@ bool TupleExpr__emit_store(Expr* self_, Ctx* ctx) {
     }
 
     if(starred_i == -1) {
-        Bytecode* prev = c11__at(Bytecode, &ctx->co->codes, ctx->co->codes.length - 1);
-        if(prev->op == OP_BUILD_TUPLE && prev->arg == self->itemCount) {
-            // build tuple and unpack it is meaningless
-            Ctx__revert_last_emit_(ctx);
-        } else {
-            Ctx__emit_(ctx, OP_UNPACK_SEQUENCE, self->itemCount, self->line);
-        }
+        Ctx__emit_(ctx, OP_UNPACK_SEQUENCE, self->itemCount, self->line);
     } else {
         // starred assignment target must be in a tuple
         if(self->itemCount == 1) return false;
@@ -19239,19 +24663,19 @@ static void BinaryExpr__dtor(Expr* self_) {
     vtdelete(self->rhs);
 }
 
-static py_Name cmp_token2name(TokenIndex token) {
+static Opcode cmp_token2op(TokenIndex token) {
     switch(token) {
-        case TK_LT: return __lt__;
-        case TK_LE: return __le__;
-        case TK_EQ: return __eq__;
-        case TK_NE: return __ne__;
-        case TK_GT: return __gt__;
-        case TK_GE: return __ge__;
+        case TK_LT: return OP_COMPARE_LT;
+        case TK_LE: return OP_COMPARE_LE;
+        case TK_EQ: return OP_COMPARE_EQ;
+        case TK_NE: return OP_COMPARE_NE;
+        case TK_GT: return OP_COMPARE_GT;
+        case TK_GE: return OP_COMPARE_GE;
         default: return 0;
     }
 }
 
-#define is_compare_expr(e) ((e)->vt->is_binary && cmp_token2name(((BinaryExpr*)(e))->op))
+#define is_compare_expr(e) ((e)->vt->is_binary && cmp_token2op(((BinaryExpr*)(e))->op))
 
 static void _emit_compare(BinaryExpr* self, Ctx* ctx, c11_vector* jmps) {
     if(is_compare_expr(self->lhs)) {
@@ -19262,7 +24686,7 @@ static void _emit_compare(BinaryExpr* self, Ctx* ctx, c11_vector* jmps) {
     vtemit_(self->rhs, ctx);                              // [a, b]
     Ctx__emit_(ctx, OP_DUP_TOP, BC_NOARG, self->line);    // [a, b, b]
     Ctx__emit_(ctx, OP_ROT_THREE, BC_NOARG, self->line);  // [b, a, b]
-    Ctx__emit_(ctx, OP_BINARY_OP, cmp_token2name(self->op), self->line);
+    Ctx__emit_(ctx, cmp_token2op(self->op), BC_NOARG, self->line);
     // [b, RES]
     int index = Ctx__emit_(ctx, OP_SHORTCUT_IF_FALSE_OR_POP, BC_NOARG, self->line);
     c11_vector__push(int, jmps, index);
@@ -19272,7 +24696,7 @@ static void BinaryExpr__emit_(Expr* self_, Ctx* ctx) {
     BinaryExpr* self = (BinaryExpr*)self_;
     c11_vector /*T=int*/ jmps;
     c11_vector__ctor(&jmps, sizeof(int));
-    if(cmp_token2name(self->op) && is_compare_expr(self->lhs)) {
+    if(cmp_token2op(self->op) && is_compare_expr(self->lhs)) {
         // (a < b) < c
         BinaryExpr* e = (BinaryExpr*)self->lhs;
         _emit_compare(e, ctx, &jmps);
@@ -19288,24 +24712,24 @@ static void BinaryExpr__emit_(Expr* self_, Ctx* ctx) {
 
     vtemit_(self->rhs, ctx);
 
-    Opcode opcode = OP_BINARY_OP;
+    Opcode opcode;
     uint16_t arg = BC_NOARG;
 
     switch(self->op) {
-        case TK_ADD: arg = __add__ | (__radd__ << 8); break;
-        case TK_SUB: arg = __sub__ | (__rsub__ << 8); break;
-        case TK_MUL: arg = __mul__ | (__rmul__ << 8); break;
-        case TK_DIV: arg = __truediv__ | (__rtruediv__ << 8); break;
-        case TK_FLOORDIV: arg = __floordiv__ | (__rfloordiv__ << 8); break;
-        case TK_MOD: arg = __mod__ | (__rmod__ << 8); break;
-        case TK_POW: arg = __pow__ | (__rpow__ << 8); break;
+        case TK_ADD: opcode = OP_BINARY_ADD; break;
+        case TK_SUB: opcode = OP_BINARY_SUB; break;
+        case TK_MUL: opcode = OP_BINARY_MUL; break;
+        case TK_DIV: opcode = OP_BINARY_TRUEDIV; break;
+        case TK_FLOORDIV: opcode = OP_BINARY_FLOORDIV; break;
+        case TK_MOD: opcode = OP_BINARY_MOD; break;
+        case TK_POW: opcode = OP_BINARY_POW; break;
 
-        case TK_LT: arg = __lt__ | (__gt__ << 8); break;
-        case TK_LE: arg = __le__ | (__ge__ << 8); break;
-        case TK_EQ: arg = __eq__ | (__eq__ << 8); break;
-        case TK_NE: arg = __ne__ | (__ne__ << 8); break;
-        case TK_GT: arg = __gt__ | (__lt__ << 8); break;
-        case TK_GE: arg = __ge__ | (__le__ << 8); break;
+        case TK_LT: opcode = OP_COMPARE_LT; break;
+        case TK_LE: opcode = OP_COMPARE_LE; break;
+        case TK_EQ: opcode = OP_COMPARE_EQ; break;
+        case TK_NE: opcode = OP_COMPARE_NE; break;
+        case TK_GT: opcode = OP_COMPARE_GT; break;
+        case TK_GE: opcode = OP_COMPARE_GE; break;
 
         case TK_IN:
             opcode = OP_CONTAINS_OP;
@@ -19324,13 +24748,13 @@ static void BinaryExpr__emit_(Expr* self_, Ctx* ctx) {
             arg = 1;
             break;
 
-        case TK_LSHIFT: arg = __lshift__; break;
-        case TK_RSHIFT: arg = __rshift__; break;
-        case TK_AND: arg = __and__; break;
-        case TK_OR: arg = __or__; break;
-        case TK_XOR: arg = __xor__; break;
-        case TK_DECORATOR: arg = __matmul__; break;
-        default: assert(false);
+        case TK_LSHIFT: opcode = OP_BINARY_LSHIFT; break;
+        case TK_RSHIFT: opcode = OP_BINARY_RSHIFT; break;
+        case TK_AND: opcode = OP_BINARY_AND; break;
+        case TK_OR: opcode = OP_BINARY_OR; break;
+        case TK_XOR: opcode = OP_BINARY_XOR; break;
+        case TK_DECORATOR: opcode = OP_BINARY_MATMUL; break;
+        default: c11__unreachable();
     }
 
     Ctx__emit_(ctx, opcode, arg, self->line);
@@ -19381,7 +24805,11 @@ void TernaryExpr__emit_(Expr* self_, Ctx* ctx) {
 }
 
 TernaryExpr* TernaryExpr__new(int line) {
-    const static ExprVt Vt = {.dtor = TernaryExpr__dtor, .emit_ = TernaryExpr__emit_};
+    const static ExprVt Vt = {
+        .dtor = TernaryExpr__dtor,
+        .emit_ = TernaryExpr__emit_,
+        .is_ternary = true,
+    };
     TernaryExpr* self = PK_MALLOC(sizeof(TernaryExpr));
     self->vt = &Vt;
     self->line = line;
@@ -19474,20 +24902,20 @@ void AttribExpr__dtor(Expr* self_) {
 void AttribExpr__emit_(Expr* self_, Ctx* ctx) {
     AttribExpr* self = (AttribExpr*)self_;
     vtemit_(self->child, ctx);
-    Ctx__emit_(ctx, OP_LOAD_ATTR, self->name, self->line);
+    Ctx__emit_(ctx, OP_LOAD_ATTR, Ctx__add_name(ctx, self->name), self->line);
 }
 
 bool AttribExpr__emit_del(Expr* self_, Ctx* ctx) {
     AttribExpr* self = (AttribExpr*)self_;
     vtemit_(self->child, ctx);
-    Ctx__emit_(ctx, OP_DELETE_ATTR, self->name, self->line);
+    Ctx__emit_(ctx, OP_DELETE_ATTR, Ctx__add_name(ctx, self->name), self->line);
     return true;
 }
 
 bool AttribExpr__emit_store(Expr* self_, Ctx* ctx) {
     AttribExpr* self = (AttribExpr*)self_;
     vtemit_(self->child, ctx);
-    Ctx__emit_(ctx, OP_STORE_ATTR, self->name, self->line);
+    Ctx__emit_(ctx, OP_STORE_ATTR, Ctx__add_name(ctx, self->name), self->line);
     return true;
 }
 
@@ -19495,14 +24923,14 @@ void AttribExpr__emit_inplace(Expr* self_, Ctx* ctx) {
     AttribExpr* self = (AttribExpr*)self_;
     vtemit_(self->child, ctx);
     Ctx__emit_(ctx, OP_DUP_TOP, BC_NOARG, self->line);
-    Ctx__emit_(ctx, OP_LOAD_ATTR, self->name, self->line);
+    Ctx__emit_(ctx, OP_LOAD_ATTR, Ctx__add_name(ctx, self->name), self->line);
 }
 
 bool AttribExpr__emit_istore(Expr* self_, Ctx* ctx) {
     // [a, val] -> [val, a]
     AttribExpr* self = (AttribExpr*)self_;
     Ctx__emit_(ctx, OP_ROT_TWO, BC_NOARG, self->line);
-    Ctx__emit_(ctx, OP_STORE_ATTR, self->name, self->line);
+    Ctx__emit_(ctx, OP_STORE_ATTR, Ctx__add_name(ctx, self->name), self->line);
     return true;
 }
 
@@ -19560,7 +24988,7 @@ void CallExpr__emit_(Expr* self_, Ctx* ctx) {
     if(self->callable->vt->is_attrib) {
         AttribExpr* p = (AttribExpr*)self->callable;
         vtemit_(p->child, ctx);
-        Ctx__emit_(ctx, OP_LOAD_METHOD, p->name, p->line);
+        Ctx__emit_(ctx, OP_LOAD_METHOD, Ctx__add_name(ctx, p->name), p->line);
     } else {
         vtemit_(self->callable, ctx);
         Ctx__emit_(ctx, OP_LOAD_NULL, BC_NOARG, BC_KEEPLINE);
@@ -19575,7 +25003,7 @@ void CallExpr__emit_(Expr* self_, Ctx* ctx) {
 
     c11__foreach(Expr*, &self->args, e) { vtemit_(*e, ctx); }
     c11__foreach(CallExprKwArg, &self->kwargs, e) {
-        Ctx__emit_int(ctx, e->key, self->line);
+        Ctx__emit_int(ctx, (uintptr_t)e->key, self->line);
         vtemit_(e->val, ctx);
     }
     int KWARGC = self->kwargs.length;
@@ -19603,8 +25031,8 @@ static void Ctx__ctor(Ctx* self, CodeObject* co, FuncDecl* func, int level) {
     self->curr_iblock = 0;
     self->is_compiling_class = false;
     c11_vector__ctor(&self->s_expr, sizeof(Expr*));
-    c11_smallmap_n2i__ctor(&self->global_names);
-    c11_smallmap_s2n__ctor(&self->co_consts_string_dedup_map);
+    c11_smallmap_n2d__ctor(&self->global_names);
+    c11_smallmap_v2d__ctor(&self->co_consts_string_dedup_map);
 }
 
 static void Ctx__dtor(Ctx* self) {
@@ -19613,8 +25041,13 @@ static void Ctx__dtor(Ctx* self) {
         vtdelete(c11__getitem(Expr*, &self->s_expr, i));
     }
     c11_vector__dtor(&self->s_expr);
-    c11_smallmap_n2i__dtor(&self->global_names);
-    c11_smallmap_s2n__dtor(&self->co_consts_string_dedup_map);
+    c11_smallmap_n2d__dtor(&self->global_names);
+    // free the dedup map
+    c11__foreach(c11_smallmap_v2d_KV, &self->co_consts_string_dedup_map, p_kv) {
+        const char* p = p_kv->key.data;
+        PK_FREE((void*)p);
+    }
+    c11_smallmap_v2d__dtor(&self->co_consts_string_dedup_map);
 }
 
 static int Ctx__prepare_loop_divert(Ctx* self, int line, bool is_break) {
@@ -19675,9 +25108,9 @@ static void Ctx__s_emit_decorators(Ctx* self, int count) {
     }
 }
 
-static int Ctx__emit_virtual(Ctx* self, Opcode opcode, uint16_t arg, int line, bool is_virtual) {
+static int Ctx__emit_(Ctx* self, Opcode opcode, uint16_t arg, int line) {
     Bytecode bc = {(uint8_t)opcode, arg};
-    BytecodeEx bcx = {line, is_virtual, self->curr_iblock};
+    BytecodeEx bcx = {line, self->curr_iblock};
     c11_vector__push(Bytecode, &self->co->codes, bc);
     c11_vector__push(BytecodeEx, &self->co->codes_ex, bcx);
     int i = self->co->codes.length - 1;
@@ -19686,14 +25119,10 @@ static int Ctx__emit_virtual(Ctx* self, Opcode opcode, uint16_t arg, int line, b
     return i;
 }
 
-static int Ctx__emit_(Ctx* self, Opcode opcode, uint16_t arg, int line) {
-    return Ctx__emit_virtual(self, opcode, arg, line, false);
-}
-
-static void Ctx__revert_last_emit_(Ctx* self) {
-    c11_vector__pop(&self->co->codes);
-    c11_vector__pop(&self->co->codes_ex);
-}
+// static void Ctx__revert_last_emit_(Ctx* self) {
+//     c11_vector__pop(&self->co->codes);
+//     c11_vector__pop(&self->co->codes_ex);
+// }
 
 static int Ctx__emit_int(Ctx* self, int64_t value, int line) {
     if(INT16_MIN <= value && value <= INT16_MAX) {
@@ -19723,17 +25152,28 @@ static int Ctx__add_varname(Ctx* self, py_Name name) {
     return CodeObject__add_varname(self->co, name);
 }
 
+static int Ctx__add_name(Ctx* self, py_Name name) { return CodeObject__add_name(self->co, name); }
+
 static int Ctx__add_const_string(Ctx* self, c11_sv key) {
-    uint16_t* val = c11_smallmap_s2n__try_get(&self->co_consts_string_dedup_map, key);
+    if(key.size > 100) {
+        py_Ref tmp = c11_vector__emplace(&self->co->consts);
+        py_newstrv(tmp, key);
+        int index = self->co->consts.length - 1;
+        return index;
+    }
+    int* val = c11_smallmap_v2d__try_get(&self->co_consts_string_dedup_map, key);
     if(val) {
         return *val;
     } else {
-        py_TValue tmp;
-        py_newstrv(&tmp, key);
-        c11_vector__push(py_TValue, &self->co->consts, tmp);
+        py_Ref tmp = c11_vector__emplace(&self->co->consts);
+        py_newstrv(tmp, key);
         int index = self->co->consts.length - 1;
-        c11_smallmap_s2n__set(&self->co_consts_string_dedup_map,
-                              c11_string__sv(PyObject__userdata(tmp._obj)),
+        // dedup
+        char* new_buf = PK_MALLOC(key.size + 1);
+        memcpy(new_buf, key.data, key.size);
+        new_buf[key.size] = 0;
+        c11_smallmap_v2d__set(&self->co_consts_string_dedup_map,
+                              (c11_sv){new_buf, key.size},
                               index);
         return index;
     }
@@ -19750,7 +25190,7 @@ static void Ctx__emit_store_name(Ctx* self, NameScope scope, py_Name name, int l
         case NAME_LOCAL: Ctx__emit_(self, OP_STORE_FAST, Ctx__add_varname(self, name), line); break;
         case NAME_GLOBAL: {
             Opcode op = self->co->src->is_dynamic ? OP_STORE_NAME : OP_STORE_GLOBAL;
-            Ctx__emit_(self, op, name, line);
+            Ctx__emit_(self, op, Ctx__add_name(self, name), line);
         } break;
         default: c11__unreachable();
     }
@@ -19886,6 +25326,15 @@ static bool is_expression(Compiler* self, bool allow_slice) {
 
 #define match(expected) (curr()->type == expected ? (++self->i) : 0)
 
+static bool match_id_by_str(Compiler* self, const char* name) {
+    if(curr()->type == TK_ID) {
+        bool ok = c11__sveq2(Token__sv(curr()), name);
+        if(ok) advance();
+        return ok;
+    }
+    return false;
+}
+
 static bool match_newlines_impl(Compiler* self) {
     bool consumed = false;
     if(curr()->type == TK_EOL) {
@@ -19990,7 +25439,7 @@ static Error* pop_context(Compiler* self) {
     // previously, we only do this if the last opcode is not a return
     // however, this is buggy...since there may be a jump to the end (out of bound) even if the last
     // opcode is a return
-    Ctx__emit_virtual(ctx(), OP_RETURN_VALUE, 1, BC_KEEPLINE, true);
+    Ctx__emit_(ctx(), OP_RETURN_VALUE, BC_RETURN_VIRTUAL, BC_KEEPLINE);
 
     CodeObject* co = ctx()->co;
     // find the last valid token
@@ -20164,6 +25613,10 @@ static Error* exprTernary(Compiler* self) {
     e->cond = Ctx__s_popx(ctx());
     e->true_expr = Ctx__s_popx(ctx());
     Ctx__s_push(ctx(), (Expr*)e);
+
+    if(e->cond->vt->is_ternary || e->false_expr->vt->is_ternary || e->true_expr->vt->is_ternary) {
+        return SyntaxError(self, "nested ternary expressions without `()` are ambiguous");
+    }
     return NULL;
 }
 
@@ -20248,7 +25701,7 @@ static Error* exprName(Compiler* self) {
     py_Name name = py_namev(Token__sv(prev()));
     NameScope scope = name_scope(self);
     // promote this name to global scope if needed
-    if(c11_smallmap_n2i__contains(&ctx()->global_names, name)) {
+    if(c11_smallmap_n2d__contains(&ctx()->global_names, name)) {
         if(self->src->is_dynamic) return SyntaxError(self, "cannot use global keyword here");
         scope = NAME_GLOBAL;
     }
@@ -20366,9 +25819,68 @@ static Error* exprMap(Compiler* self) {
     return NULL;
 }
 
+static Error* read_literal(Compiler* self, py_Ref out);
+
+static Error* exprCompileTimeCall(Compiler* self, py_ItemRef func, int line) {
+    Error* err;
+    py_push(func);
+    py_pushnil();
+
+    uint16_t argc = 0;
+    uint16_t kwargc = 0;
+    // copied from `exprCall`
+    do {
+        match_newlines();
+        if(curr()->type == TK_RPAREN) break;
+        if(curr()->type == TK_ID && next()->type == TK_ASSIGN) {
+            consume(TK_ID);
+            py_Name key = py_namev(Token__sv(prev()));
+            consume(TK_ASSIGN);
+            // k=v
+            py_pushname(key);
+            check(read_literal(self, py_pushtmp()));
+            kwargc += 1;
+        } else {
+            if(kwargc > 0) {
+                return SyntaxError(self, "positional argument follows keyword argument");
+            }
+            check(read_literal(self, py_pushtmp()));
+            argc += 1;
+        }
+        match_newlines();
+    } while(match(TK_COMMA));
+    consume(TK_RPAREN);
+
+    bool ok = py_vectorcall(argc, kwargc);
+    if(!ok) {
+        char* msg = py_formatexc();
+        err = SyntaxError(self, "compile-time call error:\n%s", msg);
+        PK_FREE(msg);
+        return err;
+    }
+
+    // TODO: optimize string dedup
+    int index = Ctx__add_const(ctx(), py_retval());
+    Ctx__s_push(ctx(), (Expr*)LoadConstExpr__new(line, index));
+    return NULL;
+}
+
 static Error* exprCall(Compiler* self) {
     Error* err;
-    CallExpr* e = CallExpr__new(prev()->line, Ctx__s_popx(ctx()));
+    Expr* callable = Ctx__s_popx(ctx());
+    int line = prev()->line;
+    if(callable->vt->is_name) {
+        NameExpr* ne = (NameExpr*)callable;
+        py_ItemRef func = py_macroget(ne->name);
+        if(func != NULL) {
+            py_StackRef p0 = py_peek(0);
+            err = exprCompileTimeCall(self, func, line);
+            if(err != NULL) py_clearexc(p0);
+            return err;
+        }
+    }
+
+    CallExpr* e = CallExpr__new(line, callable);
     Ctx__s_push(ctx(), (Expr*)e);  // push onto the stack in advance
     do {
         match_newlines();
@@ -20478,10 +25990,10 @@ static Error* consume_type_hints_sv(Compiler* self, c11_sv* out) {
 
 static Error* compile_stmt(Compiler* self);
 
-static Error* compile_block_body(Compiler* self, PrattCallback callback) {
+static Error* compile_block_body(Compiler* self) {
     Error* err;
-    assert(callback != NULL);
     consume(TK_COLON);
+
     if(curr()->type != TK_EOL && curr()->type != TK_EOF) {
         while(true) {
             check(compile_stmt(self));
@@ -20497,7 +26009,7 @@ static Error* compile_block_body(Compiler* self, PrattCallback callback) {
     consume(TK_INDENT);
     while(curr()->type != TK_DEDENT) {
         match_newlines();
-        check(callback(self));
+        check(compile_stmt(self));
         match_newlines();
     }
     consume(TK_DEDENT);
@@ -20509,7 +26021,7 @@ static Error* compile_if_stmt(Compiler* self) {
     check(EXPR(self));  // condition
     Ctx__s_emit_top(ctx());
     int patch = Ctx__emit_(ctx(), OP_POP_JUMP_IF_FALSE, BC_NOARG, prev()->line);
-    err = compile_block_body(self, compile_stmt);
+    err = compile_block_body(self);
     if(err) return err;
     if(match(TK_ELIF)) {
         int exit_patch = Ctx__emit_(ctx(), OP_JUMP_FORWARD, BC_NOARG, prev()->line);
@@ -20519,11 +26031,59 @@ static Error* compile_if_stmt(Compiler* self) {
     } else if(match(TK_ELSE)) {
         int exit_patch = Ctx__emit_(ctx(), OP_JUMP_FORWARD, BC_NOARG, prev()->line);
         Ctx__patch_jump(ctx(), patch);
-        check(compile_block_body(self, compile_stmt));
+        check(compile_block_body(self));
         Ctx__patch_jump(ctx(), exit_patch);
     } else {
         Ctx__patch_jump(ctx(), patch);
     }
+    return NULL;
+}
+
+static Error* compile_match_case(Compiler* self, c11_vector* patches) {
+    Error* err;
+    bool is_case_default = false;
+
+    check(EXPR(self));  // condition
+    Ctx__s_emit_top(ctx());
+
+    consume(TK_COLON);
+
+    bool consumed = match_newlines();
+    if(!consumed) return SyntaxError(self, "expected a new line after ':'");
+
+    consume(TK_INDENT);
+    while(curr()->type != TK_DEDENT) {
+        match_newlines();
+
+        if(match_id_by_str(self, "case")) {
+            if(is_case_default) return SyntaxError(self, "case _: must be the last one");
+            is_case_default = match_id_by_str(self, "_");
+
+            if(!is_case_default) {
+                Ctx__emit_(ctx(), OP_DUP_TOP, BC_NOARG, prev()->line);
+                check(EXPR(self));  // expr
+                Ctx__s_emit_top(ctx());
+                int patch = Ctx__emit_(ctx(), OP_POP_JUMP_IF_NOT_MATCH, BC_NOARG, prev()->line);
+                check(compile_block_body(self));
+                int break_patch = Ctx__emit_(ctx(), OP_JUMP_FORWARD, BC_NOARG, prev()->line);
+                c11_vector__push(int, patches, break_patch);
+                Ctx__patch_jump(ctx(), patch);
+            } else {
+                check(compile_block_body(self));
+            }
+        } else {
+            return SyntaxError(self, "expected 'case', got '%s'", TokenSymbols[curr()->type]);
+        }
+
+        match_newlines();
+    }
+    consume(TK_DEDENT);
+
+    for(int i = 0; i < patches->length; i++) {
+        int patch = c11__getitem(int, patches, i);
+        Ctx__patch_jump(ctx(), patch);
+    }
+    Ctx__emit_(ctx(), OP_POP_TOP, BC_NOARG, prev()->line);
     return NULL;
 }
 
@@ -20534,13 +26094,13 @@ static Error* compile_while_loop(Compiler* self) {
     check(EXPR(self));  // condition
     Ctx__s_emit_top(ctx());
     int patch = Ctx__emit_(ctx(), OP_POP_JUMP_IF_FALSE, BC_NOARG, prev()->line);
-    check(compile_block_body(self, compile_stmt));
+    check(compile_block_body(self));
     Ctx__emit_jump(ctx(), block_start, BC_KEEPLINE);
     Ctx__patch_jump(ctx(), patch);
     Ctx__exit_block(ctx());
     // optional else clause
     if(match(TK_ELSE)) {
-        check(compile_block_body(self, compile_stmt));
+        check(compile_block_body(self));
         CodeBlock* p_block = c11__at(CodeBlock, &ctx()->co->blocks, block);
         p_block->end2 = ctx()->co->codes.length;
     }
@@ -20563,12 +26123,12 @@ static Error* compile_for_loop(Compiler* self) {
         // this error occurs in `vars` instead of this line, but...nevermind
         return SyntaxError(self, "invalid syntax");
     }
-    check(compile_block_body(self, compile_stmt));
+    check(compile_block_body(self));
     Ctx__emit_jump(ctx(), block_start, BC_KEEPLINE);
     Ctx__exit_block(ctx());
     // optional else clause
     if(match(TK_ELSE)) {
-        check(compile_block_body(self, compile_stmt));
+        check(compile_block_body(self));
         CodeBlock* p_block = c11__at(CodeBlock, &ctx()->co->blocks, block);
         p_block->end2 = ctx()->co->codes.length;
     }
@@ -20629,7 +26189,7 @@ Error* try_compile_assignment(Compiler* self, bool* is_assign) {
         }
         case TK_ASSIGN: {
             consume(TK_ASSIGN);
-            int n = 0;
+            int n = 0;  // assignment count
 
             if(match(TK_YIELD_FROM)) {
                 check(compile_yield_from(self, prev()->line));
@@ -20720,7 +26280,9 @@ static Error* read_literal(Compiler* self, py_Ref out) {
             }
             return NULL;
         }
-        default: py_newnil(out); return NULL;
+        default: {
+            return SyntaxError(self, "expected a literal, got '%s'", TokenSymbols[prev()->type]);
+        }
     }
 }
 
@@ -20759,7 +26321,6 @@ static Error* _compile_f_args(Compiler* self, FuncDecl* decl, bool is_lambda) {
                 consume(TK_ASSIGN);
                 py_TValue value;
                 check(read_literal(self, &value));
-                if(py_isnil(&value)) return SyntaxError(self, "default argument must be a literal");
                 FuncDecl__add_kwarg(decl, name, &value);
             } break;
             case 3:
@@ -20787,6 +26348,7 @@ static Error* consume_pep695_py312(Compiler* self) {
 
 static Error* compile_function(Compiler* self, int decorators) {
     Error* err;
+    int def_line = prev()->line;
     consume(TK_ID);
     c11_sv decl_name_sv = Token__sv(prev());
     int decl_index;
@@ -20798,7 +26360,7 @@ static Error* compile_function(Compiler* self, int decorators) {
         consume(TK_RPAREN);
     }
     if(match(TK_ARROW)) check(consume_type_hints(self));
-    check(compile_block_body(self, compile_stmt));
+    check(compile_block_body(self));
     check(pop_context(self));
 
     if(decl->code.codes.length >= 2) {
@@ -20816,7 +26378,7 @@ static Error* compile_function(Compiler* self, int decorators) {
         }
     }
 
-    Ctx__emit_(ctx(), OP_LOAD_FUNCTION, decl_index, prev()->line);
+    Ctx__emit_(ctx(), OP_LOAD_FUNCTION, decl_index, def_line);
     Ctx__s_emit_decorators(ctx(), decorators);
 
     py_Name decl_name = py_namev(decl_name_sv);
@@ -20829,9 +26391,9 @@ static Error* compile_function(Compiler* self, int decorators) {
             }
         }
 
-        Ctx__emit_(ctx(), OP_STORE_CLASS_ATTR, decl_name, prev()->line);
+        Ctx__emit_(ctx(), OP_STORE_CLASS_ATTR, Ctx__add_name(ctx(), decl_name), def_line);
     } else {
-        NameExpr* e = NameExpr__new(prev()->line, decl_name, name_scope(self));
+        NameExpr* e = NameExpr__new(def_line, decl_name, name_scope(self));
         vtemit_store((Expr*)e, ctx());
         vtdelete((Expr*)e);
     }
@@ -20857,17 +26419,17 @@ static Error* compile_class(Compiler* self, int decorators) {
     } else {
         Ctx__s_emit_top(ctx());  // []
     }
-    Ctx__emit_(ctx(), OP_BEGIN_CLASS, name, BC_KEEPLINE);
+    Ctx__emit_(ctx(), OP_BEGIN_CLASS, Ctx__add_name(ctx(), name), BC_KEEPLINE);
 
     c11__foreach(Ctx, &self->contexts, it) {
         if(it->is_compiling_class) return SyntaxError(self, "nested class is not allowed");
     }
     ctx()->is_compiling_class = true;
-    check(compile_block_body(self, compile_stmt));
+    check(compile_block_body(self));
     ctx()->is_compiling_class = false;
 
     Ctx__s_emit_decorators(ctx(), decorators);
-    Ctx__emit_(ctx(), OP_END_CLASS, name, BC_KEEPLINE);
+    Ctx__emit_(ctx(), OP_END_CLASS, Ctx__add_name(ctx(), name), BC_KEEPLINE);
     return NULL;
 }
 
@@ -20975,7 +26537,7 @@ __EAT_DOTS_END:
         Ctx__emit_(ctx(), OP_DUP_TOP, BC_NOARG, BC_KEEPLINE);
         consume(TK_ID);
         c11_sv name = Token__sv(prev());
-        Ctx__emit_(ctx(), OP_LOAD_ATTR, py_namev(name), prev()->line);
+        Ctx__emit_(ctx(), OP_LOAD_ATTR, Ctx__add_name(ctx(), py_namev(name)), prev()->line);
         if(match(TK_AS)) {
             consume(TK_ID);
             name = Token__sv(prev());
@@ -20998,7 +26560,7 @@ static Error* compile_try_except(Compiler* self) {
 
     Ctx__enter_block(ctx(), CodeBlockType_TRY);
     Ctx__emit_(ctx(), OP_TRY_ENTER, BC_NOARG, prev()->line);
-    check(compile_block_body(self, compile_stmt));
+    check(compile_block_body(self));
 
     // https://docs.python.org/3/reference/compound_stmts.html#finally-clause
     /* If finally is present, it specifies a ‘cleanup’ handler. The try clause is executed,
@@ -21024,7 +26586,7 @@ static Error* compile_try_except(Compiler* self) {
         Ctx__emit_(ctx(), OP_BEGIN_FINALLY, BC_NOARG, prev()->line);
         // finally only, no except block
         Ctx__enter_block(ctx(), CodeBlockType_FINALLY);
-        check(compile_block_body(self, compile_stmt));
+        check(compile_block_body(self));
         Ctx__exit_block(ctx());
         Ctx__emit_(ctx(), OP_END_FINALLY, BC_NOARG, BC_KEEPLINE);
         // re-raise if needed
@@ -21060,7 +26622,7 @@ static Error* compile_try_except(Compiler* self) {
             Ctx__emit_store_name(ctx(), name_scope(self), as_name, BC_KEEPLINE);
         }
         Ctx__enter_block(ctx(), CodeBlockType_EXCEPT);
-        check(compile_block_body(self, compile_stmt));
+        check(compile_block_body(self));
         Ctx__exit_block(ctx());
         Ctx__emit_(ctx(), OP_END_EXC_HANDLING, BC_NOARG, BC_KEEPLINE);
         patches[patches_length++] = Ctx__emit_(ctx(), OP_JUMP_FORWARD, BC_NOARG, BC_KEEPLINE);
@@ -21077,7 +26639,7 @@ static Error* compile_try_except(Compiler* self) {
     if(match(TK_FINALLY)) {
         Ctx__emit_(ctx(), OP_BEGIN_FINALLY, BC_NOARG, prev()->line);
         Ctx__enter_block(ctx(), CodeBlockType_FINALLY);
-        check(compile_block_body(self, compile_stmt));
+        check(compile_block_body(self));
         Ctx__exit_block(ctx());
         Ctx__emit_(ctx(), OP_END_FINALLY, BC_NOARG, BC_KEEPLINE);
     }
@@ -21138,6 +26700,13 @@ static Error* compile_stmt(Compiler* self) {
             break;
         /*************************************************/
         case TK_IF: check(compile_if_stmt(self)); break;
+        case TK_MATCH: {
+            c11_vector patches;
+            c11_vector__ctor(&patches, sizeof(int));
+            check(compile_match_case(self, &patches));
+            c11_vector__dtor(&patches);
+            break;
+        }
         case TK_WHILE: check(compile_while_loop(self)); break;
         case TK_FOR: check(compile_for_loop(self)); break;
         case TK_IMPORT: check(compile_normal_import(self)); break;
@@ -21173,7 +26742,7 @@ static Error* compile_stmt(Compiler* self) {
             do {
                 consume(TK_ID);
                 py_Name name = py_namev(Token__sv(prev()));
-                c11_smallmap_n2i__set(&ctx()->global_names, name, 0);
+                c11_smallmap_n2d__set(&ctx()->global_names, name, 0);
             } while(match(TK_COMMA));
             consume_end_stmt();
             break;
@@ -21210,7 +26779,7 @@ static Error* compile_stmt(Compiler* self) {
                 // discard `__enter__()`'s return value
                 Ctx__emit_(ctx(), OP_POP_TOP, BC_NOARG, BC_KEEPLINE);
             }
-            check(compile_block_body(self, compile_stmt));
+            check(compile_block_body(self));
             Ctx__emit_(ctx(), OP_WITH_EXIT, BC_NOARG, prev()->line);
             Ctx__exit_block(ctx());
         } break;
@@ -21224,17 +26793,21 @@ static Error* compile_stmt(Compiler* self) {
 
             bool is_typed_name = false;  // e.g. x: int
             // eat variable's type hint if it is a single name
-            if(Ctx__s_top(ctx())->vt->is_name) {
+            const ExprVt* top_vt = Ctx__s_top(ctx())->vt;
+            if(top_vt->is_name || top_vt->is_attrib) {
                 if(match(TK_COLON)) {
                     c11_sv type_hint;
                     check(consume_type_hints_sv(self, &type_hint));
                     is_typed_name = true;
 
-                    if(ctx()->is_compiling_class) {
+                    if(ctx()->is_compiling_class && top_vt->is_name) {
                         NameExpr* ne = (NameExpr*)Ctx__s_top(ctx());
                         int index = Ctx__add_const_string(ctx(), type_hint);
                         Ctx__emit_(ctx(), OP_LOAD_CONST, index, BC_KEEPLINE);
-                        Ctx__emit_(ctx(), OP_ADD_CLASS_ANNOTATION, ne->name, BC_KEEPLINE);
+                        Ctx__emit_(ctx(),
+                                   OP_ADD_CLASS_ANNOTATION,
+                                   Ctx__add_name(ctx(), ne->name),
+                                   BC_KEEPLINE);
                     }
                 }
             }

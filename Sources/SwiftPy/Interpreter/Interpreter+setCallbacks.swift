@@ -25,8 +25,8 @@ extension Interpreter {
                 Interpreter.output.stdout(str)
             }
         }
-
-        py_callbacks().pointee.importhook = { cName in
+        
+        py_callbacks().pointee.lazyimport = { cName in
             guard let cName else { return nil }
             let name = String(cString: cName)
             

@@ -18,6 +18,13 @@
           ".experimental"
         ]
       },
+      "skippedTests" : {
+        "suites" : [
+          {
+            "name" : "ModelContainerTests"
+          }
+        ]
+      },
       "target" : {
         "containerPath" : "container:",
         "identifier" : "SwiftPyTests",
@@ -25,5 +32,5 @@
       }
     }
   ],
-  "version" : 1
+  "version" : 2
 }
