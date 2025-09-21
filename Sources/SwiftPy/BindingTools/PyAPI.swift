@@ -142,7 +142,6 @@ public extension PyType {
     @inlinable
     func magic(_ name: String, function: PyAPI.CFunction) {
         py_bindmagic(self, py_name(name), function)
-        //py_newnativefunc(py_tpgetmagic(self, py_name(name)), function)
     }
 
     @inlinable
@@ -193,7 +192,6 @@ public extension PyType {
 
             // Clear cache.
             if let bindable = (obj as? PythonBindable) {
-                UnsafeRawPointer(bindable._pythonCache.reference)?.deallocate()
                 bindable._pythonCache.reference = nil
             }
         }

@@ -33,12 +33,9 @@ public extension PythonBindable {
             .toOpaque()
         userdata?.storeBytes(of: retainedSelfPointer,
                              as: UnsafeRawPointer.self)
-        
-        // Store cache of python object.
-        let pointer = UnsafeMutableRawPointer.allocate(byteCount: 16, alignment: 8)
-        let opaquePointer = OpaquePointer(pointer)
-        opaquePointer.assign(reference)
-        _pythonCache.reference = opaquePointer
+
+        // TODO: Store cache of python value.
+        // _pythonCache.reference = reference
     }
     
     /// Creates a new python object.
