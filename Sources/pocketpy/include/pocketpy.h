@@ -743,8 +743,6 @@ PK_API bool py_getitem(py_Ref self, py_Ref key) PY_RAISE PY_RETURN;
 PK_API bool py_setitem(py_Ref self, py_Ref key, py_Ref val) PY_RAISE;
 /// Python equivalent to `del self[key]`.
 PK_API bool py_delitem(py_Ref self, py_Ref key) PY_RAISE;
-PK_API void py_assign2(py_Ref dst, py_Ref src);
-PK_API py_Ref py_arg2(py_Ref argv, int i);
 
 /// Perform a binary operation.
 /// The result will be set to `py_retval()`.

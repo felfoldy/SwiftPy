@@ -24,14 +24,15 @@ public extension PyAPI {
         py_retval()
     }
 
-    static let r0 = py_getreg(0)
+    /// Size of the value of `PyAPI.Reference`.
+    static let elementSize = 24
 
     @inlinable
     static func `return`(_ value: PythonConvertible?) -> Bool {
         py_retval().set(value)
         return true
     }
-    
+
     @inlinable
     static func returnNone(_ block: () -> Void) -> Bool {
         block()
@@ -192,6 +193,7 @@ public extension PyType {
 
             // Clear cache.
             if let bindable = (obj as? PythonBindable) {
+                UnsafeRawPointer(bindable._pythonCache.reference)?.deallocate()
                 bindable._pythonCache.reference = nil
             }
         }
@@ -283,8 +285,10 @@ public extension PyAPI.Reference {
         }
     }
 
+    // Copies the given value into the reference memory.
     @inlinable func assign(_ newValue: PyAPI.Reference?) {
-        py_assign2(self, newValue)
+        guard let pointer = UnsafeRawPointer(newValue) else { return }
+        UnsafeMutableRawPointer(self).copyMemory(from: pointer, byteCount: PyAPI.elementSize)
     }
     
     /// Retrieves the attribute with the given name and passes it as a temporary reference.
@@ -366,7 +370,10 @@ public extension PyAPI.Reference {
     
     @inlinable
     subscript(index: Int) -> PyAPI.Reference? {
-        py_arg2(self, Int32(index))
+        PyAPI.Reference(
+            UnsafeMutableRawPointer(self)
+                .advanced(by: PyAPI.elementSize * index)
+        )
     }
     
     @inlinable

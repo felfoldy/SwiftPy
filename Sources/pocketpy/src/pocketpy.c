@@ -13928,14 +13928,6 @@ bool py_delitem(py_Ref self, py_Ref key) {
     return ok;
 }
 
-void py_assign2(py_Ref dst, py_Ref src) {
-    *(dst) = *(src);
-}
-
-py_Ref py_arg2(py_Ref argv, int i) {
-    return &argv[i];
-}
-
 int py_equal(py_Ref lhs, py_Ref rhs) {
     if(py_isidentical(lhs, rhs)) return 1;
     if(!py_eq(lhs, rhs)) return -1;
