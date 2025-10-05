@@ -319,6 +319,8 @@ typedef struct py_Callbacks {
     int (*getchr)();
     /// Used by `gc.collect()` to mark extra objects for garbage collection.
     void (*gc_mark)(void (*f)(py_Ref val, void* ctx), void* ctx);
+    
+    void (*repr)(py_Ref val);
 } py_Callbacks;
 
 /// Native function signature.

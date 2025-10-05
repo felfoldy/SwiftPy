@@ -49,5 +49,15 @@ extension Interpreter {
 
             return nil
         }
+        
+        py_callbacks().pointee.repr = { obj in
+            if let str = String(obj) {
+                Interpreter.output.stdout(str)
+            }
+
+            if let view = ViewRepresentation(obj) {
+                Interpreter.output.view(view)
+            }
+        }
     }
 }

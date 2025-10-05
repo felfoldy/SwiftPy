@@ -10,7 +10,12 @@ public protocol IOStream {
     mutating func input(_ str: String)
     mutating func stdout(_ str: String)
     mutating func stderr(_ str: String)
+    mutating func view(_ view: ViewRepresentation)
     mutating func executionTime(_ time: UInt64)
+}
+
+public extension IOStream {
+    func view(_ view: ViewRepresentation) {}
 }
 
 struct DefaultIOStream: IOStream {

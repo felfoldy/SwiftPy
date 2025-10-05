@@ -4117,8 +4117,7 @@ __NEXT_STEP:
             if(TOP()->type != tp_NoneType) {
                 bool ok = py_repr(TOP());
                 if(!ok) goto __ERROR;
-                self->callbacks.print(py_tostr(&self->last_retval));
-                self->callbacks.print("\n");
+                self->callbacks.repr(&self->last_retval);
             }
             POP();
             DISPATCH();
