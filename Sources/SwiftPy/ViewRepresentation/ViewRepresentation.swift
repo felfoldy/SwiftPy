@@ -78,10 +78,11 @@ public protocol ViewRepresentable {
 /// - ``ViewRepresentable``
 @Scriptable
 public final class ViewRepresentation {
-    internal let view: AnyView
+    @usableFromInline
+    internal let anyView: AnyView
 
-    internal init(view: AnyView) {
-        self.view = view
+    private init(view: AnyView) {
+        anyView = view
     }
 }
 
@@ -89,6 +90,9 @@ public extension ViewRepresentation {
     convenience init<Content: View>(@ViewBuilder content: () -> Content) {
         self.init(view: AnyView(content()))
     }
+
+    @inlinable
+    var view: AnyView { anyView }
 }
 
 #Preview {
