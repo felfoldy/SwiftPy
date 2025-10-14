@@ -36,6 +36,7 @@ struct ViewRepresentationTests {
         let io = TestIOStream()
         Interpreter.output = io
         
+        _ = ViewRepresentation.pyType
         _ = CustomView.pyType
         
         let customView = CustomView()

@@ -4115,9 +4115,7 @@ __NEXT_STEP:
         }
         case OP_PRINT_EXPR:
             if(TOP()->type != tp_NoneType) {
-                bool ok = py_repr(TOP());
-                if(!ok) goto __ERROR;
-                self->callbacks.repr(&self->last_retval);
+                self->callbacks.repr(TOP());
             }
             POP();
             DISPATCH();

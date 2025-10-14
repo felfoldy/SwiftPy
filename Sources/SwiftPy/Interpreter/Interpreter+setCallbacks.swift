@@ -51,13 +51,22 @@ extension Interpreter {
         }
         
         py_callbacks().pointee.repr = { obj in
-            if let str = String(obj) {
-                Interpreter.output.stdout(str)
+            guard let obj else { return }
+            
+            if let view = obj.view {
+                Interpreter.output.view(view)
+                return
             }
 
-            if let view = ViewRepresentation(obj) {
-                Interpreter.output.view(view)
-            }
+            do {
+                try Interpreter.printErrors {
+                    py_repr(obj)
+                }
+                
+                if let str = String(PyAPI.returnValue) {
+                    Interpreter.output.stdout(str)
+                }
+            } catch {}
         }
     }
 }

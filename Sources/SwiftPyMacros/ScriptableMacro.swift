@@ -63,6 +63,7 @@ extension ScriptableMacro: ExtensionMacro {
             \(raw: classMeta.bindings.joined(separator: "\n"))
             type.magic("__new__") { __new__($1) }
             type.magic("__repr__") { __repr__($1) }
+            type.property("__view__") { __view__($1) }
             type.object?.setAttribute("_interface",
             \(raw: buildInterface(classMeta))
             .toRegister(0)

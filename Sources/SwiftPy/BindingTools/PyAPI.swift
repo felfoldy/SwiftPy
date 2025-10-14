@@ -320,6 +320,19 @@ public extension PyAPI.Reference {
         return try Result.cast(ref?.reference)
     }
     
+    /// Returns a `ViewRepresentation` if the bounded object implements `ViewRepresentable`.
+    @inlinable
+    var view: ViewRepresentation? {
+        let p0 = py_peek(0)
+        
+        if !py_getattr(self, py_name("__view__")) {
+            py_clearexc(p0)
+            return nil
+        }
+        
+        return ViewRepresentation(PyAPI.returnValue)
+    }
+    
     /// Pushes `self` onto the Python stack and passes it as a temporary reference.
     /// - Parameter block: Closure receiving the temporary `PyAPI.Reference?`.
     /// - Throws: Errors thrown within the closure.

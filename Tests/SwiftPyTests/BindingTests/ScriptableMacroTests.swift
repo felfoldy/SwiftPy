@@ -358,6 +358,9 @@ private var newAndRepr: String {
             type.magic("__repr__") {
                 __repr__($1)
             }
+            type.property("__view__") {
+                __view__($1)
+            }
     """
 }
 
