@@ -122,6 +122,7 @@ public extension PyType {
     static let object = PyType(tp_object.rawValue)
     static let dict = PyType(tp_dict.rawValue)
     static let function = PyType(tp_function.rawValue)
+    static let bytes = PyType(tp_bytes.rawValue)
     
     // Errors:
     static let SyntaxError = PyType(tp_SyntaxError.rawValue)

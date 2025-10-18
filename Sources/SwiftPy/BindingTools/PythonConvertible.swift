@@ -135,6 +135,26 @@ extension Float: PythonConvertible {
     }
 }
 
+extension Data: PythonConvertible {
+    public static var pyType: PyType { .bytes }
+    
+    public func toPython(_ reference: PyAPI.Reference) {
+        let count = self.count
+        guard let bytes: UnsafeMutablePointer<UInt8> = py_newbytes(reference, Int32(count)) else {
+            return
+        }
+        let buffer = UnsafeMutableRawBufferPointer(start: bytes, count: count)
+        copyBytes(to: buffer)
+    }
+    
+    public static func fromPython(_ reference: PyAPI.Reference) -> Data {
+        var size: Int32 = 0
+        let bytes = py_tobytes(reference, &size)
+        guard let bytes else { return Data() }
+        return Data(bytes: bytes, count: Int(size))
+    }
+}
+
 extension Optional: PythonConvertible where Wrapped: PythonConvertible {
 
     public static var pyType: PyType { Wrapped.pyType }

@@ -80,6 +80,10 @@ public final class Interpreter {
         let osNameRef = osName.toStack
         py_setattr(sys, py_name("os"), osNameRef.reference)
 
+        Interpreter.bindModule("interpreter", [
+            ViewRepresentation.self,
+        ])
+
         if #available(macOS 15, iOS 18, visionOS 2, *) {
             Interpreter.bindModule("views", [
                 PythonView.self,

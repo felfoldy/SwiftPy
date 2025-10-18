@@ -8,11 +8,24 @@
 import SwiftPy
 import Testing
 import pocketpy
+import Foundation
 
 @MainActor
 struct ConversionTests {
     let profiler = profile("ConversionTests")
     let main = Interpreter.main
+    
+    @Test func dataToPython() {
+        let data = "Hello".data(using: .utf8)
+        data.toPython(.main.emplace("test_bytes"))
+        #expect(Interpreter.evaluate("test_bytes.decode()") == "Hello")
+    }
+    
+    @Test func dataFromPython() throws {
+        let data: Data = try #require(Interpreter.evaluate("b'test'"))
+        
+        #expect(String(data: data, encoding: .utf8) == "test")
+    }
     
     @Test func strArrayToPython() {
         profiler.event("ConversionTests.strArrayToPython")
