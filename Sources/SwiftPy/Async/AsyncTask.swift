@@ -35,10 +35,12 @@ extension Interpreter {
 
 @MainActor
 @Scriptable
-public class AsyncTask {
+public class AsyncTask: ViewRepresentable {
     internal let task: Task<Void, Never>
     
     internal static var tasks = [UUID: AsyncTask]()
+    
+    public var representation = ViewRepresentation {}
     
     private init(task: @escaping () async -> Void) {
         let id = UUID()
@@ -105,5 +107,10 @@ extension AsyncTask {
                 context?.completion()
             }
         }
+    }
+    
+    public convenience init<T: PythonConvertible>(presenting: any ViewRepresentable, _ task: @escaping () async throws -> T) where T: Sendable {
+        self.init(task)
+        representation = presenting.representation
     }
 }
