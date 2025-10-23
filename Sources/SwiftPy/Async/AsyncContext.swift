@@ -23,7 +23,6 @@ struct AsyncContext {
 
     init(_ code: String, filename: String, mode: CompileMode, completion: @escaping () -> Void) {
         self.filename = filename
-        self.completion = completion
         self.mode = mode
         
         let lines = code.components(separatedBy: .newlines)
@@ -58,6 +57,7 @@ struct AsyncContext {
                 self.code = codeToExecute.joined(separator: "\n")
                 self.continuationCode = Self.joinRest(lines, from: i + 1)
                 self.resultName = capturedResultName
+                self.completion = completion
                 didMatch = true
                 return
             }
@@ -66,6 +66,9 @@ struct AsyncContext {
         }
         
         self.code = code
+        self.completion = {
+            // No OP in case there was an async task not awaited.
+        }
         continuationCode = nil
         resultName = nil
         didMatch = false

@@ -94,4 +94,16 @@ struct AsyncTests {
         
         #expect(main["new_result"] == 45)
     }
+    
+    @Test func asyncWithoutAwait() async {
+        main.bind("async_func() -> AsyncTask") { _, _ in
+            PyAPI.return(AsyncTask { 42 })
+        }
+        
+        await Interpreter.asyncRun("""
+        result = async_func()
+        """)
+        
+        #expect(AsyncTask(.main["result"]) != nil)
+    }
 }
