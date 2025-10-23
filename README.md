@@ -46,25 +46,3 @@ class LoginViewModel:
     def login(self) -> None:
         ...
 ```
-
-#### Integrating with SwiftUI
-
-Inject the view model into Python using the `interactable` modifier:
-```swift
-struct LoginView {
-    @State private var viewModel = LoginViewModel()
-    
-    var body: some View {
-        viewImplementation
-            .interactable("viewmodel", viewModel)
-    }
-}
-```
-
-After injection, Python scripts can interact with the Swift view model:
-```py
-viewmodel = viewcontext.viewmodel
-viewmodel.username = "username"
-viewmodel.password = "password"
-viewmodel.login()
-```
