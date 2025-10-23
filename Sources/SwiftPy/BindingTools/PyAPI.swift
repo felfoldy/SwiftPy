@@ -140,6 +140,7 @@ public extension PyType {
     static let ImportError = PyType(tp_ImportError.rawValue)
     static let AssertionError = PyType(tp_AssertionError.rawValue)
     static let KeyError = PyType(tp_KeyError.rawValue)
+    static let StopIteration = PyType(tp_StopIteration.rawValue)
 
     @inlinable
     func magic(_ name: String, function: PyAPI.CFunction) {

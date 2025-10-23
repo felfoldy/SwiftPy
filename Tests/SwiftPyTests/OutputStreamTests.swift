@@ -82,9 +82,11 @@ class TestOutputStream: IOStream {
     
     func stdout(_ str: String) {
         lastStdOut = str
+        print(str)
     }
 
     func stderr(_ str: String) {
         lastStdErr = str
+        print(str)
     }
 }

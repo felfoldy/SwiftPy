@@ -81,7 +81,11 @@ public final class Interpreter {
         py_setattr(sys, py_name("os"), osNameRef.reference)
 
         Interpreter.bindModule("interpreter", [
-            ViewRepresentation.self, AsyncTask.self,
+            ViewRepresentation.self,
+        ])
+        
+        Interpreter.bindModule("asyncio", [
+            AsyncTask.self,
         ])
 
         if #available(macOS 15, iOS 18, visionOS 2, *) {

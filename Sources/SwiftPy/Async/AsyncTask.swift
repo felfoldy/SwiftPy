@@ -37,17 +37,37 @@ extension Interpreter {
 @MainActor
 @Scriptable
 public class AsyncTask: ViewRepresentable {
-    internal let task: Task<Void, Never>
+    typealias object = PyAPI.Reference
     
+    public var isDone: Bool = false
+    public var viewRepresentation: ViewRepresentation?
+
+    internal let task: Task<Void, Never>
     internal static var tasks = [UUID: AsyncTask]()
 
-    public var viewRepresentation: ViewRepresentation?
+    var result: object? {
+        self[.result]
+    }
 
     private init(task: @escaping () async -> Void) {
         let id = UUID()
         
         self.task = Task {
             await task()
+            AsyncTask.tasks[id]?.isDone = true
+            AsyncTask.tasks[id] = nil
+        }
+
+        AsyncTask.tasks[id] = self
+    }
+
+    private init<T: PythonConvertible>(returns task: @escaping () async -> T?) {
+        let id = UUID()
+        
+        self.task = Task {
+            let result = await task()
+            AsyncTask.tasks[id]?[.result] = result
+            AsyncTask.tasks[id]?.isDone = true
             AsyncTask.tasks[id] = nil
         }
 
@@ -60,6 +80,12 @@ public class AsyncTask: ViewRepresentable {
 
     public func cancel() {
         task.cancel()
+    }
+}
+
+extension AsyncTask: HasSlots {
+    public enum Slot: Int32, CaseIterable {
+        case result
     }
 }
 
@@ -91,12 +117,12 @@ extension AsyncTask {
     public convenience init<T: PythonConvertible>(_ task: @escaping () async throws -> T) where T: Sendable {
         let context = AsyncContext.current
 
-        self.init {
+        self.init(returns: { () async -> T? in
             do {
                 let result = try await task()
 
-                guard let context else { return }
-
+                guard let context else { return nil }
+                
                 if let resultName = context.resultName {
                     result.toPython(
                         .main.emplace(resultName)
@@ -107,11 +133,15 @@ extension AsyncTask {
                     await Interpreter.shared.asyncExecute(continuation, filename: context.filename, mode: context.mode)
                 }
                 context.completion()
+
+                return result
             } catch {
                 log.critical(error.localizedDescription)
                 context?.completion()
+
+                return nil
             }
-        }
+        })
     }
     
     public convenience init<T: PythonConvertible>(presenting: any ViewRepresentable, _ task: @escaping () async throws -> T) where T: Sendable {

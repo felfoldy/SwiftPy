@@ -106,4 +106,32 @@ struct AsyncTests {
         
         #expect(AsyncTask(.main["result"]) != nil)
     }
+    
+    @Test(
+        .disabled("overrides output")
+    )
+    func asyncTaskIterator() async {
+        let out = TestOutputStream()
+        
+        Interpreter.output = out
+        
+        Interpreter.run("import asyncio")
+        
+        main.bind("async_func() -> AsyncTask") { _, _ in
+            PyAPI.return(AsyncTask { 42 })
+        }
+        
+        await Interpreter.asyncRun("""
+        def async_generator():
+            res = yield from async_func()
+            return res
+        
+        gen = async_generator()
+        """, mode: .single)
+        
+        while out.lastStdErr == nil {
+            await Interpreter.asyncRun("next(gen)", mode: .single)
+            try? await Task.sleep(nanoseconds: 1)
+        }
+    }
 }
