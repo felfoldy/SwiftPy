@@ -50,7 +50,7 @@ extension Interpreter {
             return nil
         }
         
-        py_callbacks().pointee.repr = { obj in
+        py_callbacks().pointee.displayhook = { obj in
             guard let obj else { return }
             
             if let view = obj.view {

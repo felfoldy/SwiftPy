@@ -1232,8 +1232,8 @@ void METHOD(clear)(NAME* self) { c11_vector__clear(self); }
 #define K c11_sv
 #define V int
 #define NAME c11_smallmap_v2d
-#define less(a, b)      (c11_sv__cmp((a), (b)) <  0)
-#define equal(a, b)     (c11_sv__cmp((a), (b)) == 0)
+#define less(a, b) (c11_sv__cmp((a), (b)) < 0)
+#define equal(a, b) c11__sveq((a), (b))
 #if !defined(SMALLMAP_T__HEADER) && !defined(SMALLMAP_T__SOURCE)
 #include "pocketpy/common/vector.h"
 #include "pocketpy/common/utils.h"
@@ -1369,7 +1369,6 @@ void METHOD(clear)(NAME* self) { c11_vector__clear(self); }
 #undef equal
 
 #undef SMALLMAP_T__HEADER
-
 
 #define SMALLMAP_T__HEADER
 #define K void*
@@ -1792,7 +1791,6 @@ typedef enum CodeBlockType {
     CodeBlockType_WITH,
     /* context blocks (flag-based) */
     CodeBlockType_EXCEPT,
-    CodeBlockType_FINALLY,
 } CodeBlockType;
 
 typedef enum Opcode {
@@ -1916,16 +1914,14 @@ OPCODE(ADD_CLASS_ANNOTATION)
 OPCODE(WITH_ENTER)
 OPCODE(WITH_EXIT)
 /**************************/
-OPCODE(TRY_ENTER)
+OPCODE(BEGIN_TRY)
+OPCODE(END_TRY)
 OPCODE(EXCEPTION_MATCH)
+OPCODE(HANDLE_EXCEPTION)
 OPCODE(RAISE)
 OPCODE(RAISE_ASSERT)
 OPCODE(RE_RAISE)
 OPCODE(PUSH_EXCEPTION)
-OPCODE(BEGIN_EXC_HANDLING)
-OPCODE(END_EXC_HANDLING)
-OPCODE(BEGIN_FINALLY)
-OPCODE(END_FINALLY)
 /**************************/
 OPCODE(FORMAT_STRING)
 /**************************/
@@ -2039,20 +2035,14 @@ typedef struct ValueStack {
     py_TValue* sp;
     py_TValue* end;
     // We allocate extra places to keep `_sp` valid to detect stack overflow
-    py_TValue begin[PK_VM_STACK_SIZE + PK_MAX_CO_VARNAMES * 2];
+    py_TValue begin[PK_VM_STACK_SIZE + PK_MAX_CO_VARNAMES];
 } ValueStack;
 
-void ValueStack__ctor(ValueStack* self);
-void ValueStack__dtor(ValueStack* self);
-
-typedef struct UnwindTarget {
-    struct UnwindTarget* next;
-    int iblock;
-    int offset;
-} UnwindTarget;
-
-UnwindTarget* UnwindTarget__new(UnwindTarget* next, int iblock, int offset);
-void UnwindTarget__delete(UnwindTarget* self);
+typedef struct FrameExcInfo {
+    int iblock;     // try block index
+    int offset;     // stack offset from p0
+    py_TValue exc;  // handled exception
+} FrameExcInfo;
 
 typedef struct py_Frame {
     struct py_Frame* f_back;
@@ -2063,7 +2053,7 @@ typedef struct py_Frame {
     py_Ref locals;
     bool is_locals_special;
     int ip;
-    UnwindTarget* uw_list;
+    c11_vector /*T=FrameExcInfo*/ exc_stack;
 } py_Frame;
 
 typedef struct SourceLocation {
@@ -2089,10 +2079,9 @@ int Frame__delglobal(py_Frame* self, py_Name name) PY_RAISE;
 py_Ref Frame__getclosure(py_Frame* self, py_Name name);
 py_StackRef Frame__getlocal_noproxy(py_Frame* self, py_Name name);
 
-int Frame__prepare_jump_exception_handler(py_Frame* self, ValueStack*);
-
-UnwindTarget* Frame__find_unwind_target(py_Frame* self, int iblock);
-void Frame__set_unwind_target(py_Frame* self, py_TValue* sp);
+int Frame__goto_exception_handler(py_Frame* self, ValueStack*, py_Ref);
+void Frame__begin_try(py_Frame* self, py_TValue* sp);
+FrameExcInfo* Frame__top_exc_info(py_Frame* self);
 
 void Frame__gc_mark(py_Frame* self, c11_vector* p_stack);
 SourceLocation Frame__source_location(py_Frame* self);
@@ -2186,12 +2175,10 @@ typedef struct VM {
     py_Callbacks callbacks;
 
     py_TValue last_retval;
-    py_TValue curr_exception;
+    py_TValue unhandled_exc;
 
     int recursion_depth;
     int max_recursion_depth;
-
-    bool is_curr_exc_handled;  // handled by try-except block but not cleared yet
 
     py_TValue reg[8];  // users' registers
     void* ctx;         // user-defined context
@@ -2260,6 +2247,8 @@ bool pk_stack_binaryop(VM* self, py_Name op, py_Name rop);
 
 void pk_print_stack(VM* self, py_Frame* frame, Bytecode byte);
 
+bool pk_format_object(VM* self, py_Ref val, c11_sv spec);
+
 // type registration
 void pk_object__register();
 void pk_number__register();
@@ -2322,7 +2311,8 @@ typedef struct BaseException {
     c11_vector /*T=BaseExceptionFrame*/ stacktrace;
 } BaseException;
 
-
+char* safe_stringify_exception(py_Ref exc);
+char* formatexc_internal(py_Ref exc);
 // debugger/core.h
 
 
@@ -2918,12 +2908,10 @@ void VM__ctor(VM* self) {
     self->callbacks.getchr = pk_default_getchr;
 
     self->last_retval = *py_NIL();
-    self->curr_exception = *py_NIL();
+    self->unhandled_exc = *py_NIL();
 
     self->recursion_depth = 0;
     self->max_recursion_depth = 1000;
-
-    self->is_curr_exc_handled = false;
 
     self->ctx = NULL;
     self->curr_class = NULL;
@@ -2935,7 +2923,8 @@ void VM__ctor(VM* self) {
     FixedMemoryPool__ctor(&self->pool_frame, sizeof(py_Frame), 32);
 
     ManagedHeap__ctor(&self->heap);
-    ValueStack__ctor(&self->stack);
+    self->stack.sp = self->stack.begin;
+    self->stack.end = self->stack.begin + PK_VM_STACK_SIZE;
 
     CachedNames__ctor(&self->cached_names);
     NameDict__ctor(&self->compile_time_funcs, PK_TYPE_ATTR_LOAD_FACTOR);
@@ -3113,11 +3102,11 @@ void VM__dtor(VM* self) {
     // destroy all objects
     ManagedHeap__dtor(&self->heap);
     // clear frames
-    while(self->top_frame)
+    while(self->top_frame) {
         VM__pop_frame(self);
+    }
     BinTree__dtor(&self->modules);
     FixedMemoryPool__dtor(&self->pool_frame);
-    ValueStack__dtor(&self->stack);
     CachedNames__dtor(&self->cached_names);
     NameDict__dtor(&self->compile_time_funcs);
     c11_vector__dtor(&self->types);
@@ -3287,6 +3276,11 @@ static bool
 FrameResult VM__vectorcall(VM* self, uint16_t argc, uint16_t kwargc, bool opcall) {
 #ifndef NDEBUG
     pk_print_stack(self, self->top_frame, (Bytecode){0});
+
+    if(py_checkexc()) {
+        const char* name = py_tpname(self->unhandled_exc.type);
+        c11__abort("unhandled exception `%s` was set!", name);
+    }
 #endif
 
     py_Ref p1 = self->stack.sp - kwargc * 2;
@@ -3491,7 +3485,7 @@ void ManagedHeap__mark(ManagedHeap* self) {
     }
     // mark vm's registers
     pk__mark_value(&vm->last_retval);
-    pk__mark_value(&vm->curr_exception);
+    pk__mark_value(&vm->unhandled_exc);
     for(int i = 0; i < c11__count_array(vm->reg); i++) {
         pk__mark_value(&vm->reg[i]);
     }
@@ -3713,45 +3707,11 @@ py_ItemRef pk_tpfindname(py_TypeInfo* ti, py_Name name) {
     return NULL;
 }
 
-PK_INLINE py_ItemRef py_tpfindname(py_Type type, py_Name name) {
-    py_TypeInfo* ti = pk_typeinfo(type);
-    return pk_tpfindname(ti, name);
-}
-
-PK_INLINE py_Ref py_tpfindmagic(py_Type t, py_Name name) {
-    // assert(py_ismagicname(name));
-    return py_tpfindname(t, name);
-}
-
-PK_INLINE py_Type py_tpbase(py_Type t) {
-    assert(t);
-    py_TypeInfo* ti = pk_typeinfo(t);
-    return ti->base;
-}
-
-PK_DEPRECATED py_Ref py_tpgetmagic(py_Type type, py_Name name) {
-    // assert(py_ismagicname(name));
-    py_TypeInfo* ti = pk_typeinfo(type);
-    py_Ref retval = py_getdict(&ti->self, name);
-    return retval != NULL ? retval : py_NIL();
-}
-
-py_Ref py_tpobject(py_Type type) {
-    assert(type);
-    return &pk_typeinfo(type)->self;
-}
-
-const char* py_tpname(py_Type type) {
-    if(!type) return "nil";
-    py_Name name = pk_typeinfo(type)->name;
-    return py_name2str(name);
-}
-
 PK_INLINE py_TypeInfo* pk_typeinfo(py_Type type) {
 #ifndef NDEBUG
     int length = pk_current_vm->types.length;
-    if(type < 0 || type >= length) {
-        c11__abort("type index %d is out of bounds [0, %d)", type, length);
+    if(type <= 0 || type >= length) {
+        c11__abort("type index %d is out of bounds (0, %d)", type, length);
     }
 #endif
     return c11__getitem(TypePointer, &pk_current_vm->types, type).ti;
@@ -3852,31 +3812,6 @@ py_Type pk_newtypewithmode(py_Name name,
     return pk_newtype(py_name2str(name), base, module, dtor, is_python, is_final);
 }
 
-py_Type py_newtype(const char* name, py_Type base, const py_GlobalRef module, void (*dtor)(void*)) {
-    if(strlen(name) == 0) c11__abort("type name cannot be empty");
-    py_Type type = pk_newtype(name, base, module, dtor, false, false);
-    if(module) py_setdict(module, py_name(name), py_tpobject(type));
-    return type;
-}
-
-void py_tpsetfinal(py_Type type) {
-    assert(type);
-    py_TypeInfo* ti = pk_typeinfo(type);
-    ti->is_final = true;
-}
-
-void py_tphookattributes(py_Type type,
-                         bool (*getattribute)(py_Ref self, py_Name name),
-                         bool (*setattribute)(py_Ref self, py_Name name, py_Ref val),
-                         bool (*delattribute)(py_Ref self, py_Name name),
-                         bool (*getunboundmethod)(py_Ref self, py_Name name)) {
-    assert(type);
-    py_TypeInfo* ti = pk_typeinfo(type);
-    ti->getattribute = getattribute;
-    ti->setattribute = setattribute;
-    ti->delattribute = delattribute;
-    ti->getunboundmethod = getunboundmethod;
-}
 
 // src/interpreter/generator.c
 #include <stdbool.h>
@@ -3965,11 +3900,6 @@ py_Type pk_generator__register() {
 #include <stdbool.h>
 #include <assert.h>
 #include <time.h>
-
-static bool stack_format_object(VM* self, c11_sv spec);
-
-#define CHECK_RETURN_FROM_EXCEPT_OR_FINALLY()                                                      \
-    if(self->is_curr_exc_handled) py_clearexc(NULL)
 
 #define DISPATCH()                                                                                 \
     do {                                                                                           \
@@ -4076,8 +4006,7 @@ __NEXT_STEP:
 
 #if PK_ENABLE_WATCHDOG
     if(self->watchdog_info.max_reset_time > 0) {
-        clock_t now = clock();
-        if(now > self->watchdog_info.max_reset_time) {
+        if(py_debugger_status() == 0 && clock() > self->watchdog_info.max_reset_time) {
             self->watchdog_info.max_reset_time = 0;
             TimeoutError("watchdog timeout");
             goto __ERROR;
@@ -4115,7 +4044,7 @@ __NEXT_STEP:
         }
         case OP_PRINT_EXPR:
             if(TOP()->type != tp_NoneType) {
-                self->callbacks.repr(TOP());
+                self->callbacks.displayhook(TOP());
             }
             POP();
             DISPATCH();
@@ -4159,6 +4088,8 @@ __NEXT_STEP:
                 py_Name name = py_name(decl->code.name->data);
                 // capture itself to allow recursion
                 NameDict__set(ud->closure, name, SP());
+            } else {
+                if(self->curr_class) ud->clazz = self->curr_class->_obj;
             }
             SP()++;
             DISPATCH();
@@ -4541,10 +4472,10 @@ __NEXT_STEP:
         case OP_BUILD_SLICE: {
             // [start, stop, step]
             py_TValue tmp;
-            py_newslice(&tmp);
-            py_setslot(&tmp, 0, THIRD());
-            py_setslot(&tmp, 1, SECOND());
-            py_setslot(&tmp, 2, TOP());
+            py_ObjectRef slots = py_newslice(&tmp);
+            slots[0] = *THIRD();
+            slots[1] = *SECOND();
+            slots[2] = *TOP();
             STACK_SHRINK(3);
             PUSH(&tmp);
             DISPATCH();
@@ -4739,7 +4670,6 @@ __NEXT_STEP:
             DISPATCH();
         }
         case OP_RETURN_VALUE: {
-            CHECK_RETURN_FROM_EXCEPT_OR_FINALLY();
             if(byte.arg == BC_NOARG) {
                 self->last_retval = POPX();
             } else {
@@ -4756,7 +4686,6 @@ __NEXT_STEP:
             DISPATCH();
         }
         case OP_YIELD_VALUE: {
-            CHECK_RETURN_FROM_EXCEPT_OR_FINALLY();
             if(byte.arg == 1) {
                 py_newnone(py_retval());
             } else {
@@ -4766,7 +4695,6 @@ __NEXT_STEP:
             return RES_YIELD;
         }
         case OP_FOR_ITER_YIELD_VALUE: {
-            CHECK_RETURN_FROM_EXCEPT_OR_FINALLY();
             int res = py_next(TOP());
             if(res == -1) goto __ERROR;
             if(res) {
@@ -5043,12 +4971,6 @@ __NEXT_STEP:
             assert(self->curr_class);
             py_Name name = co_names[byte.arg];
             // TOP() can be a function, classmethod or custom decorator
-            py_Ref actual_func = TOP();
-            if(actual_func->type == tp_classmethod) { actual_func = py_getslot(actual_func, 0); }
-            if(actual_func->type == tp_function) {
-                Function* ud = py_touserdata(actual_func);
-                ud->clazz = self->curr_class->_obj;
-            }
             py_setdict(self->curr_class, name, TOP());
             POP();
             DISPATCH();
@@ -5087,14 +5009,25 @@ __NEXT_STEP:
             DISPATCH();
         }
         ///////////
-        case OP_TRY_ENTER: {
-            Frame__set_unwind_target(frame, SP());
+        case OP_BEGIN_TRY: {
+            Frame__begin_try(frame, SP());
+            DISPATCH();
+        }
+        case OP_END_TRY: {
+            c11_vector__pop(&frame->exc_stack);
             DISPATCH();
         }
         case OP_EXCEPTION_MATCH: {
             if(!py_checktype(TOP(), tp_type)) goto __ERROR;
-            bool ok = py_isinstance(&self->curr_exception, py_totype(TOP()));
+            bool ok = py_isinstance(&self->unhandled_exc, py_totype(TOP()));
             py_newbool(TOP(), ok);
+            DISPATCH();
+        }
+        case OP_HANDLE_EXCEPTION: {
+            FrameExcInfo* info = Frame__top_exc_info(frame);
+            assert(info != NULL && py_isnil(&info->exc));
+            info->exc = self->unhandled_exc;
+            py_newnil(&self->unhandled_exc);
             DISPATCH();
         }
         case OP_RAISE: {
@@ -5121,53 +5054,26 @@ __NEXT_STEP:
             goto __ERROR;
         }
         case OP_RE_RAISE: {
-            if(self->curr_exception.type) {
-                assert(!self->is_curr_exc_handled);
-                goto __ERROR_RE_RAISE;
+            if(py_isnil(&self->unhandled_exc)) {
+                FrameExcInfo* info = Frame__top_exc_info(frame);
+                assert(info != NULL && !py_isnil(&info->exc));
+                self->unhandled_exc = info->exc;
             }
-            DISPATCH();
+            c11_vector__pop(&frame->exc_stack);
+            goto __ERROR_RE_RAISE;
         }
         case OP_PUSH_EXCEPTION: {
-            assert(self->curr_exception.type);
-            PUSH(&self->curr_exception);
-            DISPATCH();
-        }
-        case OP_BEGIN_EXC_HANDLING: {
-            assert(self->curr_exception.type);
-            self->is_curr_exc_handled = true;
-            DISPATCH();
-        }
-        case OP_END_EXC_HANDLING: {
-            assert(self->curr_exception.type);
-            py_clearexc(NULL);
-            DISPATCH();
-        }
-        case OP_BEGIN_FINALLY: {
-            if(self->curr_exception.type) {
-                assert(!self->is_curr_exc_handled);
-                // temporarily handle the exception if any
-                self->is_curr_exc_handled = true;
-            }
-            DISPATCH();
-        }
-        case OP_END_FINALLY: {
-            if(byte.arg == BC_NOARG) {
-                if(self->curr_exception.type) {
-                    assert(self->is_curr_exc_handled);
-                    // revert the exception handling if needed
-                    self->is_curr_exc_handled = false;
-                }
-            } else {
-                // break or continue inside finally block
-                py_clearexc(NULL);
-            }
+            FrameExcInfo* info = Frame__top_exc_info(frame);
+            assert(info != NULL && !py_isnil(&info->exc));
+            PUSH(&info->exc);
             DISPATCH();
         }
         //////////////////
         case OP_FORMAT_STRING: {
             py_Ref spec = c11__at(py_TValue, &frame->co->consts, byte.arg);
-            bool ok = stack_format_object(self, py_tosv(spec));
+            bool ok = pk_format_object(self, TOP(), py_tosv(spec));
             if(!ok) goto __ERROR;
+            py_assign(TOP(), py_retval());
             DISPATCH();
         }
         default: c11__unreachable();
@@ -5176,16 +5082,19 @@ __NEXT_STEP:
     c11__unreachable();
 
 __ERROR:
+    assert(!py_isnil(&self->unhandled_exc));
     py_BaseException__stpush(frame,
-                             &self->curr_exception,
+                             &self->unhandled_exc,
                              frame->co->src,
                              Frame__lineno(frame),
                              !frame->is_locals_special ? frame->co->name->data : NULL);
 __ERROR_RE_RAISE:
     do {
+        self->curr_class = NULL;
+        self->curr_decl_based_function = NULL;
     } while(0);
 
-    int target = Frame__prepare_jump_exception_handler(frame, &self->stack);
+    int target = Frame__goto_exception_handler(frame, &self->stack, &self->unhandled_exc);
     if(target >= 0) {
         // 1. Exception can be handled inside the current frame
         DISPATCH_JUMP_ABSOLUTE(target);
@@ -5270,61 +5179,9 @@ bool pk_stack_binaryop(VM* self, py_Name op, py_Name rop) {
                      rhs_t);
 }
 
-bool py_binaryop(py_Ref lhs, py_Ref rhs, py_Name op, py_Name rop) {
-    VM* self = pk_current_vm;
-    PUSH(lhs);
-    PUSH(rhs);
-    bool ok = pk_stack_binaryop(self, op, rop);
-    STACK_SHRINK(2);
-    return ok;
-}
-
-bool py_binaryadd(py_Ref lhs, py_Ref rhs) { return py_binaryop(lhs, rhs, __add__, __radd__); }
-
-bool py_binarysub(py_Ref lhs, py_Ref rhs) { return py_binaryop(lhs, rhs, __sub__, __rsub__); }
-
-bool py_binarymul(py_Ref lhs, py_Ref rhs) { return py_binaryop(lhs, rhs, __mul__, __rmul__); }
-
-bool py_binarytruediv(py_Ref lhs, py_Ref rhs) {
-    return py_binaryop(lhs, rhs, __truediv__, __rtruediv__);
-}
-
-bool py_binaryfloordiv(py_Ref lhs, py_Ref rhs) {
-    return py_binaryop(lhs, rhs, __floordiv__, __rfloordiv__);
-}
-
-bool py_binarymod(py_Ref lhs, py_Ref rhs) { return py_binaryop(lhs, rhs, __mod__, __rmod__); }
-
-bool py_binarypow(py_Ref lhs, py_Ref rhs) { return py_binaryop(lhs, rhs, __pow__, __rpow__); }
-
-bool py_binarylshift(py_Ref lhs, py_Ref rhs) { return py_binaryop(lhs, rhs, __lshift__, 0); }
-
-bool py_binaryrshift(py_Ref lhs, py_Ref rhs) { return py_binaryop(lhs, rhs, __rshift__, 0); }
-
-bool py_binaryand(py_Ref lhs, py_Ref rhs) { return py_binaryop(lhs, rhs, __and__, 0); }
-
-bool py_binaryor(py_Ref lhs, py_Ref rhs) { return py_binaryop(lhs, rhs, __or__, 0); }
-
-bool py_binaryxor(py_Ref lhs, py_Ref rhs) { return py_binaryop(lhs, rhs, __xor__, 0); }
-
-bool py_binarymatmul(py_Ref lhs, py_Ref rhs) { return py_binaryop(lhs, rhs, __matmul__, 0); }
-
-bool py_eq(py_Ref lhs, py_Ref rhs) { return py_binaryop(lhs, rhs, __eq__, __eq__); }
-
-bool py_ne(py_Ref lhs, py_Ref rhs) { return py_binaryop(lhs, rhs, __ne__, __ne__); }
-
-bool py_lt(py_Ref lhs, py_Ref rhs) { return py_binaryop(lhs, rhs, __lt__, __gt__); }
-
-bool py_le(py_Ref lhs, py_Ref rhs) { return py_binaryop(lhs, rhs, __le__, __ge__); }
-
-bool py_gt(py_Ref lhs, py_Ref rhs) { return py_binaryop(lhs, rhs, __gt__, __lt__); }
-
-bool py_ge(py_Ref lhs, py_Ref rhs) { return py_binaryop(lhs, rhs, __ge__, __le__); }
-
-static bool stack_format_object(VM* self, c11_sv spec) {
+bool pk_format_object(VM* self, py_Ref val, c11_sv spec) {
     // format TOS via `spec` inplace
-    // spec: '!r:.2f', '.2f'
-    py_StackRef val = TOP();
+    // spec: '!r:.2f', ':.2f', '.2f'
     if(spec.size == 0) return py_str(val);
 
     if(spec.data[0] == '!') {
@@ -5465,7 +5322,7 @@ static bool stack_format_object(VM* self, c11_sv spec) {
 
     c11_string__delete(body);
     // inplace update
-    c11_sbuf__py_submit(&buf, val);
+    c11_sbuf__py_submit(&buf, py_retval());
     return true;
 }
 
@@ -5487,26 +5344,9 @@ static bool stack_format_object(VM* self, c11_sv spec) {
 #undef vectorcall_opcall
 #undef RESET_CO_CACHE
 
-void py_sys_settrace(py_TraceFunc func, bool reset) {
-    TraceInfo* info = &pk_current_vm->trace_info;
-    info->func = func;
-    if(!reset) return;
-    if(info->prev_loc.src) {
-        PK_DECREF(info->prev_loc.src);
-        info->prev_loc.src = NULL;
-    }
-    info->prev_loc.lineno = -1;
-}
 // src/interpreter/frame.c
 #include <stdbool.h>
 #include <assert.h>
-
-void ValueStack__ctor(ValueStack* self) {
-    self->sp = self->begin;
-    self->end = self->begin + PK_VM_STACK_SIZE;
-}
-
-void ValueStack__dtor(ValueStack* self) { self->sp = self->begin; }
 
 void FastLocals__to_dict(py_TValue* locals, const CodeObject* co) {
     py_StackRef dict = py_pushtmp();
@@ -5532,16 +5372,6 @@ NameDict* FastLocals__to_namedict(py_TValue* locals, const CodeObject* co) {
     return dict;
 }
 
-UnwindTarget* UnwindTarget__new(UnwindTarget* next, int iblock, int offset) {
-    UnwindTarget* self = PK_MALLOC(sizeof(UnwindTarget));
-    self->next = next;
-    self->iblock = iblock;
-    self->offset = offset;
-    return self;
-}
-
-void UnwindTarget__delete(UnwindTarget* self) { PK_FREE(self); }
-
 py_Frame* Frame__new(const CodeObject* co,
                      py_StackRef p0,
                      py_GlobalRef module,
@@ -5562,57 +5392,47 @@ py_Frame* Frame__new(const CodeObject* co,
     self->locals = locals;
     self->is_locals_special = is_locals_special;
     self->ip = -1;
-    self->uw_list = NULL;
+    c11_vector__ctor(&self->exc_stack, sizeof(FrameExcInfo));
     return self;
 }
 
 void Frame__delete(py_Frame* self) {
-    while(self->uw_list) {
-        UnwindTarget* p = self->uw_list;
-        self->uw_list = p->next;
-        UnwindTarget__delete(p);
-    }
+    c11_vector__dtor(&self->exc_stack);
     FixedMemoryPool__dealloc(&pk_current_vm->pool_frame, self);
 }
 
-int Frame__prepare_jump_exception_handler(py_Frame* self, ValueStack* _s) {
-    // try to find a parent try block
-    int iblock = Frame__iblock(self);
-    while(iblock >= 0) {
-        CodeBlock* block = c11__at(CodeBlock, &self->co->blocks, iblock);
-        if(block->type == CodeBlockType_TRY) break;
-        iblock = block->parent;
+int Frame__goto_exception_handler(py_Frame* self, ValueStack* value_stack, py_Ref exc) {
+    FrameExcInfo* p = self->exc_stack.data;
+    for(int i = self->exc_stack.length - 1; i >= 0; i--) {
+        if(py_isnil(&p[i].exc)) {
+            value_stack->sp = (self->p0 + p[i].offset);  // unwind the stack
+            return c11__at(CodeBlock, &self->co->blocks, p[i].iblock)->end;
+        } else {
+            self->exc_stack.length--;
+        }
     }
-    if(iblock < 0) return -1;
-    UnwindTarget* uw = Frame__find_unwind_target(self, iblock);
-    _s->sp = (self->p0 + uw->offset);  // unwind the stack
-    return c11__at(CodeBlock, &self->co->blocks, iblock)->end;
+    return -1;
 }
 
-UnwindTarget* Frame__find_unwind_target(py_Frame* self, int iblock) {
-    UnwindTarget* uw;
-    for(uw = self->uw_list; uw; uw = uw->next) {
-        if(uw->iblock == iblock) return uw;
-    }
-    return NULL;
-}
-
-void Frame__set_unwind_target(py_Frame* self, py_TValue* sp) {
+void Frame__begin_try(py_Frame* self, py_TValue* sp) {
     int iblock = Frame__iblock(self);
     assert(iblock >= 0);
-    UnwindTarget* existing = Frame__find_unwind_target(self, iblock);
-    if(existing) {
-        existing->offset = sp - self->p0;
-    } else {
-        UnwindTarget* prev = self->uw_list;
-        self->uw_list = UnwindTarget__new(prev, iblock, sp - self->p0);
-    }
+    FrameExcInfo* info = c11_vector__emplace(&self->exc_stack);
+    info->iblock = iblock;
+    info->offset = (int)(sp - self->p0);
+    py_newnil(&info->exc);
+}
+
+FrameExcInfo* Frame__top_exc_info(py_Frame* self) {
+    if(self->exc_stack.length == 0) return NULL;
+    return &c11_vector__back(FrameExcInfo, &self->exc_stack);
 }
 
 void Frame__gc_mark(py_Frame* self, c11_vector* p_stack) {
     pk__mark_value(self->globals);
     if(self->is_locals_special) pk__mark_value(self->locals);
     CodeObject__gc_mark(self->co, p_stack);
+    c11__foreach(FrameExcInfo, &self->exc_stack, info) { pk__mark_value(&info->exc); }
 }
 
 int Frame__lineno(const py_Frame* self) {
@@ -5684,46 +5504,6 @@ SourceLocation Frame__source_location(py_Frame* self) {
     return loc;
 }
 
-const char* py_Frame_sourceloc(py_Frame* self, int* lineno) {
-    SourceLocation loc = Frame__source_location(self);
-    *lineno = loc.lineno;
-    return loc.src->filename->data;
-}
-
-void py_Frame_newglobals(py_Frame* frame, py_OutRef out) {
-    if(!frame) {
-        pk_mappingproxy__namedict(out, pk_current_vm->main);
-        return;
-    }
-    if(frame->globals->type == tp_module) {
-        pk_mappingproxy__namedict(out, frame->globals);
-    } else {
-        *out = *frame->globals;  // dict
-    }
-}
-
-void py_Frame_newlocals(py_Frame* frame, py_OutRef out) {
-    if(!frame) {
-        py_newdict(out);
-        return;
-    }
-    if(frame->is_locals_special) {
-        switch(frame->locals->type) {
-            case tp_locals: frame = frame->locals->_ptr; break;
-            case tp_dict: *out = *frame->locals; return;
-            case tp_nil: py_newdict(out); return;
-            default: c11__unreachable();
-        }
-    }
-    FastLocals__to_dict(frame->locals, frame->co);
-    py_assign(out, py_retval());
-}
-
-py_StackRef py_Frame_function(py_Frame* self) {
-    if(self->is_locals_special) return NULL;
-    assert(self->p0->type == tp_function);
-    return self->p0;
-}
 // src/interpreter/dll.c
 #if PK_IS_DESKTOP_PLATFORM && PK_ENABLE_OS
 
@@ -6323,7 +6103,20 @@ void BinTree__apply_mark(BinTree* self, c11_vector* p_stack) {
 #include <string.h>
 #include <assert.h>
 
-#define HASH_KEY(__k) ((uintptr_t)(__k) >> 3U)
+// https://jfdube.wordpress.com/2011/10/12/hashing-strings-and-pointers-avoiding-common-pitfalls/
+uintptr_t ThomasWangInt32Hash(void* Ptr) {
+    // Here we think only the lower 32 bits are useful
+    uint32_t Value = (uint32_t)(uintptr_t)Ptr;
+    Value = ~Value + (Value << 15);
+    Value = Value ^ (Value >> 12);
+    Value = Value + (Value << 2);
+    Value = Value ^ (Value >> 4);
+    Value = Value * 2057;
+    Value = Value ^ (Value >> 16);
+    return Value;
+}
+
+#define HASH_KEY(__k) ThomasWangInt32Hash(__k)
 
 #define HASH_PROBE_0(__k, ok, i)                                                                   \
     ok = false;                                                                                    \
@@ -6468,16 +6261,16 @@ void NameDict__clear(NameDict* self) {
 // generated by prebuild.py
 #include <string.h>
 const char kPythonLibs_bisect[] = "\"\"\"Bisection algorithms.\"\"\"\n\ndef insort_right(a, x, lo=0, hi=None):\n    \"\"\"Insert item x in list a, and keep it sorted assuming a is sorted.\n\n    If x is already in a, insert it to the right of the rightmost x.\n\n    Optional args lo (default 0) and hi (default len(a)) bound the\n    slice of a to be searched.\n    \"\"\"\n\n    lo = bisect_right(a, x, lo, hi)\n    a.insert(lo, x)\n\ndef bisect_right(a, x, lo=0, hi=None):\n    \"\"\"Return the index where to insert item x in list a, assuming a is sorted.\n\n    The return value i is such that all e in a[:i] have e <= x, and all e in\n    a[i:] have e > x.  So if x already appears in the list, a.insert(x) will\n    insert just after the rightmost x already there.\n\n    Optional args lo (default 0) and hi (default len(a)) bound the\n    slice of a to be searched.\n    \"\"\"\n\n    if lo < 0:\n        raise ValueError('lo must be non-negative')\n    if hi is None:\n        hi = len(a)\n    while lo < hi:\n        mid = (lo+hi)//2\n        if x < a[mid]: hi = mid\n        else: lo = mid+1\n    return lo\n\ndef insort_left(a, x, lo=0, hi=None):\n    \"\"\"Insert item x in list a, and keep it sorted assuming a is sorted.\n\n    If x is already in a, insert it to the left of the leftmost x.\n\n    Optional args lo (default 0) and hi (default len(a)) bound the\n    slice of a to be searched.\n    \"\"\"\n\n    lo = bisect_left(a, x, lo, hi)\n    a.insert(lo, x)\n\n\ndef bisect_left(a, x, lo=0, hi=None):\n    \"\"\"Return the index where to insert item x in list a, assuming a is sorted.\n\n    The return value i is such that all e in a[:i] have e < x, and all e in\n    a[i:] have e >= x.  So if x already appears in the list, a.insert(x) will\n    insert just before the leftmost x already there.\n\n    Optional args lo (default 0) and hi (default len(a)) bound the\n    slice of a to be searched.\n    \"\"\"\n\n    if lo < 0:\n        raise ValueError('lo must be non-negative')\n    if hi is None:\n        hi = len(a)\n    while lo < hi:\n        mid = (lo+hi)//2\n        if a[mid] < x: lo = mid+1\n        else: hi = mid\n    return lo\n\n# Create aliases\nbisect = bisect_right\ninsort = insort_right\n";
-const char kPythonLibs_builtins[] = "def all(iterable):\n    for i in iterable:\n        if not i:\n            return False\n    return True\n\ndef any(iterable):\n    for i in iterable:\n        if i:\n            return True\n    return False\n\ndef enumerate(iterable, start=0):\n    n = start\n    for elem in iterable:\n        yield n, elem\n        n += 1\n\ndef __minmax_reduce(op, args):\n    if len(args) == 2:  # min(1, 2)\n        return args[0] if op(args[0], args[1]) else args[1]\n    if len(args) == 0:  # min()\n        raise TypeError('expected 1 arguments, got 0')\n    if len(args) == 1:  # min([1, 2, 3, 4]) -> min(1, 2, 3, 4)\n        args = args[0]\n    args = iter(args)\n    try:\n        res = next(args)\n    except StopIteration:\n        raise ValueError('args is an empty sequence')\n    while True:\n        try:\n            i = next(args)\n        except StopIteration:\n            break\n        if op(i, res):\n            res = i\n    return res\n\ndef min(*args, key=None):\n    key = key or (lambda x: x)\n    return __minmax_reduce(lambda x,y: key(x)<key(y), args)\n\ndef max(*args, key=None):\n    key = key or (lambda x: x)\n    return __minmax_reduce(lambda x,y: key(x)>key(y), args)\n\ndef sum(iterable):\n    res = 0\n    for i in iterable:\n        res += i\n    return res\n\ndef map(f, iterable):\n    for i in iterable:\n        yield f(i)\n\ndef filter(f, iterable):\n    for i in iterable:\n        if f(i):\n            yield i\n\ndef zip(a, b):\n    a = iter(a)\n    b = iter(b)\n    while True:\n        try:\n            ai = next(a)\n            bi = next(b)\n        except StopIteration:\n            break\n        yield ai, bi\n\ndef reversed(iterable):\n    a = list(iterable)\n    a.reverse()\n    return a\n\ndef sorted(iterable, key=None, reverse=False):\n    a = list(iterable)\n    a.sort(key=key, reverse=reverse)\n    return a\n\n##### str #####\ndef __format_string(self: str, *args, **kwargs) -> str:\n    def tokenizeString(s: str):\n        tokens = []\n        L, R = 0,0\n        \n        mode = None\n        curArg = 0\n        # lookingForKword = False\n        \n        while(R<len(s)):\n            curChar = s[R]\n            nextChar = s[R+1] if R+1<len(s) else ''\n            \n            # Invalid case 1: stray '}' encountered, example: \"ABCD EFGH {name} IJKL}\", \"Hello {vv}}\", \"HELLO {0} WORLD}\"\n            if curChar == '}' and nextChar != '}':\n                raise ValueError(\"Single '}' encountered in format string\")        \n            \n            # Valid Case 1: Escaping case, we escape \"{{ or \"}}\" to be \"{\" or \"}\", example: \"{{}}\", \"{{My Name is {0}}}\"\n            if (curChar == '{' and nextChar == '{') or (curChar == '}' and nextChar == '}'):\n                \n                if (L<R): # Valid Case 1.1: make sure we are not adding empty string\n                    tokens.append(s[L:R]) # add the string before the escape\n                \n                \n                tokens.append(curChar) # Valid Case 1.2: add the escape char\n                L = R+2 # move the left pointer to the next char\n                R = R+2 # move the right pointer to the next char\n                continue\n            \n            # Valid Case 2: Regular command line arg case: example:  \"ABCD EFGH {} IJKL\", \"{}\", \"HELLO {} WORLD\"\n            elif curChar == '{' and nextChar == '}':\n                if mode is not None and mode != 'auto':\n                    # Invalid case 2: mixing automatic and manual field specifications -- example: \"ABCD EFGH {name} IJKL {}\", \"Hello {vv} {}\", \"HELLO {0} WORLD {}\" \n                    raise ValueError(\"Cannot switch from manual field numbering to automatic field specification\")\n                \n                mode = 'auto'\n                if(L<R): # Valid Case 2.1: make sure we are not adding empty string\n                    tokens.append(s[L:R]) # add the string before the special marker for the arg\n                \n                tokens.append(\"{\"+str(curArg)+\"}\") # Valid Case 2.2: add the special marker for the arg\n                curArg+=1 # increment the arg position, this will be used for referencing the arg later\n                \n                L = R+2 # move the left pointer to the next char\n                R = R+2 # move the right pointer to the next char\n                continue\n            \n            # Valid Case 3: Key-word arg case: example: \"ABCD EFGH {name} IJKL\", \"Hello {vv}\", \"HELLO {name} WORLD\"\n            elif (curChar == '{'):\n                \n                if mode is not None and mode != 'manual':\n                    # # Invalid case 2: mixing automatic and manual field specifications -- example: \"ABCD EFGH {} IJKL {name}\", \"Hello {} {1}\", \"HELLO {} WORLD {name}\"\n                    raise ValueError(\"Cannot switch from automatic field specification to manual field numbering\")\n                \n                mode = 'manual'\n                \n                if(L<R): # Valid case 3.1: make sure we are not adding empty string\n                    tokens.append(s[L:R]) # add the string before the special marker for the arg\n                \n                # We look for the end of the keyword          \n                kwL = R # Keyword left pointer\n                kwR = R+1 # Keyword right pointer\n                while(kwR<len(s) and s[kwR]!='}'):\n                    if s[kwR] == '{': # Invalid case 3: stray '{' encountered, example: \"ABCD EFGH {n{ame} IJKL {\", \"Hello {vv{}}\", \"HELLO {0} WOR{LD}\"\n                        raise ValueError(\"Unexpected '{' in field name\")\n                    kwR += 1\n                \n                # Valid case 3.2: We have successfully found the end of the keyword\n                if kwR<len(s) and s[kwR] == '}':\n                    tokens.append(s[kwL:kwR+1]) # add the special marker for the arg\n                    L = kwR+1\n                    R = kwR+1\n                    \n                # Invalid case 4: We didn't find the end of the keyword, throw error\n                else:\n                    raise ValueError(\"Expected '}' before end of string\")\n                continue\n            \n            R = R+1\n        \n        \n        # Valid case 4: We have reached the end of the string, add the remaining string to the tokens \n        if L<R:\n            tokens.append(s[L:R])\n                \n        # print(tokens)\n        return tokens\n\n    tokens = tokenizeString(self)\n    argMap = {}\n    for i, a in enumerate(args):\n        argMap[str(i)] = a\n    final_tokens = []\n    for t in tokens:\n        if t[0] == '{' and t[-1] == '}':\n            key = t[1:-1]\n            argMapVal = argMap.get(key, None)\n            kwargsVal = kwargs.get(key, None)\n                                    \n            if argMapVal is None and kwargsVal is None:\n                raise ValueError(\"No arg found for token: \"+t)\n            elif argMapVal is not None:\n                final_tokens.append(str(argMapVal))\n            else:\n                final_tokens.append(str(kwargsVal))\n        else:\n            final_tokens.append(t)\n    \n    return ''.join(final_tokens)\n\nstr.format = __format_string\ndel __format_string\n\n\ndef help(obj):\n    if hasattr(obj, '__func__'):\n        obj = obj.__func__\n    # print(obj.__signature__)\n    if obj.__doc__:\n        print(obj.__doc__)\n\ndef complex(real, imag=0):\n    import cmath\n    return cmath.complex(real, imag) # type: ignore\n\ndef dir(obj) -> list[str]:\n    tp_module = type(__import__('math'))\n    if isinstance(obj, tp_module):\n        return [k for k, _ in obj.__dict__.items()]\n    names = set()\n    if not isinstance(obj, type):\n        obj_d = obj.__dict__\n        if obj_d is not None:\n            names.update([k for k, _ in obj_d.items()])\n        cls = type(obj)\n    else:\n        cls = obj\n    while cls is not None:\n        names.update([k for k, _ in cls.__dict__.items()])\n        cls = cls.__base__\n    return sorted(list(names))\n\nclass set:\n    def __init__(self, iterable=None):\n        iterable = iterable or []\n        self._a = {}\n        self.update(iterable)\n\n    def add(self, elem):\n        self._a[elem] = None\n        \n    def discard(self, elem):\n        self._a.pop(elem, None)\n\n    def remove(self, elem):\n        del self._a[elem]\n        \n    def clear(self):\n        self._a.clear()\n\n    def update(self, other):\n        for elem in other:\n            self.add(elem)\n\n    def __len__(self):\n        return len(self._a)\n    \n    def copy(self):\n        return set(self._a.keys())\n    \n    def __and__(self, other):\n        return {elem for elem in self if elem in other}\n\n    def __sub__(self, other):\n        return {elem for elem in self if elem not in other}\n    \n    def __or__(self, other):\n        ret = self.copy()\n        ret.update(other)\n        return ret\n\n    def __xor__(self, other): \n        _0 = self - other\n        _1 = other - self\n        return _0 | _1\n\n    def union(self, other):\n        return self | other\n\n    def intersection(self, other):\n        return self & other\n\n    def difference(self, other):\n        return self - other\n\n    def symmetric_difference(self, other):      \n        return self ^ other\n    \n    def __eq__(self, other):\n        if not isinstance(other, set):\n            return NotImplemented\n        return len(self ^ other) == 0\n    \n    def __ne__(self, other):\n        if not isinstance(other, set):\n            return NotImplemented\n        return len(self ^ other) != 0\n\n    def isdisjoint(self, other):\n        return len(self & other) == 0\n    \n    def issubset(self, other):\n        return len(self - other) == 0\n    \n    def issuperset(self, other):\n        return len(other - self) == 0\n\n    def __contains__(self, elem):\n        return elem in self._a\n    \n    def __repr__(self):\n        if len(self) == 0:\n            return 'set()'\n        return '{'+ ', '.join([repr(i) for i in self._a.keys()]) + '}'\n    \n    def __iter__(self):\n        return iter(self._a.keys())";
+const char kPythonLibs_builtins[] = "def all(iterable):\n    for i in iterable:\n        if not i:\n            return False\n    return True\n\ndef any(iterable):\n    for i in iterable:\n        if i:\n            return True\n    return False\n\ndef enumerate(iterable, start=0):\n    n = start\n    for elem in iterable:\n        yield n, elem\n        n += 1\n\ndef __minmax_reduce(op, args):\n    if len(args) == 2:  # min(1, 2)\n        return args[0] if op(args[0], args[1]) else args[1]\n    if len(args) == 0:  # min()\n        raise TypeError('expected 1 arguments, got 0')\n    if len(args) == 1:  # min([1, 2, 3, 4]) -> min(1, 2, 3, 4)\n        args = args[0]\n    args = iter(args)\n    try:\n        res = next(args)\n    except StopIteration:\n        raise ValueError('args is an empty sequence')\n    while True:\n        try:\n            i = next(args)\n        except StopIteration:\n            break\n        if op(i, res):\n            res = i\n    return res\n\ndef min(*args, key=None):\n    key = key or (lambda x: x)\n    return __minmax_reduce(lambda x,y: key(x)<key(y), args)\n\ndef max(*args, key=None):\n    key = key or (lambda x: x)\n    return __minmax_reduce(lambda x,y: key(x)>key(y), args)\n\ndef sum(iterable):\n    res = 0\n    for i in iterable:\n        res += i\n    return res\n\ndef map(f, iterable):\n    for i in iterable:\n        yield f(i)\n\ndef filter(f, iterable):\n    for i in iterable:\n        if f(i):\n            yield i\n\ndef zip(a, b):\n    a = iter(a)\n    b = iter(b)\n    while True:\n        try:\n            ai = next(a)\n            bi = next(b)\n        except StopIteration:\n            break\n        yield ai, bi\n\ndef reversed(iterable):\n    a = list(iterable)\n    a.reverse()\n    return a\n\ndef sorted(iterable, key=None, reverse=False):\n    a = list(iterable)\n    a.sort(key=key, reverse=reverse)\n    return a\n\n\ndef help(obj):\n    if hasattr(obj, '__func__'):\n        obj = obj.__func__\n    # print(obj.__signature__)\n    if obj.__doc__:\n        print(obj.__doc__)\n\ndef complex(real, imag=0):\n    import cmath\n    return cmath.complex(real, imag) # type: ignore\n\ndef dir(obj) -> list[str]:\n    tp_module = type(__import__('math'))\n    if isinstance(obj, tp_module):\n        return [k for k, _ in obj.__dict__.items()]\n    names = set()\n    if not isinstance(obj, type):\n        obj_d = obj.__dict__\n        if obj_d is not None:\n            names.update([k for k, _ in obj_d.items()])\n        cls = type(obj)\n    else:\n        cls = obj\n    while cls is not None:\n        names.update([k for k, _ in cls.__dict__.items()])\n        cls = cls.__base__\n    return sorted(list(names))\n\nclass set:\n    def __init__(self, iterable=None):\n        iterable = iterable or []\n        self._a = {}\n        self.update(iterable)\n\n    def add(self, elem):\n        self._a[elem] = None\n        \n    def discard(self, elem):\n        self._a.pop(elem, None)\n\n    def remove(self, elem):\n        del self._a[elem]\n        \n    def clear(self):\n        self._a.clear()\n\n    def update(self, other):\n        for elem in other:\n            self.add(elem)\n\n    def __len__(self):\n        return len(self._a)\n    \n    def copy(self):\n        return set(self._a.keys())\n    \n    def __and__(self, other):\n        return {elem for elem in self if elem in other}\n\n    def __sub__(self, other):\n        return {elem for elem in self if elem not in other}\n    \n    def __or__(self, other):\n        ret = self.copy()\n        ret.update(other)\n        return ret\n\n    def __xor__(self, other): \n        _0 = self - other\n        _1 = other - self\n        return _0 | _1\n\n    def union(self, other):\n        return self | other\n\n    def intersection(self, other):\n        return self & other\n\n    def difference(self, other):\n        return self - other\n\n    def symmetric_difference(self, other):      \n        return self ^ other\n    \n    def __eq__(self, other):\n        if not isinstance(other, set):\n            return NotImplemented\n        return len(self ^ other) == 0\n    \n    def __ne__(self, other):\n        if not isinstance(other, set):\n            return NotImplemented\n        return len(self ^ other) != 0\n\n    def isdisjoint(self, other):\n        return len(self & other) == 0\n    \n    def issubset(self, other):\n        return len(self - other) == 0\n    \n    def issuperset(self, other):\n        return len(other - self) == 0\n\n    def __contains__(self, elem):\n        return elem in self._a\n    \n    def __repr__(self):\n        if len(self) == 0:\n            return 'set()'\n        return '{'+ ', '.join([repr(i) for i in self._a.keys()]) + '}'\n    \n    def __iter__(self):\n        return iter(self._a.keys())";
 const char kPythonLibs_cmath[] = "import math\n\nclass complex:\n    def __init__(self, real, imag=0):\n        self._real = float(real)\n        self._imag = float(imag)\n\n    @property\n    def real(self):\n        return self._real\n    \n    @property\n    def imag(self):\n        return self._imag\n\n    def conjugate(self):\n        return complex(self.real, -self.imag)\n    \n    def __repr__(self):\n        s = ['(', str(self.real)]\n        s.append('-' if self.imag < 0 else '+')\n        s.append(str(abs(self.imag)))\n        s.append('j)')\n        return ''.join(s)\n    \n    def __eq__(self, other):\n        if type(other) is complex:\n            return self.real == other.real and self.imag == other.imag\n        if type(other) in (int, float):\n            return self.real == other and self.imag == 0\n        return NotImplemented\n    \n    def __ne__(self, other):\n        res = self == other\n        if res is NotImplemented:\n            return res\n        return not res\n    \n    def __add__(self, other):\n        if type(other) is complex:\n            return complex(self.real + other.real, self.imag + other.imag)\n        if type(other) in (int, float):\n            return complex(self.real + other, self.imag)\n        return NotImplemented\n        \n    def __radd__(self, other):\n        return self.__add__(other)\n    \n    def __sub__(self, other):\n        if type(other) is complex:\n            return complex(self.real - other.real, self.imag - other.imag)\n        if type(other) in (int, float):\n            return complex(self.real - other, self.imag)\n        return NotImplemented\n    \n    def __rsub__(self, other):\n        if type(other) is complex:\n            return complex(other.real - self.real, other.imag - self.imag)\n        if type(other) in (int, float):\n            return complex(other - self.real, -self.imag)\n        return NotImplemented\n    \n    def __mul__(self, other):\n        if type(other) is complex:\n            return complex(self.real * other.real - self.imag * other.imag,\n                           self.real * other.imag + self.imag * other.real)\n        if type(other) in (int, float):\n            return complex(self.real * other, self.imag * other)\n        return NotImplemented\n    \n    def __rmul__(self, other):\n        return self.__mul__(other)\n    \n    def __truediv__(self, other):\n        if type(other) is complex:\n            denominator = other.real ** 2 + other.imag ** 2\n            real_part = (self.real * other.real + self.imag * other.imag) / denominator\n            imag_part = (self.imag * other.real - self.real * other.imag) / denominator\n            return complex(real_part, imag_part)\n        if type(other) in (int, float):\n            return complex(self.real / other, self.imag / other)\n        return NotImplemented\n    \n    def __pow__(self, other: int | float):\n        if type(other) in (int, float):\n            return complex(self.__abs__() ** other * math.cos(other * phase(self)),\n                           self.__abs__() ** other * math.sin(other * phase(self)))\n        return NotImplemented\n    \n    def __abs__(self) -> float:\n        return math.sqrt(self.real ** 2 + self.imag ** 2)\n\n    def __neg__(self):\n        return complex(-self.real, -self.imag)\n    \n    def __hash__(self):\n        return hash((self.real, self.imag))\n\n\n# Conversions to and from polar coordinates\n\ndef phase(z: complex):\n    return math.atan2(z.imag, z.real)\n\ndef polar(z: complex):\n    return z.__abs__(), phase(z)\n\ndef rect(r: float, phi: float):\n    return r * math.cos(phi) + r * math.sin(phi) * 1j\n\n# Power and logarithmic functions\n\ndef exp(z: complex):\n    return math.exp(z.real) * rect(1, z.imag)\n\ndef log(z: complex, base=2.718281828459045):\n    return math.log(z.__abs__(), base) + phase(z) * 1j\n\ndef log10(z: complex):\n    return log(z, 10)\n\ndef sqrt(z: complex):\n    return z ** 0.5\n\n# Trigonometric functions\n\ndef acos(z: complex):\n    return -1j * log(z + sqrt(z * z - 1))\n\ndef asin(z: complex):\n    return -1j * log(1j * z + sqrt(1 - z * z))\n\ndef atan(z: complex):\n    return 1j / 2 * log((1 - 1j * z) / (1 + 1j * z))\n\ndef cos(z: complex):\n    return (exp(z) + exp(-z)) / 2\n\ndef sin(z: complex):\n    return (exp(z) - exp(-z)) / (2 * 1j)\n\ndef tan(z: complex):\n    return sin(z) / cos(z)\n\n# Hyperbolic functions\n\ndef acosh(z: complex):\n    return log(z + sqrt(z * z - 1))\n\ndef asinh(z: complex):\n    return log(z + sqrt(z * z + 1))\n\ndef atanh(z: complex):\n    return 1 / 2 * log((1 + z) / (1 - z))\n\ndef cosh(z: complex):\n    return (exp(z) + exp(-z)) / 2\n\ndef sinh(z: complex):\n    return (exp(z) - exp(-z)) / 2\n\ndef tanh(z: complex):\n    return sinh(z) / cosh(z)\n\n# Classification functions\n\ndef isfinite(z: complex):\n    return math.isfinite(z.real) and math.isfinite(z.imag)\n\ndef isinf(z: complex):\n    return math.isinf(z.real) or math.isinf(z.imag)\n\ndef isnan(z: complex):\n    return math.isnan(z.real) or math.isnan(z.imag)\n\ndef isclose(a: complex, b: complex):\n    return math.isclose(a.real, b.real) and math.isclose(a.imag, b.imag)\n\n# Constants\n\npi = math.pi\ne = math.e\ntau = 2 * pi\ninf = math.inf\ninfj = complex(0, inf)\nnan = math.nan\nnanj = complex(0, nan)\n";
-const char kPythonLibs_collections[] = "from typing import TypeVar, Iterable\n\ndef Counter[T](iterable: Iterable[T]):\n    a: dict[T, int] = {}\n    for x in iterable:\n        if x in a:\n            a[x] += 1\n        else:\n            a[x] = 1\n    return a\n\n\nclass defaultdict(dict):\n    def __init__(self, default_factory, *args):\n        super().__init__(*args)\n        self.default_factory = default_factory\n\n    def __missing__(self, key):\n        self[key] = self.default_factory()\n        return self[key]\n\n    def __repr__(self) -> str:\n        return f\"defaultdict({self.default_factory}, {super().__repr__()})\"\n\n    def copy(self):\n        return defaultdict(self.default_factory, self)\n\n\nclass deque[T]:\n    _data: list[T]\n    _head: int\n    _tail: int\n    _capacity: int\n\n    def __init__(self, iterable: Iterable[T] = None):\n        self._data = [None] * 8 # type: ignore\n        self._head = 0\n        self._tail = 0\n        self._capacity = len(self._data)\n\n        if iterable is not None:\n            self.extend(iterable)\n\n    def __resize_2x(self):\n        backup = list(self)\n        self._capacity *= 2\n        self._head = 0\n        self._tail = len(backup)\n        self._data.clear()\n        self._data.extend(backup)\n        self._data.extend([None] * (self._capacity - len(backup)))\n\n    def append(self, x: T):\n        self._data[self._tail] = x\n        self._tail = (self._tail + 1) % self._capacity\n        if (self._tail + 1) % self._capacity == self._head:\n            self.__resize_2x()\n\n    def appendleft(self, x: T):\n        self._head = (self._head - 1) % self._capacity\n        self._data[self._head] = x\n        if (self._tail + 1) % self._capacity == self._head:\n            self.__resize_2x()\n\n    def copy(self):\n        return deque(self)\n    \n    def count(self, x: T) -> int:\n        n = 0\n        for item in self:\n            if item == x:\n                n += 1\n        return n\n    \n    def extend(self, iterable: Iterable[T]):\n        for x in iterable:\n            self.append(x)\n\n    def extendleft(self, iterable: Iterable[T]):\n        for x in iterable:\n            self.appendleft(x)\n    \n    def pop(self) -> T:\n        if self._head == self._tail:\n            raise IndexError(\"pop from an empty deque\")\n        self._tail = (self._tail - 1) % self._capacity\n        return self._data[self._tail]\n    \n    def popleft(self) -> T:\n        if self._head == self._tail:\n            raise IndexError(\"pop from an empty deque\")\n        x = self._data[self._head]\n        self._head = (self._head + 1) % self._capacity\n        return x\n    \n    def clear(self):\n        i = self._head\n        while i != self._tail:\n            self._data[i] = None # type: ignore\n            i = (i + 1) % self._capacity\n        self._head = 0\n        self._tail = 0\n\n    def rotate(self, n: int = 1):\n        if len(self) == 0:\n            return\n        if n > 0:\n            n = n % len(self)\n            for _ in range(n):\n                self.appendleft(self.pop())\n        elif n < 0:\n            n = -n % len(self)\n            for _ in range(n):\n                self.append(self.popleft())\n\n    def __len__(self) -> int:\n        return (self._tail - self._head) % self._capacity\n\n    def __contains__(self, x: object) -> bool:\n        for item in self:\n            if item == x:\n                return True\n        return False\n    \n    def __iter__(self):\n        i = self._head\n        while i != self._tail:\n            yield self._data[i]\n            i = (i + 1) % self._capacity\n\n    def __eq__(self, other: object) -> bool:\n        if not isinstance(other, deque):\n            return NotImplemented\n        if len(self) != len(other):\n            return False\n        for x, y in zip(self, other):\n            if x != y:\n                return False\n        return True\n    \n    def __ne__(self, other: object) -> bool:\n        if not isinstance(other, deque):\n            return NotImplemented\n        return not self == other\n    \n    def __repr__(self) -> str:\n        return f\"deque({list(self)!r})\"\n\n";
+const char kPythonLibs_collections[] = "from typing import TypeVar, Iterable\n\ndef Counter[T](iterable: Iterable[T]):\n    a: dict[T, int] = {}\n    for x in iterable:\n        if x in a:\n            a[x] += 1\n        else:\n            a[x] = 1\n    return a\n\n\nclass defaultdict(dict):\n    def __init__(self, default_factory, *args):\n        super().__init__(*args)\n        self.default_factory = default_factory\n\n    def __missing__(self, key):\n        self[key] = self.default_factory()\n        return self[key]\n\n    def __repr__(self) -> str:\n        return f\"defaultdict({self.default_factory}, {super().__repr__()})\"\n\n    def copy(self):\n        return defaultdict(self.default_factory, self)\n\n\nclass deque[T]:\n    _head: int\n    _tail: int\n    _maxlen: int | None\n    _capacity: int\n    _data: list[T]\n\n    def __init__(self, iterable: Iterable[T] = None, maxlen: int | None = None):\n        if maxlen is not None:\n            assert maxlen > 0\n\n        self._head = 0\n        self._tail = 0\n        self._maxlen = maxlen\n        self._capacity = 8 if maxlen is None else maxlen + 1\n        self._data = [None] * self._capacity # type: ignore\n\n        if iterable is not None:\n            self.extend(iterable)\n\n    @property\n    def maxlen(self) -> int | None:\n        return self._maxlen\n\n    def __resize_2x(self):\n        backup = list(self)\n        self._capacity *= 2\n        self._head = 0\n        self._tail = len(backup)\n        self._data.clear()\n        self._data.extend(backup)\n        self._data.extend([None] * (self._capacity - len(backup)))\n\n    def append(self, x: T):\n        if (self._tail + 1) % self._capacity == self._head:\n            if self._maxlen is None:\n                self.__resize_2x()\n            else:\n                self.popleft()\n        self._data[self._tail] = x\n        self._tail = (self._tail + 1) % self._capacity\n\n    def appendleft(self, x: T):\n        if (self._tail + 1) % self._capacity == self._head:\n            if self._maxlen is None:\n                self.__resize_2x()\n            else:\n                self.pop()\n        self._head = (self._head - 1) % self._capacity\n        self._data[self._head] = x\n\n    def copy(self):\n        return deque(self, maxlen=self.maxlen)\n    \n    def count(self, x: T) -> int:\n        n = 0\n        for item in self:\n            if item == x:\n                n += 1\n        return n\n    \n    def extend(self, iterable: Iterable[T]):\n        for x in iterable:\n            self.append(x)\n\n    def extendleft(self, iterable: Iterable[T]):\n        for x in iterable:\n            self.appendleft(x)\n    \n    def pop(self) -> T:\n        if self._head == self._tail:\n            raise IndexError(\"pop from an empty deque\")\n        self._tail = (self._tail - 1) % self._capacity\n        x = self._data[self._tail]\n        self._data[self._tail] = None\n        return x\n    \n    def popleft(self) -> T:\n        if self._head == self._tail:\n            raise IndexError(\"pop from an empty deque\")\n        x = self._data[self._head]\n        self._data[self._head] = None\n        self._head = (self._head + 1) % self._capacity\n        return x\n    \n    def clear(self):\n        i = self._head\n        while i != self._tail:\n            self._data[i] = None # type: ignore\n            i = (i + 1) % self._capacity\n        self._head = 0\n        self._tail = 0\n\n    def rotate(self, n: int = 1):\n        if len(self) == 0:\n            return\n        if n > 0:\n            n = n % len(self)\n            for _ in range(n):\n                self.appendleft(self.pop())\n        elif n < 0:\n            n = -n % len(self)\n            for _ in range(n):\n                self.append(self.popleft())\n\n    def __len__(self) -> int:\n        return (self._tail - self._head) % self._capacity\n\n    def __contains__(self, x: object) -> bool:\n        for item in self:\n            if item == x:\n                return True\n        return False\n    \n    def __iter__(self):\n        i = self._head\n        while i != self._tail:\n            yield self._data[i]\n            i = (i + 1) % self._capacity\n\n    def __eq__(self, other: object) -> bool:\n        if not isinstance(other, deque):\n            return NotImplemented\n        if len(self) != len(other):\n            return False\n        for x, y in zip(self, other):\n            if x != y:\n                return False\n        return True\n    \n    def __ne__(self, other: object) -> bool:\n        if not isinstance(other, deque):\n            return NotImplemented\n        return not self == other\n    \n    def __repr__(self) -> str:\n        if self.maxlen is None:\n            return f\"deque({list(self)!r})\"\n        return f\"deque({list(self)!r}, maxlen={self.maxlen})\"\n\n";
 const char kPythonLibs_dataclasses[] = "def _get_annotations(cls: type):\n    inherits = []\n    while cls is not object:\n        inherits.append(cls)\n        cls = cls.__base__\n    inherits.reverse()\n    res = {}\n    for cls in inherits:\n        res.update(cls.__annotations__)\n    return res.keys()\n\ndef _wrapped__init__(self, *args, **kwargs):\n    cls = type(self)\n    cls_d = cls.__dict__\n    fields = _get_annotations(cls)\n    i = 0   # index into args\n    for field in fields:\n        if field in kwargs:\n            setattr(self, field, kwargs.pop(field))\n        else:\n            if i < len(args):\n                setattr(self, field, args[i])\n                i += 1\n            elif field in cls_d:    # has default value\n                setattr(self, field, cls_d[field])\n            else:\n                raise TypeError(f\"{cls.__name__} missing required argument {field!r}\")\n    if len(args) > i:\n        raise TypeError(f\"{cls.__name__} takes {len(fields)} positional arguments but {len(args)} were given\")\n    if len(kwargs) > 0:\n        raise TypeError(f\"{cls.__name__} got an unexpected keyword argument {next(iter(kwargs))!r}\")\n\ndef _wrapped__repr__(self):\n    fields = _get_annotations(type(self))\n    obj_d = self.__dict__\n    args: list = [f\"{field}={obj_d[field]!r}\" for field in fields]\n    return f\"{type(self).__name__}({', '.join(args)})\"\n\ndef _wrapped__eq__(self, other):\n    if type(self) is not type(other):\n        return False\n    fields = _get_annotations(type(self))\n    for field in fields:\n        if getattr(self, field) != getattr(other, field):\n            return False\n    return True\n\ndef _wrapped__ne__(self, other):\n    return not self.__eq__(other)\n\ndef dataclass(cls: type):\n    assert type(cls) is type\n    cls_d = cls.__dict__\n    if '__init__' not in cls_d:\n        cls.__init__ = _wrapped__init__\n    if '__repr__' not in cls_d:\n        cls.__repr__ = _wrapped__repr__\n    if '__eq__' not in cls_d:\n        cls.__eq__ = _wrapped__eq__\n    if '__ne__' not in cls_d:\n        cls.__ne__ = _wrapped__ne__\n    fields = _get_annotations(cls)\n    has_default = False\n    for field in fields:\n        if field in cls_d:\n            has_default = True\n        else:\n            if has_default:\n                raise TypeError(f\"non-default argument {field!r} follows default argument\")\n    return cls\n\ndef asdict(obj) -> dict:\n    fields = _get_annotations(type(obj))\n    obj_d = obj.__dict__\n    return {field: obj_d[field] for field in fields}";
 const char kPythonLibs_datetime[] = "from time import localtime\nimport operator\n\nclass timedelta:\n    def __init__(self, days=0, seconds=0):\n        self.days = days\n        self.seconds = seconds\n\n    def __repr__(self):\n        return f\"datetime.timedelta(days={self.days}, seconds={self.seconds})\"\n\n    def __eq__(self, other) -> bool:\n        if not isinstance(other, timedelta):\n            return NotImplemented\n        return (self.days, self.seconds) == (other.days, other.seconds)\n\n    def __ne__(self, other) -> bool:\n        if not isinstance(other, timedelta):\n            return NotImplemented\n        return (self.days, self.seconds) != (other.days, other.seconds)\n\n\nclass date:\n    def __init__(self, year: int, month: int, day: int):\n        self.year = year\n        self.month = month\n        self.day = day\n\n    @staticmethod\n    def today():\n        t = localtime()\n        return date(t.tm_year, t.tm_mon, t.tm_mday)\n    \n    def __cmp(self, other, op):\n        if not isinstance(other, date):\n            return NotImplemented\n        if self.year != other.year:\n            return op(self.year, other.year)\n        if self.month != other.month:\n            return op(self.month, other.month)\n        return op(self.day, other.day)\n\n    def __eq__(self, other) -> bool:\n        return self.__cmp(other, operator.eq)\n    \n    def __ne__(self, other) -> bool:\n        return self.__cmp(other, operator.ne)\n\n    def __lt__(self, other: 'date') -> bool:\n        return self.__cmp(other, operator.lt)\n\n    def __le__(self, other: 'date') -> bool:\n        return self.__cmp(other, operator.le)\n\n    def __gt__(self, other: 'date') -> bool:\n        return self.__cmp(other, operator.gt)\n\n    def __ge__(self, other: 'date') -> bool:\n        return self.__cmp(other, operator.ge)\n\n    def __str__(self):\n        return f\"{self.year}-{self.month:02}-{self.day:02}\"\n\n    def __repr__(self):\n        return f\"datetime.date({self.year}, {self.month}, {self.day})\"\n\n\nclass datetime(date):\n    def __init__(self, year: int, month: int, day: int, hour: int, minute: int, second: int):\n        super().__init__(year, month, day)\n        # Validate and set hour, minute, and second\n        if not 0 <= hour <= 23:\n            raise ValueError(\"Hour must be between 0 and 23\")\n        self.hour = hour\n        if not 0 <= minute <= 59:\n            raise ValueError(\"Minute must be between 0 and 59\")\n        self.minute = minute\n        if not 0 <= second <= 59:\n            raise ValueError(\"Second must be between 0 and 59\")\n        self.second = second\n\n    def date(self) -> date:\n        return date(self.year, self.month, self.day)\n\n    @staticmethod\n    def now():\n        t = localtime()\n        tm_sec = t.tm_sec\n        if tm_sec == 60:\n            tm_sec = 59\n        return datetime(t.tm_year, t.tm_mon, t.tm_mday, t.tm_hour, t.tm_min, tm_sec)\n\n    def __str__(self):\n        return f\"{self.year}-{self.month:02}-{self.day:02} {self.hour:02}:{self.minute:02}:{self.second:02}\"\n\n    def __repr__(self):\n        return f\"datetime.datetime({self.year}, {self.month}, {self.day}, {self.hour}, {self.minute}, {self.second})\"\n\n    def __cmp(self, other, op):\n        if not isinstance(other, datetime):\n            return NotImplemented\n        if self.year != other.year:\n            return op(self.year, other.year)\n        if self.month != other.month:\n            return op(self.month, other.month)\n        if self.day != other.day:\n            return op(self.day, other.day)\n        if self.hour != other.hour:\n            return op(self.hour, other.hour)\n        if self.minute != other.minute:\n            return op(self.minute, other.minute)\n        return op(self.second, other.second)\n\n    def __eq__(self, other) -> bool:\n        return self.__cmp(other, operator.eq)\n    \n    def __ne__(self, other) -> bool:\n        return self.__cmp(other, operator.ne)\n    \n    def __lt__(self, other) -> bool:\n        return self.__cmp(other, operator.lt)\n    \n    def __le__(self, other) -> bool:\n        return self.__cmp(other, operator.le)\n    \n    def __gt__(self, other) -> bool:\n        return self.__cmp(other, operator.gt)\n    \n    def __ge__(self, other) -> bool:\n        return self.__cmp(other, operator.ge)\n\n\n";
 const char kPythonLibs_functools[] = "class cache:\n    def __init__(self, f):\n        self.f = f\n        self.cache = {}\n\n    def __call__(self, *args):\n        if args not in self.cache:\n            self.cache[args] = self.f(*args)\n        return self.cache[args]\n    \nclass lru_cache:\n    def __init__(self, maxsize=128):\n        self.maxsize = maxsize\n        self.cache = {}\n\n    def __call__(self, f):\n        def wrapped(*args):\n            if args in self.cache:\n                res = self.cache.pop(args)\n                self.cache[args] = res\n                return res\n            \n            res = f(*args)\n            if len(self.cache) >= self.maxsize:\n                first_key = next(iter(self.cache))\n                self.cache.pop(first_key)\n            self.cache[args] = res\n            return res\n        return wrapped\n    \ndef reduce(function, sequence, initial=...):\n    it = iter(sequence)\n    if initial is ...:\n        try:\n            value = next(it)\n        except StopIteration:\n            raise TypeError(\"reduce() of empty sequence with no initial value\")\n    else:\n        value = initial\n    for element in it:\n        value = function(value, element)\n    return value\n\nclass partial:\n    def __init__(self, f, *args, **kwargs):\n        self.f = f\n        if not callable(f):\n            raise TypeError(\"the first argument must be callable\")\n        self.args = args\n        self.kwargs = kwargs\n\n    def __call__(self, *args, **kwargs):\n        kwargs.update(self.kwargs)\n        return self.f(*self.args, *args, **kwargs)\n\n";
 const char kPythonLibs_heapq[] = "# Heap queue algorithm (a.k.a. priority queue)\ndef heappush(heap, item):\n    \"\"\"Push item onto heap, maintaining the heap invariant.\"\"\"\n    heap.append(item)\n    _siftdown(heap, 0, len(heap)-1)\n\ndef heappop(heap):\n    \"\"\"Pop the smallest item off the heap, maintaining the heap invariant.\"\"\"\n    lastelt = heap.pop()    # raises appropriate IndexError if heap is empty\n    if heap:\n        returnitem = heap[0]\n        heap[0] = lastelt\n        _siftup(heap, 0)\n        return returnitem\n    return lastelt\n\ndef heapreplace(heap, item):\n    \"\"\"Pop and return the current smallest value, and add the new item.\n\n    This is more efficient than heappop() followed by heappush(), and can be\n    more appropriate when using a fixed-size heap.  Note that the value\n    returned may be larger than item!  That constrains reasonable uses of\n    this routine unless written as part of a conditional replacement:\n\n        if item > heap[0]:\n            item = heapreplace(heap, item)\n    \"\"\"\n    returnitem = heap[0]    # raises appropriate IndexError if heap is empty\n    heap[0] = item\n    _siftup(heap, 0)\n    return returnitem\n\ndef heappushpop(heap, item):\n    \"\"\"Fast version of a heappush followed by a heappop.\"\"\"\n    if heap and heap[0] < item:\n        item, heap[0] = heap[0], item\n        _siftup(heap, 0)\n    return item\n\ndef heapify(x):\n    \"\"\"Transform list into a heap, in-place, in O(len(x)) time.\"\"\"\n    n = len(x)\n    # Transform bottom-up.  The largest index there's any point to looking at\n    # is the largest with a child index in-range, so must have 2*i + 1 < n,\n    # or i < (n-1)/2.  If n is even = 2*j, this is (2*j-1)/2 = j-1/2 so\n    # j-1 is the largest, which is n//2 - 1.  If n is odd = 2*j+1, this is\n    # (2*j+1-1)/2 = j so j-1 is the largest, and that's again n//2-1.\n    for i in reversed(range(n//2)):\n        _siftup(x, i)\n\n# 'heap' is a heap at all indices >= startpos, except possibly for pos.  pos\n# is the index of a leaf with a possibly out-of-order value.  Restore the\n# heap invariant.\ndef _siftdown(heap, startpos, pos):\n    newitem = heap[pos]\n    # Follow the path to the root, moving parents down until finding a place\n    # newitem fits.\n    while pos > startpos:\n        parentpos = (pos - 1) >> 1\n        parent = heap[parentpos]\n        if newitem < parent:\n            heap[pos] = parent\n            pos = parentpos\n            continue\n        break\n    heap[pos] = newitem\n\ndef _siftup(heap, pos):\n    endpos = len(heap)\n    startpos = pos\n    newitem = heap[pos]\n    # Bubble up the smaller child until hitting a leaf.\n    childpos = 2*pos + 1    # leftmost child position\n    while childpos < endpos:\n        # Set childpos to index of smaller child.\n        rightpos = childpos + 1\n        if rightpos < endpos and not heap[childpos] < heap[rightpos]:\n            childpos = rightpos\n        # Move the smaller child up.\n        heap[pos] = heap[childpos]\n        pos = childpos\n        childpos = 2*pos + 1\n    # The leaf at pos is empty now.  Put newitem there, and bubble it up\n    # to its final resting place (by sifting its parents down).\n    heap[pos] = newitem\n    _siftdown(heap, startpos, pos)";
 const char kPythonLibs_linalg[] = "from vmath import *";
 const char kPythonLibs_operator[] = "# https://docs.python.org/3/library/operator.html#mapping-operators-to-functions\n\ndef le(a, b): return a <= b\ndef lt(a, b): return a < b\ndef ge(a, b): return a >= b\ndef gt(a, b): return a > b\ndef eq(a, b): return a == b\ndef ne(a, b): return a != b\n\ndef and_(a, b): return a & b\ndef or_(a, b): return a | b\ndef xor(a, b): return a ^ b\ndef invert(a): return ~a\ndef lshift(a, b): return a << b\ndef rshift(a, b): return a >> b\n\ndef is_(a, b): return a is b\ndef is_not(a, b): return a is not b\ndef not_(a): return not a\ndef truth(a): return bool(a)\ndef contains(a, b): return b in a\n\ndef add(a, b): return a + b\ndef sub(a, b): return a - b\ndef mul(a, b): return a * b\ndef truediv(a, b): return a / b\ndef floordiv(a, b): return a // b\ndef mod(a, b): return a % b\ndef pow(a, b): return a ** b\ndef neg(a): return -a\ndef matmul(a, b): return a @ b\n\ndef getitem(a, b): return a[b]\ndef setitem(a, b, c): a[b] = c\ndef delitem(a, b): del a[b]\n\ndef iadd(a, b): a += b; return a\ndef isub(a, b): a -= b; return a\ndef imul(a, b): a *= b; return a\ndef itruediv(a, b): a /= b; return a\ndef ifloordiv(a, b): a //= b; return a\ndef imod(a, b): a %= b; return a\n# def ipow(a, b): a **= b; return a\n# def imatmul(a, b): a @= b; return a\ndef iand(a, b): a &= b; return a\ndef ior(a, b): a |= b; return a\ndef ixor(a, b): a ^= b; return a\ndef ilshift(a, b): a <<= b; return a\ndef irshift(a, b): a >>= b; return a\n";
-const char kPythonLibs_typing[] = "class _Placeholder:\n    def __init__(self, *args, **kwargs):\n        pass\n    def __getitem__(self, *args):\n        return self\n    def __call__(self, *args, **kwargs):\n        return self\n    def __and__(self, other):\n        return self\n    def __or__(self, other):\n        return self\n    def __xor__(self, other):\n        return self\n\n\n_PLACEHOLDER = _Placeholder()\n\nSequence = _PLACEHOLDER\nList = _PLACEHOLDER\nDict = _PLACEHOLDER\nTuple = _PLACEHOLDER\nSet = _PLACEHOLDER\nAny = _PLACEHOLDER\nUnion = _PLACEHOLDER\nOptional = _PLACEHOLDER\nCallable = _PLACEHOLDER\nType = _PLACEHOLDER\nTypeAlias = _PLACEHOLDER\nNewType = _PLACEHOLDER\n\nLiteral = _PLACEHOLDER\nLiteralString = _PLACEHOLDER\n\nIterable = _PLACEHOLDER\nGenerator = _PLACEHOLDER\nIterator = _PLACEHOLDER\n\nHashable = _PLACEHOLDER\n\nTypeVar = _PLACEHOLDER\nSelf = _PLACEHOLDER\n\nProtocol = object\nGeneric = object\nNever = object\n\nTYPE_CHECKING = False\n\n# decorators\noverload = lambda x: x\nfinal = lambda x: x\n\n# exhaustiveness checking\nassert_never = lambda x: x\n";
+const char kPythonLibs_typing[] = "class _Placeholder:\n    def __init__(self, *args, **kwargs):\n        pass\n    def __getitem__(self, *args):\n        return self\n    def __call__(self, *args, **kwargs):\n        return self\n    def __and__(self, other):\n        return self\n    def __or__(self, other):\n        return self\n    def __xor__(self, other):\n        return self\n\n\n_PLACEHOLDER = _Placeholder()\n\nSequence = _PLACEHOLDER\nList = _PLACEHOLDER\nDict = _PLACEHOLDER\nTuple = _PLACEHOLDER\nSet = _PLACEHOLDER\nAny = _PLACEHOLDER\nUnion = _PLACEHOLDER\nOptional = _PLACEHOLDER\nCallable = _PLACEHOLDER\nType = _PLACEHOLDER\nTypeAlias = _PLACEHOLDER\nNewType = _PLACEHOLDER\n\nLiteral = _PLACEHOLDER\nLiteralString = _PLACEHOLDER\n\nIterable = _PLACEHOLDER\nGenerator = _PLACEHOLDER\nIterator = _PLACEHOLDER\n\nHashable = _PLACEHOLDER\n\nTypeVar = _PLACEHOLDER\nSelf = _PLACEHOLDER\n\nProtocol = object\nGeneric = object\nNever = object\n\nTYPE_CHECKING = False\n\n# decorators\noverload = lambda x: x\nfinal = lambda x: x\n\n# exhaustiveness checking\nassert_never = lambda x: x\n\nTypedDict = dict\nNotRequired = _PLACEHOLDER\n";
 
 const char* load_kPythonLib(const char* name) {
     if (strchr(name, '.') != NULL) return NULL;
@@ -9059,56 +8852,12 @@ void c11_thrd_yield() { thrd_yield(); }
 #endif
 
 #endif  // PK_ENABLE_THREADS
-// src/public/values.c
-void py_newint(py_OutRef out, py_i64 val) {
-    out->type = tp_int;
-    out->is_ptr = false;
-    out->_i64 = val;
-}
-
-void py_newtrivial(py_OutRef out, py_Type type, void* data, int size) {
-    out->type = type;
-    out->is_ptr = false;
-    assert(size <= 16);
-    memcpy(&out->_chars, data, size);
-}
-
-void py_newfloat(py_OutRef out, py_f64 val) {
-    out->type = tp_float;
-    out->is_ptr = false;
-    out->_f64 = val;
-}
-
-void py_newbool(py_OutRef out, bool val) {
-    out->type = tp_bool;
-    out->is_ptr = false;
-    out->_bool = val;
-}
-
-void py_newnone(py_OutRef out) {
-    out->type = tp_NoneType;
-    out->is_ptr = false;
-}
-
-void py_newnotimplemented(py_OutRef out) {
-    out->type = tp_NotImplementedType;
-    out->is_ptr = false;
-}
-
-void py_newellipsis(py_OutRef out) {
-    out->type = tp_ellipsis;
-    out->is_ptr = false;
-}
-
-void py_newnil(py_OutRef out) {
-    out->type = tp_nil;
-    out->is_ptr = false;
-}
-
-void py_newnativefunc(py_OutRef out, py_CFunction f) {
-    out->type = tp_nativefunc;
-    out->is_ptr = false;
-    out->_cfunc = f;
+// src/public/Bindings.c
+void py_bind(py_Ref obj, const char* sig, py_CFunction f) {
+    py_Ref tmp = py_pushtmp();
+    py_Name name = py_newfunction(tmp, sig, f, NULL, 0);
+    py_setdict(obj, name, tmp);
+    py_pop();
 }
 
 void py_bindmethod(py_Type type, const char* name, py_CFunction f) {
@@ -9151,13 +8900,6 @@ void py_bindmagic(py_Type type, py_Name name, py_CFunction f) {
     py_newnativefunc(tmp, f);
 }
 
-void py_bind(py_Ref obj, const char* sig, py_CFunction f) {
-    py_Ref tmp = py_pushtmp();
-    py_Name name = py_newfunction(tmp, sig, f, NULL, 0);
-    py_setdict(obj, name, tmp);
-    py_pop();
-}
-
 void py_macrobind(const char* sig, py_CFunction f) {
     py_Ref tmp = py_pushtmp();
     py_Name name = py_newfunction(tmp, sig, f, NULL, 0);
@@ -9169,6 +8911,259 @@ py_ItemRef py_macroget(py_Name name) {
     NameDict* d = &pk_current_vm->compile_time_funcs;
     if(d->length == 0) return NULL;
     return NameDict__try_get(d, name);
+}
+
+// src/public/FrameOps.c
+const char* py_Frame_sourceloc(py_Frame* self, int* lineno) {
+    SourceLocation loc = Frame__source_location(self);
+    *lineno = loc.lineno;
+    return loc.src->filename->data;
+}
+
+void py_Frame_newglobals(py_Frame* frame, py_OutRef out) {
+    if(!frame) {
+        pk_mappingproxy__namedict(out, pk_current_vm->main);
+        return;
+    }
+    if(frame->globals->type == tp_module) {
+        pk_mappingproxy__namedict(out, frame->globals);
+    } else {
+        *out = *frame->globals;  // dict
+    }
+}
+
+void py_Frame_newlocals(py_Frame* frame, py_OutRef out) {
+    if(!frame) {
+        py_newdict(out);
+        return;
+    }
+    if(frame->is_locals_special) {
+        switch(frame->locals->type) {
+            case tp_locals: frame = frame->locals->_ptr; break;
+            case tp_dict: *out = *frame->locals; return;
+            case tp_nil: py_newdict(out); return;
+            default: c11__unreachable();
+        }
+    }
+    FastLocals__to_dict(frame->locals, frame->co);
+    py_assign(out, py_retval());
+}
+
+py_StackRef py_Frame_function(py_Frame* self) {
+    if(self->is_locals_special) return NULL;
+    assert(self->p0->type == tp_function);
+    return self->p0;
+}
+
+// src/public/PySlice.c
+py_ObjectRef py_newslice(py_OutRef out) {
+    VM* vm = pk_current_vm;
+    PyObject* obj = ManagedHeap__gcnew(&vm->heap, tp_slice, 3, 0);
+    out->type = tp_slice;
+    out->is_ptr = true;
+    out->_obj = obj;
+    return PyObject__slots(obj);
+}
+
+void py_newsliceint(py_OutRef out, py_i64 start, py_i64 stop, py_i64 step) {
+    py_Ref slots = py_newslice(out);
+    py_newint(&slots[0], start);
+    py_newint(&slots[1], stop);
+    py_newint(&slots[2], step);
+}
+
+static bool slice__new__(int argc, py_Ref argv) {
+    PY_CHECK_ARGC(1 + 3);
+    py_Ref slice = py_retval();
+    py_newslice(slice);
+    py_setslot(slice, 0, py_arg(1));
+    py_setslot(slice, 1, py_arg(2));
+    py_setslot(slice, 2, py_arg(3));
+    return true;
+}
+
+static bool slice__repr__(int argc, py_Ref argv) {
+    c11_sbuf buf;
+    c11_sbuf__ctor(&buf);
+    c11_sbuf__write_cstr(&buf, "slice(");
+    for(int i = 0; i < 3; i++) {
+        py_TValue* val = py_getslot(argv, i);
+        bool ok = py_repr(val);
+        if(!ok) {
+            c11_sbuf__dtor(&buf);
+            return false;
+        }
+        c11_sbuf__write_sv(&buf, py_tosv(py_retval()));
+        if(i != 2) c11_sbuf__write_cstr(&buf, ", ");
+    }
+    c11_sbuf__write_char(&buf, ')');
+    c11_sbuf__py_submit(&buf, py_retval());
+    return true;
+}
+
+static bool slice_start(int argc, py_Ref argv) {
+    py_Ref self = py_arg(0);
+    py_TValue* val = py_getslot(self, 0);
+    py_assign(py_retval(), val);
+    return true;
+}
+
+static bool slice_stop(int argc, py_Ref argv) {
+    py_Ref self = py_arg(0);
+    py_TValue* val = py_getslot(self, 1);
+    py_assign(py_retval(), val);
+    return true;
+}
+
+static bool slice_step(int argc, py_Ref argv) {
+    py_Ref self = py_arg(0);
+    py_TValue* val = py_getslot(self, 2);
+    py_assign(py_retval(), val);
+    return true;
+}
+
+static bool slice__eq__(int argc, py_Ref argv) {
+    py_Ref self = py_arg(0);
+    py_Ref other = py_arg(1);
+    if(!py_istype(other, tp_slice)) {
+        py_newnotimplemented(py_retval());
+        return true;
+    }
+    for(int i = 0; i < 3; i++) {
+        py_Ref lhs = py_getslot(self, i);
+        py_Ref rhs = py_getslot(other, i);
+        int res = py_equal(lhs, rhs);
+        if(res == -1) return false;
+        if(res == 0) {
+            py_newbool(py_retval(), false);
+            return true;
+        }
+    }
+    py_newbool(py_retval(), true);
+    return true;
+}
+
+static bool slice__ne__(int argc, py_Ref argv) {
+    bool ok = slice__eq__(argc, argv);
+    if(!ok) return false;
+    py_Ref res = py_retval();
+    if(py_isbool(res)) py_newbool(py_retval(), !py_tobool(res));
+    return true;
+}
+
+py_Type pk_slice__register() {
+    py_Type type = pk_newtype("slice", tp_object, NULL, NULL, false, true);
+
+    py_bindmagic(type, __new__, slice__new__);
+    py_bindmagic(type, __repr__, slice__repr__);
+    py_bindmagic(type, __eq__, slice__eq__);
+    py_bindmagic(type, __ne__, slice__ne__);
+
+    py_setdict(py_tpobject(type), __hash__, py_None());
+
+    py_bindproperty(type, "start", slice_start, NULL);
+    py_bindproperty(type, "stop", slice_stop, NULL);
+    py_bindproperty(type, "step", slice_step, NULL);
+    return type;
+}
+// src/public/ValueCreation.c
+void py_newint(py_OutRef out, py_i64 val) {
+    out->type = tp_int;
+    out->is_ptr = false;
+    out->_i64 = val;
+}
+
+void py_newtrivial(py_OutRef out, py_Type type, void* data, int size) {
+    out->type = type;
+    out->is_ptr = false;
+    assert(size <= 16);
+    memcpy(&out->_chars, data, size);
+}
+
+void py_newfloat(py_OutRef out, py_f64 val) {
+    out->type = tp_float;
+    out->is_ptr = false;
+    out->_f64 = val;
+}
+
+void py_newbool(py_OutRef out, bool val) {
+    out->type = tp_bool;
+    out->is_ptr = false;
+    out->_bool = val;
+}
+
+void py_newstr(py_OutRef out, const char* data) { py_newstrv(out, (c11_sv){data, strlen(data)}); }
+
+char* py_newstrn(py_OutRef out, int size) {
+    if(size < 16) {
+        out->type = tp_str;
+        out->is_ptr = false;
+        c11_string* ud = (c11_string*)(&out->extra);
+        c11_string__ctor3(ud, size);
+        return ud->data;
+    }
+    ManagedHeap* heap = &pk_current_vm->heap;
+    int total_size = sizeof(c11_string) + size + 1;
+    PyObject* obj = ManagedHeap__gcnew(heap, tp_str, 0, total_size);
+    c11_string* ud = PyObject__userdata(obj);
+    c11_string__ctor3(ud, size);
+    out->type = tp_str;
+    out->is_ptr = true;
+    out->_obj = obj;
+    return ud->data;
+}
+
+void py_newstrv(py_OutRef out, c11_sv sv) {
+    char* data = py_newstrn(out, sv.size);
+    memcpy(data, sv.data, sv.size);
+}
+
+void py_newfstr(py_OutRef out, const char* fmt, ...) {
+    c11_sbuf buf;
+    c11_sbuf__ctor(&buf);
+    va_list args;
+    va_start(args, fmt);
+    pk_vsprintf(&buf, fmt, args);
+    va_end(args);
+    c11_sbuf__py_submit(&buf, out);
+}
+
+unsigned char* py_newbytes(py_OutRef out, int size) {
+    ManagedHeap* heap = &pk_current_vm->heap;
+    // 4 bytes size + data
+    PyObject* obj = ManagedHeap__gcnew(heap, tp_bytes, 0, sizeof(c11_bytes) + size);
+    c11_bytes* ud = PyObject__userdata(obj);
+    ud->size = size;
+    out->type = tp_bytes;
+    out->is_ptr = true;
+    out->_obj = obj;
+    return ud->data;
+}
+
+void py_newnone(py_OutRef out) {
+    out->type = tp_NoneType;
+    out->is_ptr = false;
+}
+
+void py_newnotimplemented(py_OutRef out) {
+    out->type = tp_NotImplementedType;
+    out->is_ptr = false;
+}
+
+void py_newellipsis(py_OutRef out) {
+    out->type = tp_ellipsis;
+    out->is_ptr = false;
+}
+
+void py_newnil(py_OutRef out) {
+    out->type = tp_nil;
+    out->is_ptr = false;
+}
+
+void py_newnativefunc(py_OutRef out, py_CFunction f) {
+    out->type = tp_nativefunc;
+    out->is_ptr = false;
+    out->_cfunc = f;
 }
 
 py_Name py_newfunction(py_OutRef out,
@@ -9218,13 +9213,543 @@ void* py_newobject(py_OutRef out, py_Type type, int slots, int udsize) {
     return PyObject__userdata(obj);
 }
 
-// src/public/modules.c
-#include <ctype.h>
-#include <math.h>
+// src/public/TypeSystem.c
+py_Type py_newtype(const char* name, py_Type base, const py_GlobalRef module, void (*dtor)(void*)) {
+    if(strlen(name) == 0) c11__abort("type name cannot be empty");
+    py_Type type = pk_newtype(name, base, module, dtor, false, false);
+    if(module) py_setdict(module, py_name(name), py_tpobject(type));
+    return type;
+}
 
-py_Ref py_getmodule(const char* path) {
+PK_INLINE bool py_istype(py_Ref self, py_Type type) { return self->type == type; }
+
+PK_INLINE py_Type py_typeof(py_Ref self) { return self->type; }
+
+bool py_isinstance(py_Ref obj, py_Type type) { return py_issubclass(obj->type, type); }
+
+bool py_issubclass(py_Type derived, py_Type base) {
+    assert(derived != 0 && base != 0);
+    py_TypeInfo* derived_ti = pk_typeinfo(derived);
+    py_TypeInfo* base_ti = pk_typeinfo(base);
+    do {
+        if(derived_ti == base_ti) return true;
+        derived_ti = derived_ti->base_ti;
+    } while(derived_ti);
+    return false;
+}
+
+py_Type py_gettype(const char* module, py_Name name) {
+    py_Ref mod;
+    if(module != NULL) {
+        mod = py_getmodule(module);
+        if(!mod) return tp_nil;
+    } else {
+        mod = pk_current_vm->builtins;
+    }
+    py_Ref object = py_getdict(mod, name);
+    if(object && py_istype(object, tp_type)) return py_totype(object);
+    return tp_nil;
+}
+
+bool py_checktype(py_Ref self, py_Type type) {
+    if(self->type == type) return true;
+    return TypeError("expected '%t', got '%t'", type, self->type);
+}
+
+bool py_checkinstance(py_Ref self, py_Type type) {
+    if(py_isinstance(self, type)) return true;
+    return TypeError("expected '%t' or its subclass, got '%t'", type, self->type);
+}
+
+PK_DEPRECATED py_Ref py_tpgetmagic(py_Type type, py_Name name) {
+    // assert(py_ismagicname(name));
+    py_TypeInfo* ti = pk_typeinfo(type);
+    py_Ref retval = py_getdict(&ti->self, name);
+    return retval != NULL ? retval : py_NIL();
+}
+
+PK_INLINE py_Ref py_tpfindmagic(py_Type t, py_Name name) {
+    // assert(py_ismagicname(name));
+    return py_tpfindname(t, name);
+}
+
+PK_INLINE py_ItemRef py_tpfindname(py_Type type, py_Name name) {
+    py_TypeInfo* ti = pk_typeinfo(type);
+    return pk_tpfindname(ti, name);
+}
+
+PK_INLINE py_Type py_tpbase(py_Type t) {
+    assert(t);
+    py_TypeInfo* ti = pk_typeinfo(t);
+    return ti->base;
+}
+
+py_Ref py_tpobject(py_Type type) {
+    assert(type);
+    return &pk_typeinfo(type)->self;
+}
+
+const char* py_tpname(py_Type type) {
+    if(!type) return "nil";
+    py_Name name = pk_typeinfo(type)->name;
+    return py_name2str(name);
+}
+
+void py_tpsetfinal(py_Type type) {
+    assert(type);
+    py_TypeInfo* ti = pk_typeinfo(type);
+    ti->is_final = true;
+}
+
+void py_tphookattributes(py_Type type,
+                         bool (*getattribute)(py_Ref self, py_Name name),
+                         bool (*setattribute)(py_Ref self, py_Name name, py_Ref val),
+                         bool (*delattribute)(py_Ref self, py_Name name),
+                         bool (*getunboundmethod)(py_Ref self, py_Name name)) {
+    assert(type);
+    py_TypeInfo* ti = pk_typeinfo(type);
+    ti->getattribute = getattribute;
+    ti->setattribute = setattribute;
+    ti->delattribute = delattribute;
+    ti->getunboundmethod = getunboundmethod;
+}
+
+// src/public/Inspection.c
+py_StackRef py_inspect_currentfunction() {
     VM* vm = pk_current_vm;
-    return BinTree__try_get(&vm->modules, (void*)path);
+    if(vm->curr_decl_based_function) return vm->curr_decl_based_function;
+    py_Frame* frame = vm->top_frame;
+    if(!frame || frame->is_locals_special) return NULL;
+    return frame->p0;
+}
+
+py_GlobalRef py_inspect_currentmodule() {
+    py_Frame* frame = pk_current_vm->top_frame;
+    if(!frame) return NULL;
+    return frame->module;
+}
+
+py_Frame* py_inspect_currentframe() { return pk_current_vm->top_frame; }
+
+void py_newglobals(py_OutRef out) {
+    py_Frame* frame = pk_current_vm->top_frame;
+    py_Frame_newglobals(frame, out);
+}
+
+void py_newlocals(py_OutRef out) {
+    py_Frame* frame = pk_current_vm->top_frame;
+    py_Frame_newlocals(frame, out);
+}
+
+// src/public/PythonOps.c
+bool py_binaryadd(py_Ref lhs, py_Ref rhs) { return py_binaryop(lhs, rhs, __add__, __radd__); }
+
+bool py_binarysub(py_Ref lhs, py_Ref rhs) { return py_binaryop(lhs, rhs, __sub__, __rsub__); }
+
+bool py_binarymul(py_Ref lhs, py_Ref rhs) { return py_binaryop(lhs, rhs, __mul__, __rmul__); }
+
+bool py_binarytruediv(py_Ref lhs, py_Ref rhs) {
+    return py_binaryop(lhs, rhs, __truediv__, __rtruediv__);
+}
+
+bool py_binaryfloordiv(py_Ref lhs, py_Ref rhs) {
+    return py_binaryop(lhs, rhs, __floordiv__, __rfloordiv__);
+}
+
+bool py_binarymod(py_Ref lhs, py_Ref rhs) { return py_binaryop(lhs, rhs, __mod__, __rmod__); }
+
+bool py_binarypow(py_Ref lhs, py_Ref rhs) { return py_binaryop(lhs, rhs, __pow__, __rpow__); }
+
+bool py_binarylshift(py_Ref lhs, py_Ref rhs) { return py_binaryop(lhs, rhs, __lshift__, 0); }
+
+bool py_binaryrshift(py_Ref lhs, py_Ref rhs) { return py_binaryop(lhs, rhs, __rshift__, 0); }
+
+bool py_binaryand(py_Ref lhs, py_Ref rhs) { return py_binaryop(lhs, rhs, __and__, 0); }
+
+bool py_binaryor(py_Ref lhs, py_Ref rhs) { return py_binaryop(lhs, rhs, __or__, 0); }
+
+bool py_binaryxor(py_Ref lhs, py_Ref rhs) { return py_binaryop(lhs, rhs, __xor__, 0); }
+
+bool py_binarymatmul(py_Ref lhs, py_Ref rhs) { return py_binaryop(lhs, rhs, __matmul__, 0); }
+
+bool py_eq(py_Ref lhs, py_Ref rhs) { return py_binaryop(lhs, rhs, __eq__, __eq__); }
+
+bool py_ne(py_Ref lhs, py_Ref rhs) { return py_binaryop(lhs, rhs, __ne__, __ne__); }
+
+bool py_lt(py_Ref lhs, py_Ref rhs) { return py_binaryop(lhs, rhs, __lt__, __gt__); }
+
+bool py_le(py_Ref lhs, py_Ref rhs) { return py_binaryop(lhs, rhs, __le__, __ge__); }
+
+bool py_gt(py_Ref lhs, py_Ref rhs) { return py_binaryop(lhs, rhs, __gt__, __lt__); }
+
+bool py_ge(py_Ref lhs, py_Ref rhs) { return py_binaryop(lhs, rhs, __ge__, __le__); }
+
+bool py_isidentical(py_Ref lhs, py_Ref rhs) {
+    if(lhs->type != rhs->type) return false;
+    switch(lhs->type) {
+        case tp_int: return lhs->_i64 == rhs->_i64;
+        case tp_float: return lhs->_f64 == rhs->_f64;
+        case tp_bool: return lhs->_bool == rhs->_bool;
+        case tp_str: {
+            if(lhs->is_ptr && rhs->is_ptr) {
+                return lhs->_obj == rhs->_obj;
+            } else {
+                return strcmp(lhs->_chars, rhs->_chars) == 0;
+            }
+        }
+        case tp_nativefunc: return lhs->_cfunc == rhs->_cfunc;
+        case tp_NoneType: return true;
+        case tp_NotImplementedType: return true;
+        case tp_ellipsis: return true;
+        // fallback to pointer comparison
+        default: return lhs->is_ptr && rhs->is_ptr && lhs->_obj == rhs->_obj;
+    }
+}
+
+int py_bool(py_Ref val) {
+    switch(val->type) {
+        case tp_bool: return val->_bool;
+        case tp_int: return val->_i64 != 0;
+        case tp_float: return val->_f64 != 0;
+        case tp_NoneType: return 0;
+        default: {
+            py_Ref tmp = py_tpfindmagic(val->type, __bool__);
+            if(tmp) {
+                if(!py_call(tmp, 1, val)) return -1;
+                if(!py_checkbool(py_retval())) return -1;
+                return py_tobool(py_retval());
+            } else {
+                tmp = py_tpfindmagic(val->type, __len__);
+                if(tmp) {
+                    if(!py_call(tmp, 1, val)) return -1;
+                    if(!py_checkint(py_retval())) return -1;
+                    return py_toint(py_retval());
+                } else {
+                    return 1;  // True
+                }
+            }
+        }
+    }
+}
+
+int py_equal(py_Ref lhs, py_Ref rhs) {
+    if(py_isidentical(lhs, rhs)) return 1;
+    if(!py_eq(lhs, rhs)) return -1;
+    return py_bool(py_retval());
+}
+
+int py_less(py_Ref lhs, py_Ref rhs) {
+    if(!py_lt(lhs, rhs)) return -1;
+    return py_bool(py_retval());
+}
+
+bool py_callable(py_Ref val) {
+    switch(val->type) {
+        case tp_nativefunc: return true;
+        case tp_function: return true;
+        case tp_type: return true;
+        case tp_boundmethod: return true;
+        case tp_staticmethod: return true;
+        case tp_classmethod: return true;
+        default: return py_tpfindmagic(val->type, __call__);
+    }
+}
+
+bool py_hash(py_Ref val, int64_t* out) {
+    py_TypeInfo* ti = pk_typeinfo(val->type);
+    do {
+        py_Ref slot_hash = py_getdict(&ti->self, __hash__);
+        if(slot_hash && py_isnone(slot_hash)) break;
+        py_Ref slot_eq = py_getdict(&ti->self, __eq__);
+        if(slot_eq) {
+            if(!slot_hash) break;
+            if(!py_call(slot_hash, 1, val)) return false;
+            if(!py_checkint(py_retval())) return false;
+            *out = py_toint(py_retval());
+            return true;
+        }
+        ti = ti->base_ti;
+    } while(ti);
+    return TypeError("unhashable type: '%t'", val->type);
+}
+
+bool py_iter(py_Ref val) {
+    py_Ref tmp = py_tpfindmagic(val->type, __iter__);
+    if(!tmp) return TypeError("'%t' object is not iterable", val->type);
+    return py_call(tmp, 1, val);
+}
+
+int py_next(py_Ref val) {
+    VM* vm = pk_current_vm;
+
+    switch(val->type) {
+        case tp_generator:
+            if(generator__next__(1, val)) return 1;
+            break;
+        case tp_array2d_like_iterator:
+            if(array2d_like_iterator__next__(1, val)) return 1;
+            break;
+        case tp_list_iterator:
+            if(list_iterator__next__(1, val)) return 1;
+            break;
+        case tp_tuple_iterator:
+            if(tuple_iterator__next__(1, val)) return 1;
+            break;
+        case tp_dict_iterator:
+            if(dict_items__next__(1, val)) return 1;
+            break;
+        case tp_range_iterator:
+            if(range_iterator__next__(1, val)) return 1;
+            break;
+        case tp_str_iterator:
+            if(str_iterator__next__(1, val)) return 1;
+            break;
+        default: {
+            py_Ref tmp = py_tpfindmagic(val->type, __next__);
+            if(!tmp) {
+                TypeError("'%t' object is not an iterator", val->type);
+                return -1;
+            }
+            if(py_call(tmp, 1, val)) return 1;
+            break;
+        }
+    }
+    if(vm->unhandled_exc.type == tp_StopIteration) {
+        vm->last_retval = vm->unhandled_exc;
+        py_clearexc(NULL);
+        return 0;
+    }
+    return -1;
+}
+
+bool py_str(py_Ref val) {
+    if(val->type == tp_str) {
+        py_assign(py_retval(), val);
+        return true;
+    }
+    py_Ref tmp = py_tpfindmagic(val->type, __str__);
+    if(!tmp) return py_repr(val);
+    return py_call(tmp, 1, val);
+}
+
+bool py_repr(py_Ref val) { return pk_callmagic(__repr__, 1, val); }
+
+bool py_len(py_Ref val) { return pk_callmagic(__len__, 1, val); }
+
+bool py_getattr(py_Ref self, py_Name name) {
+    // https://docs.python.org/3/howto/descriptor.html#invocation-from-an-instance
+    py_TypeInfo* ti = pk_typeinfo(self->type);
+    if(ti->getattribute) return ti->getattribute(self, name);
+
+    py_Ref cls_var = pk_tpfindname(ti, name);
+    if(cls_var) {
+        // handle descriptor
+        if(py_istype(cls_var, tp_property)) {
+            py_Ref getter = py_getslot(cls_var, 0);
+            return py_call(getter, 1, self);
+        }
+    }
+    // handle instance __dict__
+    if(self->is_ptr && self->_obj->slots == -1) {
+        if(!py_istype(self, tp_type)) {
+            py_Ref res = py_getdict(self, name);
+            if(res) {
+                py_assign(py_retval(), res);
+                return true;
+            }
+        } else {
+            // self is a type object
+            py_TypeInfo* inner_type = py_touserdata(self);
+            py_Ref res = pk_tpfindname(inner_type, name);
+            if(res) {
+                if(py_istype(res, tp_staticmethod)) {
+                    res = py_getslot(res, 0);
+                } else if(py_istype(res, tp_classmethod)) {
+                    res = py_getslot(res, 0);
+                    py_newboundmethod(py_retval(), self, res);
+                    return true;
+                }
+                py_assign(py_retval(), res);
+                return true;
+            }
+        }
+    }
+
+    if(cls_var) {
+        // bound method is non-data descriptor
+        switch(cls_var->type) {
+            case tp_function: {
+                if(name == __new__) goto __STATIC_NEW;
+                py_newboundmethod(py_retval(), self, cls_var);
+                return true;
+            }
+            case tp_nativefunc: {
+                if(name == __new__) goto __STATIC_NEW;
+                py_newboundmethod(py_retval(), self, cls_var);
+                return true;
+            }
+            case tp_staticmethod: {
+                py_assign(py_retval(), py_getslot(cls_var, 0));
+                return true;
+            }
+            case tp_classmethod: {
+                py_newboundmethod(py_retval(), &ti->self, py_getslot(cls_var, 0));
+                return true;
+            }
+            default: {
+            __STATIC_NEW:
+                py_assign(py_retval(), cls_var);
+                return true;
+            }
+        }
+    }
+
+    py_Ref fallback = pk_tpfindmagic(ti, __getattr__);
+    if(fallback) {
+        py_push(fallback);
+        py_push(self);
+        py_assign(py_pushtmp(), py_name2ref(name));
+        return py_vectorcall(1, 0);
+    }
+
+    if(self->type == tp_module) {
+        py_ModuleInfo* mi = py_touserdata(self);
+        c11_sbuf buf;
+        c11_sbuf__ctor(&buf);
+        pk_sprintf(&buf, "%v.%n", c11_string__sv(mi->path), name);
+        c11_string* new_path = c11_sbuf__submit(&buf);
+        int res = py_import(new_path->data);
+        c11_string__delete(new_path);
+        if(res == -1) {
+            return false;
+        } else if(res == 1) {
+            return true;
+        }
+    }
+
+    return AttributeError(self, name);
+}
+
+bool py_setattr(py_Ref self, py_Name name, py_Ref val) {
+    py_TypeInfo* ti = pk_typeinfo(self->type);
+    if(ti->setattribute) return ti->setattribute(self, name, val);
+
+    py_Ref cls_var = pk_tpfindname(ti, name);
+    if(cls_var) {
+        // handle descriptor
+        if(py_istype(cls_var, tp_property)) {
+            py_Ref setter = py_getslot(cls_var, 1);
+            if(!py_isnone(setter)) {
+                py_push(setter);
+                py_push(self);
+                py_push(val);
+                return py_vectorcall(1, 0);
+            } else {
+                return TypeError("readonly attribute: '%n'", name);
+            }
+        }
+    }
+
+    // handle instance __dict__
+    if(self->is_ptr && self->_obj->slots == -1) {
+        py_setdict(self, name, val);
+        return true;
+    }
+
+    return TypeError("cannot set attribute");
+}
+
+bool py_delattr(py_Ref self, py_Name name) {
+    py_TypeInfo* ti = pk_typeinfo(self->type);
+    if(ti->delattribute) return ti->delattribute(self, name);
+
+    if(self->is_ptr && self->_obj->slots == -1) {
+        if(py_deldict(self, name)) return true;
+        return AttributeError(self, name);
+    }
+    return TypeError("cannot delete attribute");
+}
+
+bool py_getitem(py_Ref self, py_Ref key) {
+    py_push(self);
+    py_push(key);
+    bool ok = pk_callmagic(__getitem__, 2, py_peek(-2));
+    py_shrink(2);
+    return ok;
+}
+
+bool py_setitem(py_Ref self, py_Ref key, py_Ref val) {
+    py_push(self);
+    py_push(key);
+    py_push(val);
+    bool ok = pk_callmagic(__setitem__, 3, py_peek(-3));
+    py_shrink(3);
+    return ok;
+}
+
+bool py_delitem(py_Ref self, py_Ref key) {
+    py_push(self);
+    py_push(key);
+    bool ok = pk_callmagic(__delitem__, 2, py_peek(-2));
+    py_shrink(2);
+    return ok;
+}
+
+// src/public/DictSlots.c
+py_Ref py_getreg(int i) { return pk_current_vm->reg + i; }
+
+void py_setreg(int i, py_Ref val) { pk_current_vm->reg[i] = *val; }
+
+PK_INLINE py_Ref py_retval() { return &pk_current_vm->last_retval; }
+
+PK_INLINE py_Ref py_getdict(py_Ref self, py_Name name) {
+    assert(self && self->is_ptr);
+    return NameDict__try_get(PyObject__dict(self->_obj), name);
+}
+
+PK_INLINE void py_setdict(py_Ref self, py_Name name, py_Ref val) {
+    assert(self && self->is_ptr);
+    NameDict__set(PyObject__dict(self->_obj), name, val);
+}
+
+bool py_deldict(py_Ref self, py_Name name) {
+    assert(self && self->is_ptr);
+    return NameDict__del(PyObject__dict(self->_obj), name);
+}
+
+py_ItemRef py_emplacedict(py_Ref self, py_Name name) {
+    py_setdict(self, name, py_NIL());
+    return py_getdict(self, name);
+}
+
+bool py_applydict(py_Ref self, bool (*f)(py_Name, py_Ref, void*), void* ctx) {
+    assert(self && self->is_ptr);
+    NameDict* dict = PyObject__dict(self->_obj);
+    for(int i = 0; i < dict->capacity; i++) {
+        NameDict_KV* kv = &dict->items[i];
+        if(kv->key == NULL) continue;
+        bool ok = f(kv->key, &kv->value, ctx);
+        if(!ok) return false;
+    }
+    return true;
+}
+
+void py_cleardict(py_Ref self) {
+    assert(self && self->is_ptr);
+    NameDict* dict = PyObject__dict(self->_obj);
+    NameDict__clear(dict);
+}
+
+py_Ref py_getslot(py_Ref self, int i) {
+    assert(self && self->is_ptr);
+    assert(i >= 0 && i < self->_obj->slots);
+    return PyObject__slots(self->_obj) + i;
+}
+
+void py_setslot(py_Ref self, int i, py_Ref val) {
+    assert(self && self->is_ptr);
+    assert(i >= 0 && i < self->_obj->slots);
+    PyObject__slots(self->_obj)[i] = *val;
 }
 
 py_Ref py_getbuiltin(py_Name name) { return py_getdict(pk_current_vm->builtins, name); }
@@ -9233,15 +9758,599 @@ py_Ref py_getglobal(py_Name name) { return py_getdict(pk_current_vm->main, name)
 
 void py_setglobal(py_Name name, py_Ref val) { py_setdict(pk_current_vm->main, name, val); }
 
-static void py_ModuleInfo__dtor(py_ModuleInfo* mi) {
-    c11_string__delete(mi->name);
-    c11_string__delete(mi->package);
-    c11_string__delete(mi->path);
+// src/public/PyException.c
+void py_BaseException__stpush(py_Frame* frame,
+                              py_Ref self,
+                              SourceData_ src,
+                              int lineno,
+                              const char* func_name) {
+    BaseException* ud = py_touserdata(self);
+    int max_frame_dumps = py_debugger_status() == 1 ? 31 : 7;
+    if(ud->stacktrace.length >= max_frame_dumps) return;
+    BaseExceptionFrame* frame_dump = c11_vector__emplace(&ud->stacktrace);
+    PK_INCREF(src);
+    frame_dump->src = src;
+    frame_dump->lineno = lineno;
+    frame_dump->name = func_name ? c11_string__new(func_name) : NULL;
+
+    if(py_debugger_status() == 1) {
+        if(frame != NULL) {
+            py_Frame_newlocals(frame, &frame_dump->locals);
+            py_Frame_newglobals(frame, &frame_dump->globals);
+        } else {
+            py_newdict(&frame_dump->locals);
+            py_newdict(&frame_dump->globals);
+        }
+    }
 }
 
-py_Type pk_module__register() {
-    py_Type type = pk_newtype("module", tp_object, NULL, (py_Dtor)py_ModuleInfo__dtor, false, true);
+static void BaseException__dtor(void* ud) {
+    BaseException* self = (BaseException*)ud;
+    c11__foreach(BaseExceptionFrame, &self->stacktrace, it) {
+        PK_DECREF(it->src);
+        if(it->name) c11_string__delete(it->name);
+    }
+    c11_vector__dtor(&self->stacktrace);
+}
+
+static bool _py_BaseException__new__(int argc, py_Ref argv) {
+    py_Type cls = py_totype(argv);
+    BaseException* ud = py_newobject(py_retval(), cls, 0, sizeof(BaseException));
+    py_newnil(&ud->args);
+    py_newnil(&ud->inner_exc);
+    c11_vector__ctor(&ud->stacktrace, sizeof(BaseExceptionFrame));
+    return true;
+}
+
+static bool _py_BaseException__init__(int argc, py_Ref argv) {
+    BaseException* ud = py_touserdata(argv);
+    py_newnone(py_retval());
+    if(argc == 1 + 0) return true;
+    if(argc == 1 + 1) {
+        py_assign(&ud->args, &argv[1]);
+        return true;
+    }
+    return TypeError("__init__() takes at most 1 arguments but %d were given", argc - 1);
+}
+
+static bool _py_BaseException__repr__(int argc, py_Ref argv) {
+    PY_CHECK_ARGC(1);
+    BaseException* ud = py_touserdata(argv);
+    c11_sbuf ss;
+    c11_sbuf__ctor(&ss);
+    pk_sprintf(&ss, "%t(", argv->type);
+    py_Ref args = &ud->args;
+    if(!py_isnil(args)) {
+        if(!py_repr(args)) return false;
+        c11_sbuf__write_sv(&ss, py_tosv(py_retval()));
+    }
+    c11_sbuf__write_char(&ss, ')');
+    c11_sbuf__py_submit(&ss, py_retval());
+    return true;
+}
+
+static bool _py_BaseException__str__(int argc, py_Ref argv) {
+    PY_CHECK_ARGC(1);
+    BaseException* ud = py_touserdata(argv);
+    c11_sbuf ss;
+    c11_sbuf__ctor(&ss);
+    py_Ref args = &ud->args;
+    if(!py_isnil(args)) {
+        if(argv->type == tp_KeyError) {
+            if(!py_repr(args)) return false;
+        } else {
+            if(!py_str(args)) return false;
+        }
+        c11_sbuf__write_sv(&ss, py_tosv(py_retval()));
+    }
+    c11_sbuf__py_submit(&ss, py_retval());
+    return true;
+}
+
+static bool BaseException_args(int argc, py_Ref argv) {
+    BaseException* ud = py_touserdata(argv);
+    PY_CHECK_ARGC(1);
+    py_Ref args = &ud->args;
+    if(!py_isnil(args)) {
+        py_Ref p = py_newtuple(py_retval(), 1);
+        p[0] = *args;
+    } else {
+        py_newtuple(py_retval(), 0);
+    }
+    return true;
+}
+
+static bool StopIteration_value(int argc, py_Ref argv) {
+    BaseException* ud = py_touserdata(argv);
+    PY_CHECK_ARGC(1);
+    py_Ref args = &ud->args;
+    if(py_isnil(args)) {
+        py_newnone(py_retval());
+    } else {
+        py_assign(py_retval(), args);
+    }
+    return true;
+}
+
+py_Type pk_BaseException__register() {
+    py_Type type = pk_newtype("BaseException", tp_object, NULL, BaseException__dtor, false, false);
+
+    py_bindmagic(type, __new__, _py_BaseException__new__);
+    py_bindmagic(type, __init__, _py_BaseException__init__);
+    py_bindmagic(type, __repr__, _py_BaseException__repr__);
+    py_bindmagic(type, __str__, _py_BaseException__str__);
+    py_bindproperty(type, "args", BaseException_args, NULL);
     return type;
+}
+
+py_Type pk_Exception__register() {
+    py_Type type = pk_newtype("Exception", tp_BaseException, NULL, NULL, false, false);
+    return type;
+}
+
+py_Type pk_StopIteration__register() {
+    py_Type type = pk_newtype("StopIteration", tp_Exception, NULL, NULL, false, false);
+    py_bindproperty(type, "value", StopIteration_value, NULL);
+    return type;
+}
+
+
+static void c11_sbuf__write_exc(c11_sbuf* self, py_Ref exc) {
+    c11_sbuf__write_cstr(self, "Traceback (most recent call last):\n");
+    BaseException* ud = py_touserdata(exc);
+
+    for(int i = ud->stacktrace.length - 1; i >= 0; i--) {
+        BaseExceptionFrame* frame = c11__at(BaseExceptionFrame, &ud->stacktrace, i);
+        SourceData__snapshot(frame->src,
+                             self,
+                             frame->lineno,
+                             NULL,
+                             frame->name ? frame->name->data : NULL);
+        c11_sbuf__write_char(self, '\n');
+    }
+
+    const char* name = py_tpname(exc->type);
+    char* message = safe_stringify_exception(exc);
+
+    c11_sbuf__write_cstr(self, name);
+    c11_sbuf__write_cstr(self, ": ");
+    c11_sbuf__write_cstr(self, message);
+
+    PK_FREE(message);
+}
+
+char* safe_stringify_exception(py_Ref exc) {
+    VM* vm = pk_current_vm;
+
+    const char* message = "<exception str() failed>";
+
+    py_Ref tmp = py_pushtmp();
+    py_Ref old_unhandled_exc = py_pushtmp();
+    *tmp = *exc;
+    *old_unhandled_exc = vm->unhandled_exc;
+    py_newnil(&vm->unhandled_exc);
+
+    py_StackRef p0 = py_peek(0);
+    bool ok = py_str(tmp);
+    if(ok) {
+        if(py_isstr(py_retval())) message = py_tostr(py_retval());
+    } else {
+        py_clearexc(p0);
+    }
+
+    vm->unhandled_exc = *old_unhandled_exc;
+    py_shrink(2);
+    return c11_strdup(message);
+}
+
+//////////////////////////////////////////////////
+bool py_checkexc() {
+    VM* vm = pk_current_vm;
+    return !py_isnil(&vm->unhandled_exc);
+}
+
+bool py_matchexc(py_Type type) {
+    VM* vm = pk_current_vm;
+    if(py_isnil(&vm->unhandled_exc)) return false;
+    bool ok = py_issubclass(vm->unhandled_exc.type, type);
+    if(ok) vm->last_retval = vm->unhandled_exc;
+    return ok;
+}
+
+void py_clearexc(py_StackRef p0) {
+    VM* vm = pk_current_vm;
+    py_newnil(&vm->unhandled_exc);
+    if(p0) {
+        c11__rtassert(p0 >= vm->stack.begin && p0 <= vm->stack.sp);
+        vm->stack.sp = p0;
+    }
+}
+
+void py_printexc() {
+    char* msg = py_formatexc();
+    if(!msg) return;
+    pk_current_vm->callbacks.print(msg);
+    pk_current_vm->callbacks.print("\n");
+    PK_FREE(msg);
+}
+
+char* py_formatexc() {
+    VM* vm = pk_current_vm;
+    if(py_isnil(&vm->unhandled_exc)) return NULL;
+    char* res = formatexc_internal(&vm->unhandled_exc);
+    if(py_debugger_status() == 1) py_debugger_exceptionbreakpoint(&vm->unhandled_exc);
+    return res;
+}
+
+char* formatexc_internal(py_Ref exc) {
+    c11__rtassert(exc != NULL);
+    c11__rtassert(py_issubclass(exc->type, tp_BaseException));
+
+    c11_sbuf ss;
+    c11_sbuf__ctor(&ss);
+
+    BaseException* ud = py_touserdata(exc);
+    py_Ref inner = &ud->inner_exc;
+    if(py_isnil(inner)) {
+        c11_sbuf__write_exc(&ss, exc);
+    } else {
+        c11_sbuf__write_exc(&ss, inner);
+        c11_sbuf__write_cstr(
+            &ss,
+            "\n\nDuring handling of the above exception, another exception occurred:\n\n");
+        c11_sbuf__write_exc(&ss, exc);
+    }
+
+    c11_string* res = c11_sbuf__submit(&ss);
+    char* dup = PK_MALLOC(res->size + 1);
+    memcpy(dup, res->data, res->size);
+    dup[res->size] = '\0';
+    c11_string__delete(res);
+    return dup;
+}
+
+bool py_exception(py_Type type, const char* fmt, ...) {
+#ifndef NDEBUG
+    if(py_checkexc()) {
+        const char* name = py_tpname(pk_current_vm->unhandled_exc.type);
+        c11__abort("py_exception(): `%s` was already set!", name);
+    }
+#endif
+
+    c11_sbuf buf;
+    c11_sbuf__ctor(&buf);
+    va_list args;
+    va_start(args, fmt);
+    pk_vsprintf(&buf, fmt, args);
+    va_end(args);
+
+    py_Ref message = py_pushtmp();
+    c11_sbuf__py_submit(&buf, message);
+
+    bool ok = py_tpcall(type, 1, message);
+    if(!ok) return false;
+    py_pop();
+
+    return py_raise(py_retval());
+}
+
+bool py_raise(py_Ref exc) {
+    assert(py_isinstance(exc, tp_BaseException));
+    VM* vm = pk_current_vm;
+    if(vm->top_frame) {
+        FrameExcInfo* info = Frame__top_exc_info(vm->top_frame);
+        if(info && !py_isnil(&info->exc)) {
+            BaseException* ud = py_touserdata(exc);
+            ud->inner_exc = info->exc;
+        }
+    }
+    assert(py_isnil(&vm->unhandled_exc));
+    vm->unhandled_exc = *exc;
+    return false;
+}
+
+bool KeyError(py_Ref key) {
+    bool ok = py_tpcall(tp_KeyError, 1, key);
+    if(!ok) return false;
+    return py_raise(py_retval());
+}
+
+bool StopIteration() {
+    bool ok = py_tpcall(tp_StopIteration, 0, NULL);
+    if(!ok) return false;
+    return py_raise(py_retval());
+}
+
+// src/public/GlobalSetup.c
+_Thread_local VM* pk_current_vm;
+
+static bool pk_initialized;
+static bool pk_finalized;
+
+static VM pk_default_vm;
+static VM* pk_all_vm[16];
+static py_TValue _True, _False, _None, _NIL;
+
+void py_initialize() {
+    c11__rtassert(!pk_finalized);
+
+    if(pk_initialized) {
+        // c11__abort("py_initialize() can only be called once!");
+        return;
+    }
+
+    pk_names_initialize();
+
+    // check endianness
+    int x = 1;
+    bool is_little_endian = *(char*)&x == 1;
+    if(!is_little_endian) c11__abort("is_little_endian != true");
+
+    _Static_assert(sizeof(py_TValue) == 24, "sizeof(py_TValue) != 24");
+    _Static_assert(offsetof(py_TValue, extra) == 4, "offsetof(py_TValue, extra) != 4");
+
+    pk_current_vm = pk_all_vm[0] = &pk_default_vm;
+
+    // initialize some convenient references
+    py_newbool(&_True, true);
+    py_newbool(&_False, false);
+    py_newnone(&_None);
+    py_newnil(&_NIL);
+    VM__ctor(&pk_default_vm);
+
+    pk_initialized = true;
+}
+
+void py_finalize() {
+    if(pk_finalized) c11__abort("py_finalize() can only be called once!");
+    pk_finalized = true;
+
+    for(int i = 1; i < 16; i++) {
+        VM* vm = pk_all_vm[i];
+        if(vm) {
+            // temp fix https://github.com/pocketpy/pocketpy/issues/315
+            // TODO: refactor VM__ctor and VM__dtor
+            pk_current_vm = vm;
+            VM__dtor(vm);
+            PK_FREE(vm);
+        }
+    }
+    pk_current_vm = &pk_default_vm;
+    VM__dtor(&pk_default_vm);
+    pk_current_vm = NULL;
+
+    pk_names_finalize();
+}
+
+int py_currentvm() {
+    for(int i = 0; i < 16; i++) {
+        if(pk_all_vm[i] == pk_current_vm) return i;
+    }
+    return -1;
+}
+
+void py_switchvm(int index) {
+    if(index < 0 || index >= 16) c11__abort("invalid vm index");
+    if(!pk_all_vm[index]) {
+        pk_current_vm = pk_all_vm[index] = PK_MALLOC(sizeof(VM));
+        memset(pk_current_vm, 0, sizeof(VM));
+        VM__ctor(pk_all_vm[index]);
+    } else {
+        pk_current_vm = pk_all_vm[index];
+    }
+}
+
+void py_resetvm() {
+    VM* vm = pk_current_vm;
+    VM__dtor(vm);
+    memset(vm, 0, sizeof(VM));
+    VM__ctor(vm);
+}
+
+void py_resetallvm() {
+    for(int i = 0; i < 16; i++) {
+        py_switchvm(i);
+        py_resetvm();
+    }
+    py_switchvm(0);
+}
+
+void* py_getvmctx() { return pk_current_vm->ctx; }
+
+void py_setvmctx(void* ctx) { pk_current_vm->ctx = ctx; }
+
+py_Callbacks* py_callbacks() { return &pk_current_vm->callbacks; }
+
+/////////////////////////////
+
+void py_sys_setargv(int argc, char** argv) {
+    py_GlobalRef sys = py_getmodule("sys");
+    py_Ref argv_list = py_getdict(sys, py_name("argv"));
+    py_list_clear(argv_list);
+    for(int i = 0; i < argc; i++) {
+        py_newstr(py_list_emplace(argv_list), argv[i]);
+    }
+}
+
+void py_sys_settrace(py_TraceFunc func, bool reset) {
+    TraceInfo* info = &pk_current_vm->trace_info;
+    info->func = func;
+    if(!reset) return;
+    if(info->prev_loc.src) {
+        PK_DECREF(info->prev_loc.src);
+        info->prev_loc.src = NULL;
+    }
+    info->prev_loc.lineno = -1;
+}
+
+int py_gc_collect() {
+    ManagedHeap* heap = &pk_current_vm->heap;
+    return ManagedHeap__collect(heap);
+}
+
+/////////////////////////////
+
+void* py_malloc(size_t size) { return PK_MALLOC(size); }
+
+void* py_realloc(void* ptr, size_t size) { return PK_REALLOC(ptr, size); }
+
+void py_free(void* ptr) { PK_FREE(ptr); }
+
+/////////////////////////////
+
+py_GlobalRef py_True() { return &_True; }
+
+py_GlobalRef py_False() { return &_False; }
+
+py_GlobalRef py_None() { return &_None; }
+
+py_GlobalRef py_NIL() { return &_NIL; }
+
+/////////////////////////////
+
+const char* pk_opname(Opcode op) {
+    const static char* OP_NAMES[] = {
+#define OPCODE(name) #name,
+#ifdef OPCODE
+
+/**************************/
+OPCODE(NO_OP)
+/**************************/
+OPCODE(POP_TOP)
+OPCODE(DUP_TOP)
+OPCODE(DUP_TOP_TWO)
+OPCODE(ROT_TWO)
+OPCODE(ROT_THREE)
+OPCODE(PRINT_EXPR)
+/**************************/
+OPCODE(LOAD_CONST)
+OPCODE(LOAD_NONE)
+OPCODE(LOAD_TRUE)
+OPCODE(LOAD_FALSE)
+/**************************/
+OPCODE(LOAD_SMALL_INT)
+/**************************/
+OPCODE(LOAD_ELLIPSIS)
+OPCODE(LOAD_FUNCTION)
+OPCODE(LOAD_NULL)
+/**************************/
+OPCODE(LOAD_FAST)
+OPCODE(LOAD_NAME)
+OPCODE(LOAD_NONLOCAL)
+OPCODE(LOAD_GLOBAL)
+OPCODE(LOAD_ATTR)
+OPCODE(LOAD_CLASS_GLOBAL)
+OPCODE(LOAD_METHOD)
+OPCODE(LOAD_SUBSCR)
+
+OPCODE(STORE_FAST)
+OPCODE(STORE_NAME)
+OPCODE(STORE_GLOBAL)
+OPCODE(STORE_ATTR)
+OPCODE(STORE_SUBSCR)
+
+OPCODE(DELETE_FAST)
+OPCODE(DELETE_NAME)
+OPCODE(DELETE_GLOBAL)
+OPCODE(DELETE_ATTR)
+OPCODE(DELETE_SUBSCR)
+/**************************/
+OPCODE(BUILD_IMAG)
+OPCODE(BUILD_BYTES)
+OPCODE(BUILD_TUPLE)
+OPCODE(BUILD_LIST)
+OPCODE(BUILD_DICT)
+OPCODE(BUILD_SET)
+OPCODE(BUILD_SLICE)
+OPCODE(BUILD_STRING)
+/**************************/
+OPCODE(BINARY_ADD)
+OPCODE(BINARY_SUB)
+OPCODE(BINARY_MUL)
+OPCODE(BINARY_TRUEDIV)
+OPCODE(BINARY_FLOORDIV)
+OPCODE(BINARY_MOD)
+OPCODE(BINARY_POW)
+OPCODE(BINARY_LSHIFT)
+OPCODE(BINARY_RSHIFT)
+OPCODE(BINARY_AND)
+OPCODE(BINARY_OR)
+OPCODE(BINARY_XOR)
+OPCODE(BINARY_MATMUL)
+OPCODE(COMPARE_LT)
+OPCODE(COMPARE_LE)
+OPCODE(COMPARE_EQ)
+OPCODE(COMPARE_NE)
+OPCODE(COMPARE_GT)
+OPCODE(COMPARE_GE)
+OPCODE(IS_OP)
+OPCODE(CONTAINS_OP)
+/**************************/
+OPCODE(JUMP_FORWARD)
+OPCODE(POP_JUMP_IF_NOT_MATCH)
+OPCODE(POP_JUMP_IF_FALSE)
+OPCODE(POP_JUMP_IF_TRUE)
+OPCODE(JUMP_IF_TRUE_OR_POP)
+OPCODE(JUMP_IF_FALSE_OR_POP)
+OPCODE(SHORTCUT_IF_FALSE_OR_POP)
+OPCODE(LOOP_CONTINUE)
+OPCODE(LOOP_BREAK)
+/**************************/
+OPCODE(CALL)
+OPCODE(CALL_VARGS)
+/**************************/
+OPCODE(RETURN_VALUE)
+OPCODE(YIELD_VALUE)
+OPCODE(FOR_ITER_YIELD_VALUE)
+/**************************/
+OPCODE(LIST_APPEND)
+OPCODE(DICT_ADD)
+OPCODE(SET_ADD)
+/**************************/
+OPCODE(UNARY_NEGATIVE)
+OPCODE(UNARY_NOT)
+OPCODE(UNARY_STAR)
+OPCODE(UNARY_INVERT)
+/**************************/
+OPCODE(GET_ITER)
+OPCODE(FOR_ITER)
+/**************************/
+OPCODE(IMPORT_PATH)
+OPCODE(POP_IMPORT_STAR)
+/**************************/
+OPCODE(UNPACK_SEQUENCE)
+OPCODE(UNPACK_EX)
+/**************************/
+OPCODE(BEGIN_CLASS)
+OPCODE(END_CLASS)
+OPCODE(STORE_CLASS_ATTR)
+OPCODE(ADD_CLASS_ANNOTATION)
+/**************************/
+OPCODE(WITH_ENTER)
+OPCODE(WITH_EXIT)
+/**************************/
+OPCODE(BEGIN_TRY)
+OPCODE(END_TRY)
+OPCODE(EXCEPTION_MATCH)
+OPCODE(HANDLE_EXCEPTION)
+OPCODE(RAISE)
+OPCODE(RAISE_ASSERT)
+OPCODE(RE_RAISE)
+OPCODE(PUSH_EXCEPTION)
+/**************************/
+OPCODE(FORMAT_STRING)
+/**************************/
+#endif
+
+#undef OPCODE
+    };
+    return OP_NAMES[op];
+}
+
+// src/public/ModuleSystem.c
+py_Ref py_getmodule(const char* path) {
+    VM* vm = pk_current_vm;
+    return BinTree__try_get(&vm->modules, (void*)path);
 }
 
 py_Ref py_newmodule(const char* path) {
@@ -9280,6 +10389,17 @@ py_Ref py_newmodule(const char* path) {
     // setup __path__
     py_newstrv(py_emplacedict(retval, __path__), c11_string__sv(mi->path));
     return retval;
+}
+
+static void py_ModuleInfo__dtor(py_ModuleInfo* mi) {
+    c11_string__delete(mi->name);
+    c11_string__delete(mi->package);
+    c11_string__delete(mi->path);
+}
+
+py_Type pk_module__register() {
+    py_Type type = pk_newtype("module", tp_object, NULL, (py_Dtor)py_ModuleInfo__dtor, false, true);
+    return type;
 }
 
 int load_module_from_dll_desktop_only(const char* path) PY_RAISE PY_RETURN;
@@ -9410,427 +10530,275 @@ bool py_importlib_reload(py_Ref module) {
     return ok;
 }
 
-//////////////////////////
-
-static bool builtins_exit(int argc, py_Ref argv) {
-    int code = 0;
-    if(argc > 1) return TypeError("exit() takes at most 1 argument");
-    if(argc == 1) {
-        PY_CHECK_ARG_TYPE(0, tp_int);
-        code = py_toint(argv);
-    }
-    exit(code);
-    return false;
+// src/public/StackOps.c
+PK_INLINE py_Ref py_peek(int i) {
+    assert(i <= 0);
+    return pk_current_vm->stack.sp + i;
 }
 
-static bool builtins_input(int argc, py_Ref argv) {
-    if(argc > 1) return TypeError("input() takes at most 1 argument");
-    const char* prompt = "";
-    if(argc == 1) {
-        if(!py_checkstr(argv)) return false;
-        prompt = py_tostr(argv);
-    }
-    py_callbacks()->print(prompt);
-
-    c11_sbuf buf;
-    c11_sbuf__ctor(&buf);
-    while(true) {
-        int c = py_callbacks()->getchr();
-        if(c == '\n' || c == '\r') break;
-        if(c == EOF) break;
-        c11_sbuf__write_char(&buf, c);
-    }
-    c11_sbuf__py_submit(&buf, py_retval());
-    return true;
+PK_INLINE void py_push(py_Ref src) {
+    VM* vm = pk_current_vm;
+    *vm->stack.sp++ = *src;
 }
 
-static bool builtins_repr(int argc, py_Ref argv) {
-    PY_CHECK_ARGC(1);
-    return py_repr(argv);
+PK_INLINE void py_pushnil() {
+    VM* vm = pk_current_vm;
+    py_newnil(vm->stack.sp++);
 }
 
-static bool builtins_len(int argc, py_Ref argv) {
-    PY_CHECK_ARGC(1);
-    return py_len(argv);
+PK_INLINE void py_pushnone() {
+    VM* vm = pk_current_vm;
+    py_newnone(vm->stack.sp++);
 }
 
-static bool builtins_hex(int argc, py_Ref argv) {
-    PY_CHECK_ARGC(1);
-    PY_CHECK_ARG_TYPE(0, tp_int);
-
-    py_i64 val = py_toint(argv);
-
-    if(val == 0) {
-        py_newstr(py_retval(), "0x0");
-        return true;
-    }
-
-    c11_sbuf ss;
-    c11_sbuf__ctor(&ss);
-
-    if(val < 0) {
-        c11_sbuf__write_char(&ss, '-');
-        val = -val;
-    }
-    c11_sbuf__write_cstr(&ss, "0x");
-    bool non_zero = true;
-    for(int i = 56; i >= 0; i -= 8) {
-        unsigned char cpnt = (val >> i) & 0xff;
-        c11_sbuf__write_hex(&ss, cpnt, non_zero);
-        if(cpnt != 0) non_zero = false;
-    }
-
-    c11_sbuf__py_submit(&ss, py_retval());
-    return true;
+PK_INLINE void py_pushname(py_Name name) {
+    VM* vm = pk_current_vm;
+    py_newint(vm->stack.sp++, (uintptr_t)name);
 }
 
-static bool builtins_iter(int argc, py_Ref argv) {
-    PY_CHECK_ARGC(1);
-    return py_iter(argv);
+PK_INLINE void py_pop() {
+    VM* vm = pk_current_vm;
+    vm->stack.sp--;
 }
 
-static bool builtins_next(int argc, py_Ref argv) {
-    if(argc == 0 || argc > 2) return TypeError("next() takes 1 or 2 arguments");
-    int res = py_next(argv);
-    if(res == -1) return false;
-    if(res) return true;
-    if(argc == 1) {
-        // StopIteration stored in py_retval()
-        return py_raise(py_retval());
-    } else {
-        py_assign(py_retval(), py_arg(1));
-        return true;
-    }
+PK_INLINE void py_shrink(int n) {
+    VM* vm = pk_current_vm;
+    vm->stack.sp -= n;
 }
 
-static bool builtins_hash(int argc, py_Ref argv) {
-    PY_CHECK_ARGC(1);
-    py_i64 val;
-    if(!py_hash(argv, &val)) return false;
-    py_newint(py_retval(), val);
-    return true;
+PK_INLINE py_Ref py_pushtmp() {
+    VM* vm = pk_current_vm;
+    return vm->stack.sp++;
 }
 
-static bool builtins_abs(int argc, py_Ref argv) {
-    PY_CHECK_ARGC(1);
-    return pk_callmagic(__abs__, 1, argv);
-}
-
-static bool builtins_divmod(int argc, py_Ref argv) {
-    PY_CHECK_ARGC(2);
-    return pk_callmagic(__divmod__, 2, argv);
-}
-
-static bool builtins_round(int argc, py_Ref argv) {
-    py_i64 ndigits;
-
-    if(argc == 1) {
-        ndigits = -1;
-    } else if(argc == 2) {
-        PY_CHECK_ARG_TYPE(1, tp_int);
-        ndigits = py_toint(py_arg(1));
-        if(ndigits < 0) return ValueError("ndigits should be non-negative");
-    } else {
-        return TypeError("round() takes 1 or 2 arguments");
-    }
-
-    if(argv->type == tp_int) {
-        py_assign(py_retval(), py_arg(0));
-        return true;
-    } else if(argv->type == tp_float) {
-        py_f64 x = py_tofloat(py_arg(0));
-        py_f64 offset = x >= 0 ? 0.5 : -0.5;
-        if(ndigits == -1) {
-            py_newint(py_retval(), (py_i64)(x + offset));
-            return true;
-        }
-        py_f64 factor = pow(10, ndigits);
-        py_newfloat(py_retval(), (py_i64)(x * factor + offset) / factor);
-        return true;
-    }
-
-    return pk_callmagic(__round__, argc, argv);
-}
-
-static bool builtins_print(int argc, py_Ref argv) {
-    // print(*args, sep=' ', end='\n', flush=False)
-    py_TValue* args = py_tuple_data(argv);
-    int length = py_tuple_len(argv);
-    PY_CHECK_ARG_TYPE(1, tp_str);
-    PY_CHECK_ARG_TYPE(2, tp_str);
-    PY_CHECK_ARG_TYPE(3, tp_bool);
-    c11_sv sep = py_tosv(py_arg(1));
-    c11_sv end = py_tosv(py_arg(2));
-    bool flush = py_tobool(py_arg(3));
-    c11_sbuf buf;
-    c11_sbuf__ctor(&buf);
-    for(int i = 0; i < length; i++) {
-        if(i > 0) c11_sbuf__write_sv(&buf, sep);
-        if(!py_str(&args[i])) {
-            c11_sbuf__dtor(&buf);
-            return false;
-        }
-        c11_sbuf__write_sv(&buf, py_tosv(py_retval()));
-    }
-    c11_sbuf__write_sv(&buf, end);
-    c11_string* res = c11_sbuf__submit(&buf);
-    py_callbacks()->print(res->data);
-    if(flush) py_callbacks()->flush();
-    c11_string__delete(res);
-    py_newnone(py_retval());
-    return true;
-}
-
-static bool builtins_isinstance(int argc, py_Ref argv) {
-    PY_CHECK_ARGC(2);
-    if(py_istuple(py_arg(1))) {
-        int length = py_tuple_len(py_arg(1));
-        for(int i = 0; i < length; i++) {
-            py_Ref item = py_tuple_getitem(py_arg(1), i);
-            if(!py_checktype(item, tp_type)) return false;
-            if(py_isinstance(py_arg(0), py_totype(item))) {
-                py_newbool(py_retval(), true);
-                return true;
-            }
-        }
-        py_newbool(py_retval(), false);
-        return true;
-    }
-
-    if(!py_checktype(py_arg(1), tp_type)) return false;
-    py_newbool(py_retval(), py_isinstance(py_arg(0), py_totype(py_arg(1))));
-    return true;
-}
-
-static bool builtins_issubclass(int argc, py_Ref argv) {
-    PY_CHECK_ARGC(2);
-    if(!py_checktype(py_arg(0), tp_type)) return false;
-    if(!py_checktype(py_arg(1), tp_type)) return false;
-    py_newbool(py_retval(), py_issubclass(py_totype(py_arg(0)), py_totype(py_arg(1))));
-    return true;
-}
-
-bool py_callable(py_Ref val) {
-    switch(val->type) {
-        case tp_nativefunc: return true;
-        case tp_function: return true;
-        case tp_type: return true;
-        case tp_boundmethod: return true;
-        case tp_staticmethod: return true;
-        case tp_classmethod: return true;
-        default: return py_tpfindmagic(val->type, __call__);
-    }
-}
-
-static bool builtins_callable(int argc, py_Ref argv) {
-    PY_CHECK_ARGC(1);
-    bool res = py_callable(py_arg(0));
-    py_newbool(py_retval(), res);
-    return true;
-}
-
-static bool builtins_getattr(int argc, py_Ref argv) {
-    PY_CHECK_ARG_TYPE(1, tp_str);
-    py_Name name = py_namev(py_tosv(py_arg(1)));
-    if(argc == 2) {
-        return py_getattr(py_arg(0), name);
-    } else if(argc == 3) {
-        bool ok = py_getattr(py_arg(0), name);
-        if(!ok && py_matchexc(tp_AttributeError)) {
-            py_clearexc(NULL);
-            py_assign(py_retval(), py_arg(2));
-            return true;  // default value
-        }
-        return ok;
-    } else {
-        return TypeError("getattr() expected 2 or 3 arguments");
-    }
-    return true;
-}
-
-static bool builtins_setattr(int argc, py_Ref argv) {
-    PY_CHECK_ARGC(3);
-    PY_CHECK_ARG_TYPE(1, tp_str);
-    py_Name name = py_namev(py_tosv(py_arg(1)));
-    py_newnone(py_retval());
-    return py_setattr(py_arg(0), name, py_arg(2));
-}
-
-static bool builtins_hasattr(int argc, py_Ref argv) {
-    PY_CHECK_ARGC(2);
-    PY_CHECK_ARG_TYPE(1, tp_str);
-    py_Name name = py_namev(py_tosv(py_arg(1)));
-    bool ok = py_getattr(py_arg(0), name);
-    if(ok) {
-        py_newbool(py_retval(), true);
-        return true;
-    }
-    if(py_matchexc(tp_AttributeError)) {
-        py_clearexc(NULL);
-        py_newbool(py_retval(), false);
-        return true;
-    }
-    return false;
-}
-
-static bool builtins_delattr(int argc, py_Ref argv) {
-    PY_CHECK_ARGC(2);
-    PY_CHECK_ARG_TYPE(1, tp_str);
-    py_Name name = py_namev(py_tosv(py_arg(1)));
-    py_newnone(py_retval());
-    return py_delattr(py_arg(0), name);
-}
-
-static bool builtins_chr(int argc, py_Ref argv) {
-    PY_CHECK_ARGC(1);
-    PY_CHECK_ARG_TYPE(0, tp_int);
-    uint32_t val = py_toint(py_arg(0));
-    // convert to utf-8
-    char utf8[4];
-    int len = c11__u32_to_u8(val, utf8);
-    if(len == -1) return ValueError("invalid unicode code point: %d", val);
-    py_newstrv(py_retval(), (c11_sv){utf8, len});
-    return true;
-}
-
-static bool builtins_ord(int argc, py_Ref argv) {
-    PY_CHECK_ARGC(1);
-    PY_CHECK_ARG_TYPE(0, tp_str);
-    c11_sv sv = py_tosv(py_arg(0));
-    if(c11_sv__u8_length(sv) != 1) {
-        return TypeError("ord() expected a character, but string of length %d found",
-                         c11_sv__u8_length(sv));
-    }
-    int u8bytes = c11__u8_header(sv.data[0], true);
-    if(u8bytes == 0) return ValueError("invalid utf-8 char: %c", sv.data[0]);
-    int value = c11__u8_value(u8bytes, sv.data);
-    py_newint(py_retval(), value);
-    return true;
-}
-
-static bool builtins_id(int argc, py_Ref argv) {
-    PY_CHECK_ARGC(1);
-    if(argv->is_ptr) {
-        py_newint(py_retval(), (intptr_t)argv->_obj);
-    } else {
-        py_newnone(py_retval());
-    }
-    return true;
-}
-
-static bool builtins_globals(int argc, py_Ref argv) {
-    PY_CHECK_ARGC(0);
-    py_newglobals(py_retval());
-    return true;
-}
-
-static bool builtins_locals(int argc, py_Ref argv) {
-    PY_CHECK_ARGC(0);
-    py_newlocals(py_retval());
-    return true;
-}
-
-void py_newglobals(py_OutRef out) {
-    py_Frame* frame = pk_current_vm->top_frame;
-    py_Frame_newglobals(frame, out);
-}
-
-void py_newlocals(py_OutRef out) {
-    py_Frame* frame = pk_current_vm->top_frame;
-    py_Frame_newlocals(frame, out);
-}
-
-static void pk_push_special_locals() {
-    py_Frame* frame = pk_current_vm->top_frame;
-    if(!frame) {
-        py_pushnil();
-        return;
-    }
-    if(frame->is_locals_special) {
-        py_push(frame->locals);
-    } else {
-        py_StackRef out = py_pushtmp();
-        out->type = tp_locals;
-        out->is_ptr = false;
-        out->extra = 0;
-        // this is a weak reference
-        // which will expire when the frame is destroyed
-        out->_ptr = frame;
-    }
-}
-
-static bool _builtins_execdyn(const char* title, int argc, py_Ref argv, enum py_CompileMode mode) {
-    switch(argc) {
-        case 1: {
-            py_newglobals(py_pushtmp());
-            pk_push_special_locals();
-            break;
-        }
-        case 2: {
-            // globals
-            if(py_isnone(py_arg(1))) {
-                py_newglobals(py_pushtmp());
-            } else {
-                py_push(py_arg(1));
-            }
-            // locals
-            py_pushnil();
-            break;
-        }
-        case 3: {
-            // globals
-            if(py_isnone(py_arg(1))) {
-                py_newglobals(py_pushtmp());
-            } else {
-                py_push(py_arg(1));
-            }
-            // locals
-            if(py_isnone(py_arg(2))) {
-                py_pushnil();
-            } else {
-                py_push(py_arg(2));
-            }
-            break;
-        }
-        default: return TypeError("%s() takes at most 3 arguments", title);
-    }
-
-    if(py_isstr(argv)) {
-        bool ok = py_compile(py_tostr(argv), "<string>", mode, true);
-        if(!ok) return false;
-        py_push(py_retval());
-    } else if(py_istype(argv, tp_code)) {
-        py_push(argv);
-    } else {
-        return TypeError("%s() expected 'str' or 'code', got '%t'", title, argv->type);
-    }
-
-    py_Frame* frame = pk_current_vm->top_frame;
-    // [globals, locals, code]
-    CodeObject* code = py_touserdata(py_peek(-1));
-    if(code->src->is_dynamic) {
-        bool ok = pk_execdyn(code, frame ? frame->module : NULL, py_peek(-3), py_peek(-2));
-        py_shrink(3);
-        return ok;
-    } else {
-        if(argc != 1) {
-            return ValueError(
-                "code object is not dynamic, `globals` and `locals` must not be specified");
-        }
-        bool ok = pk_exec(code, frame ? frame->module : NULL);
-        py_shrink(3);
-        return ok;
-    }
-}
-
-static bool builtins_exec(int argc, py_Ref argv) {
-    bool ok = _builtins_execdyn("exec", argc, argv, EXEC_MODE);
-    py_newnone(py_retval());
+PK_INLINE bool py_pushmethod(py_Name name) {
+    bool ok = pk_loadmethod(py_peek(-1), name);
+    if(ok) pk_current_vm->stack.sp++;
     return ok;
 }
 
-static bool builtins_eval(int argc, py_Ref argv) {
-    return _builtins_execdyn("eval", argc, argv, EVAL_MODE);
+bool py_pusheval(const char* expr, py_GlobalRef module) {
+    bool ok = py_exec(expr, "<string>", EVAL_MODE, module);
+    if(!ok) return false;
+    py_push(py_retval());
+    return true;
+}
+
+PK_INLINE bool py_vectorcall(uint16_t argc, uint16_t kwargc) {
+    return VM__vectorcall(pk_current_vm, argc, kwargc, false) != RES_ERROR;
+}
+
+bool py_call(py_Ref f, int argc, py_Ref argv) {
+    if(f->type == tp_nativefunc) {
+        return py_callcfunc(f->_cfunc, argc, argv);
+    } else {
+        py_push(f);
+        py_pushnil();
+        for(int i = 0; i < argc; i++)
+            py_push(py_offset(argv, i));
+        bool ok = py_vectorcall(argc, 0);
+        return ok;
+    }
+}
+
+#ifndef NDEBUG
+bool py_callcfunc(py_CFunction f, int argc, py_Ref argv) {
+    if(py_checkexc()) {
+        const char* name = py_tpname(pk_current_vm->unhandled_exc.type);
+        c11__abort("unhandled exception `%s` was set!", name);
+    }
+    py_StackRef p0 = py_peek(0);
+    // NOTE: sometimes users are using `py_retval()` to pass `argv`
+    // It will be reset to `nil` and cause an exception
+    py_newnil(py_retval());
+    bool ok = f(argc, argv);
+    if(!ok) {
+        if(!py_checkexc()) { c11__abort("py_CFunction returns `false` but no exception is set!"); }
+        return false;
+    }
+    if(py_peek(0) != p0) {
+        c11__abort("py_CFunction corrupts the stack! Did you forget to call `py_pop()`?");
+    }
+    if(py_isnil(py_retval())) {
+        c11__abort(
+            "py_CFunction returns nothing! Did you forget to call `py_newnone(py_retval())`?");
+    }
+    if(py_checkexc()) {
+        const char* name = py_tpname(pk_current_vm->unhandled_exc.type);
+        c11__abort("py_CFunction returns `true`, but `%s` was set!", name);
+    }
+    return true;
+}
+#endif
+
+bool py_tpcall(py_Type type, int argc, py_Ref argv) {
+    return py_call(py_tpobject(type), argc, argv);
+}
+
+bool py_binaryop(py_Ref lhs, py_Ref rhs, py_Name op, py_Name rop) {
+    py_push(lhs);
+    py_push(rhs);
+    bool ok = pk_stack_binaryop(pk_current_vm, op, rop);
+    py_shrink(2);
+    return ok;
+}
+
+bool pk_loadmethod(py_StackRef self, py_Name name) {
+    // NOTE: `out` and `out_self` may overlap with `self`
+    py_Type type;
+
+    if(name == __new__) {
+        // __new__ acts like a @staticmethod
+        if(self->type == tp_type) {
+            // T.__new__(...)
+            type = py_totype(self);
+        } else if(self->type == tp_super) {
+            // super(T, obj).__new__(...)
+            type = *(py_Type*)py_touserdata(self);
+        } else {
+            // invalid usage of `__new__`
+            return false;
+        }
+        py_Ref cls_var = py_tpfindmagic(type, name);
+        if(cls_var) {
+            self[0] = *cls_var;
+            self[1] = *py_NIL();
+            return true;
+        }
+        return false;
+    }
+
+    py_TValue self_bak;  // to avoid overlapping
+    // handle super() proxy
+    if(py_istype(self, tp_super)) {
+        type = *(py_Type*)py_touserdata(self);
+        // BUG: here we modify `self` which refers to the stack directly
+        // If `pk_loadmethod` fails, `self` will be corrupted
+        self_bak = *py_getslot(self, 0);
+    } else {
+        type = self->type;
+        self_bak = *self;
+    }
+
+    py_TypeInfo* ti = pk_typeinfo(type);
+
+    if(ti->getunboundmethod) {
+        bool ok = ti->getunboundmethod(self, name);
+        if(ok) {
+            assert(py_retval()->type == tp_nativefunc || py_retval()->type == tp_function);
+            self[0] = *py_retval();
+            self[1] = self_bak;
+            return true;
+        } else {
+            return false;
+        }
+    }
+
+    py_Ref cls_var = pk_tpfindname(ti, name);
+    if(cls_var != NULL) {
+        switch(cls_var->type) {
+            case tp_function:
+            case tp_nativefunc: {
+                self[0] = *cls_var;
+                self[1] = self_bak;
+                break;
+            }
+            case tp_staticmethod:
+                self[0] = *py_getslot(cls_var, 0);
+                self[1] = *py_NIL();
+                break;
+            case tp_classmethod:
+                self[0] = *py_getslot(cls_var, 0);
+                self[1] = ti->self;
+                break;
+            default: return false;
+        }
+        return true;
+    }
+    return false;
+}
+
+bool pk_callmagic(py_Name name, int argc, py_Ref argv) {
+    assert(argc >= 1);
+    // assert(py_ismagicname(name));
+    py_Ref tmp = py_tpfindmagic(argv->type, name);
+    if(!tmp) return AttributeError(argv, name);
+    return py_call(tmp, argc, argv);
+}
+
+// src/public/CodeExecution.c
+#include <assert.h>
+#include <ctype.h>
+
+py_Type pk_code__register() {
+    py_Type type = pk_newtype("code", tp_object, NULL, (py_Dtor)CodeObject__dtor, false, true);
+    return type;
+}
+
+static bool _py_compile(CodeObject* out,
+                 const char* source,
+                 const char* filename,
+                 enum py_CompileMode mode,
+                 bool is_dynamic) {
+    VM* vm = pk_current_vm;
+    SourceData_ src = SourceData__rcnew(source, filename, mode, is_dynamic);
+    Error* err = pk_compile(src, out);
+    if(err) {
+        py_exception(tp_SyntaxError, err->msg);
+        py_BaseException__stpush(NULL, &vm->unhandled_exc, err->src, err->lineno, NULL);
+        PK_DECREF(src);
+
+        PK_DECREF(err->src);
+        PK_FREE(err);
+        return false;
+    }
+    PK_DECREF(src);
+    return true;
+}
+
+bool pk_exec(CodeObject* co, py_Ref module) {
+    VM* vm = pk_current_vm;
+    if(!module) module = vm->main;
+    assert(module->type == tp_module);
+
+    py_StackRef sp = vm->stack.sp;
+    py_Frame* frame = Frame__new(co, sp, module, module, py_NIL(), true);
+    VM__push_frame(vm, frame);
+    FrameResult res = VM__run_top_frame(vm);
+    if(res == RES_ERROR) return false;
+    assert(res == RES_RETURN);
+    return true;
+}
+
+bool pk_execdyn(CodeObject* co, py_Ref module, py_Ref globals, py_Ref locals) {
+    VM* vm = pk_current_vm;
+    if(!module) module = vm->main;
+    assert(module->type == tp_module);
+
+    py_StackRef sp = vm->stack.sp;
+    assert(globals != NULL && locals != NULL);
+
+    // check globals
+    if(globals->type == tp_namedict) {
+        globals = py_getslot(globals, 0);
+        assert(globals->type == tp_module);
+    } else {
+        if(!py_istype(globals, tp_dict)) { return TypeError("globals must be a dict object"); }
+    }
+    // check locals
+    switch(locals->type) {
+        case tp_locals: break;
+        case tp_dict: break;
+        case tp_nil: break;
+        default: return TypeError("locals must be a dict object");
+    }
+
+    py_Frame* frame = Frame__new(co, sp, module, globals, locals, true);
+    VM__push_frame(vm, frame);
+    FrameResult res = VM__run_top_frame(vm);
+    if(res == RES_ERROR) return false;
+    assert(res == RES_RETURN);
+    return true;
 }
 
 static bool
@@ -9881,6 +10849,32 @@ static bool
     return true;
 }
 
+bool py_compile(const char* source,
+                const char* filename,
+                enum py_CompileMode mode,
+                bool is_dynamic) {
+    CodeObject co;
+    bool ok = _py_compile(&co, source, filename, mode, is_dynamic);
+    if(ok) {
+        // compile success
+        CodeObject* ud = py_newobject(py_retval(), tp_code, 0, sizeof(CodeObject));
+        *ud = co;
+    }
+    return ok;
+}
+
+bool py_exec(const char* source, const char* filename, enum py_CompileMode mode, py_Ref module) {
+    CodeObject co;
+    if(!_py_compile(&co, source, filename, mode, false)) return false;
+    bool ok = pk_exec(&co, module);
+    CodeObject__dtor(&co);
+    return ok;
+}
+
+bool py_eval(const char* source, py_Ref module) {
+    return py_exec(source, "<string>", EVAL_MODE, module);
+}
+
 bool py_smartexec(const char* source, py_Ref module, ...) {
     va_list args;
     va_start(args, module);
@@ -9897,339 +10891,87 @@ bool py_smarteval(const char* source, py_Ref module, ...) {
     return ok;
 }
 
-static bool builtins_compile(int argc, py_Ref argv) {
-    PY_CHECK_ARGC(3);
-    for(int i = 0; i < 3; i++) {
-        if(!py_checktype(py_arg(i), tp_str)) return false;
+// src/public/ValueCast.c
+py_i64 py_toint(py_Ref self) {
+    assert(self->type == tp_int);
+    return self->_i64;
+}
+
+void* py_totrivial(py_Ref self) { return &self->_chars; }
+
+double py_tofloat(py_Ref self) {
+    assert(self->type == tp_float);
+    return self->_f64;
+}
+
+bool py_castfloat(py_Ref self, double* out) {
+    switch(self->type) {
+        case tp_int: *out = (double)self->_i64; return true;
+        case tp_float: *out = self->_f64; return true;
+        default: return TypeError("expected 'int' or 'float', got '%t'", self->type);
     }
-    const char* source = py_tostr(py_arg(0));
-    const char* filename = py_tostr(py_arg(1));
-    const char* mode = py_tostr(py_arg(2));
+}
 
-    enum py_CompileMode compile_mode;
-    if(strcmp(mode, "exec") == 0) {
-        compile_mode = EXEC_MODE;
-    } else if(strcmp(mode, "eval") == 0) {
-        compile_mode = EVAL_MODE;
-    } else if(strcmp(mode, "single") == 0) {
-        compile_mode = SINGLE_MODE;
-    } else {
-        return ValueError("compile() mode must be 'exec', 'eval', or 'single'");
+bool py_castfloat32(py_Ref self, float* out) {
+    switch(self->type) {
+        case tp_int: *out = (float)self->_i64; return true;
+        case tp_float: *out = (float)self->_f64; return true;
+        default: return TypeError("expected 'int' or 'float', got '%t'", self->type);
     }
-    return py_compile(source, filename, compile_mode, true);
 }
 
-static bool builtins__import__(int argc, py_Ref argv) {
-    PY_CHECK_ARGC(1);
-    PY_CHECK_ARG_TYPE(0, tp_str);
-    int res = py_import(py_tostr(argv));
-    if(res == -1) return false;
-    if(res) return true;
-    return ImportError("module '%s' not found", py_tostr(argv));
-}
-
-static bool NoneType__repr__(int argc, py_Ref argv) {
-    py_newstr(py_retval(), "None");
-    return true;
-}
-
-static bool ellipsis__repr__(int argc, py_Ref argv) {
-    py_newstr(py_retval(), "...");
-    return true;
-}
-
-static bool NotImplementedType__repr__(int argc, py_Ref argv) {
-    py_newstr(py_retval(), "NotImplemented");
-    return true;
-}
-
-py_GlobalRef pk_builtins__register() {
-    py_GlobalRef builtins = py_newmodule("builtins");
-    py_bindfunc(builtins, "exit", builtins_exit);
-    py_bindfunc(builtins, "input", builtins_input);
-    py_bindfunc(builtins, "repr", builtins_repr);
-    py_bindfunc(builtins, "len", builtins_len);
-    py_bindfunc(builtins, "hex", builtins_hex);
-    py_bindfunc(builtins, "iter", builtins_iter);
-    py_bindfunc(builtins, "next", builtins_next);
-    py_bindfunc(builtins, "hash", builtins_hash);
-    py_bindfunc(builtins, "abs", builtins_abs);
-    py_bindfunc(builtins, "divmod", builtins_divmod);
-    py_bindfunc(builtins, "round", builtins_round);
-
-    py_bind(builtins, "print(*args, sep=' ', end='\\n', flush=False)", builtins_print);
-
-    py_bindfunc(builtins, "isinstance", builtins_isinstance);
-    py_bindfunc(builtins, "issubclass", builtins_issubclass);
-    py_bindfunc(builtins, "callable", builtins_callable);
-
-    py_bindfunc(builtins, "getattr", builtins_getattr);
-    py_bindfunc(builtins, "setattr", builtins_setattr);
-    py_bindfunc(builtins, "hasattr", builtins_hasattr);
-    py_bindfunc(builtins, "delattr", builtins_delattr);
-
-    py_bindfunc(builtins, "chr", builtins_chr);
-    py_bindfunc(builtins, "ord", builtins_ord);
-    py_bindfunc(builtins, "id", builtins_id);
-
-    py_bindfunc(builtins, "globals", builtins_globals);
-    py_bindfunc(builtins, "locals", builtins_locals);
-    py_bindfunc(builtins, "exec", builtins_exec);
-    py_bindfunc(builtins, "eval", builtins_eval);
-    py_bindfunc(builtins, "compile", builtins_compile);
-
-    py_bindfunc(builtins, "__import__", builtins__import__);
-
-    // some patches
-    py_bindmagic(tp_NoneType, __repr__, NoneType__repr__);
-    py_setdict(py_tpobject(tp_NoneType), __hash__, py_None());
-    py_bindmagic(tp_ellipsis, __repr__, ellipsis__repr__);
-    py_setdict(py_tpobject(tp_ellipsis), __hash__, py_None());
-    py_bindmagic(tp_NotImplementedType, __repr__, NotImplementedType__repr__);
-    py_setdict(py_tpobject(tp_NotImplementedType), __hash__, py_None());
-    return builtins;
-}
-
-void function__gc_mark(void* ud, c11_vector* p_stack) {
-    Function* func = ud;
-    if(func->globals) pk__mark_value(func->globals);
-    if(func->closure) {
-        NameDict* dict = func->closure;
-        for(int i = 0; i < dict->capacity; i++) {
-            NameDict_KV* kv = &dict->items[i];
-            if(kv->key == NULL) continue;
-            pk__mark_value(&kv->value);
-        }
-    }
-    FuncDecl__gc_mark(func->decl, p_stack);
-}
-
-static bool function__doc__(int argc, py_Ref argv) {
-    PY_CHECK_ARGC(1);
-    Function* func = py_touserdata(py_arg(0));
-    if(func->decl->docstring) {
-        py_newstr(py_retval(), func->decl->docstring);
-    } else {
-        py_newnone(py_retval());
-    }
-    return true;
-}
-
-static bool function__name__(int argc, py_Ref argv) {
-    PY_CHECK_ARGC(1);
-    Function* func = py_touserdata(py_arg(0));
-    py_newstr(py_retval(), func->decl->code.name->data);
-    return true;
-}
-
-static bool function__repr__(int argc, py_Ref argv) {
-    // <function f at 0x10365b9c0>
-    PY_CHECK_ARGC(1);
-    Function* func = py_touserdata(py_arg(0));
-    c11_sbuf buf;
-    c11_sbuf__ctor(&buf);
-    c11_sbuf__write_cstr(&buf, "<function ");
-    c11_sbuf__write_cstr(&buf, func->decl->code.name->data);
-    c11_sbuf__write_cstr(&buf, " at ");
-    c11_sbuf__write_ptr(&buf, func);
-    c11_sbuf__write_char(&buf, '>');
-    c11_sbuf__py_submit(&buf, py_retval());
-    return true;
-}
-
-py_Type pk_function__register() {
-    py_Type type =
-        pk_newtype("function", tp_object, NULL, (void (*)(void*))Function__dtor, false, true);
-    py_bindproperty(type, "__doc__", function__doc__, NULL);
-    py_bindproperty(type, "__name__", function__name__, NULL);
-    py_bindmagic(type, __repr__, function__repr__);
-    return type;
-}
-
-static bool nativefunc__repr__(int argc, py_Ref argv) {
-    PY_CHECK_ARGC(1);
-    py_newstr(py_retval(), "<nativefunc object>");
-    return true;
-}
-
-py_Type pk_nativefunc__register() {
-    py_Type type = pk_newtype("nativefunc", tp_object, NULL, NULL, false, true);
-    py_bindmagic(type, __repr__, nativefunc__repr__);
-    return type;
-}
-
-static bool super__new__(int argc, py_Ref argv) {
-    py_Type class_arg = 0;
-    py_Frame* frame = pk_current_vm->top_frame;
-    py_Ref self_arg = NULL;
-    if(argc == 1) {
-        // super()
-        if(!frame->is_locals_special) {
-            py_TValue* callable = frame->p0;
-            if(callable->type == tp_boundmethod) callable = py_getslot(frame->p0, 1);
-            if(callable->type == tp_function) {
-                Function* func = py_touserdata(callable);
-                if(func->clazz != NULL) {
-                    class_arg = ((py_TypeInfo*)PyObject__userdata(func->clazz))->index;
-                    if(frame->co->nlocals > 0) { self_arg = &frame->locals[0]; }
-                }
-            }
-        }
-        if(class_arg == 0 || self_arg == NULL) return RuntimeError("super(): no arguments");
-        if(self_arg->type == tp_type) {
-            // f(cls, ...)
-            class_arg = pk_typeinfo(class_arg)->base;
-            if(class_arg == 0) return RuntimeError("super(): base class is invalid");
-            py_assign(py_retval(), py_tpobject(class_arg));
-            return true;
-        }
-    } else if(argc == 3) {
-        // super(type[T], obj)
-        PY_CHECK_ARG_TYPE(1, tp_type);
-        class_arg = py_totype(py_arg(1));
-        self_arg = py_arg(2);
-        if(!py_isinstance(self_arg, class_arg)) {
-            return TypeError("super(type, obj): obj must be an instance of type");
-        }
-    } else {
-        return TypeError("super() takes 0 or 2 arguments");
-    }
-
-    class_arg = pk_typeinfo(class_arg)->base;
-    if(class_arg == 0) return RuntimeError("super(): base class is invalid");
-
-    py_Type* p_class_arg = py_newobject(py_retval(), tp_super, 1, sizeof(py_Type));
-    *p_class_arg = class_arg;
-    py_setslot(py_retval(), 0, self_arg);
-    return true;
-}
-
-py_Type pk_super__register() {
-    py_Type type = pk_newtype("super", tp_object, NULL, NULL, false, true);
-    py_bindmagic(type, __new__, super__new__);
-    return type;
-}
-
-// src/public/typecast.c
-PK_INLINE bool py_istype(py_Ref self, py_Type type) { return self->type == type; }
-
-bool py_checktype(py_Ref self, py_Type type) {
-    if(self->type == type) return true;
-    return TypeError("expected '%t', got '%t'", type, self->type);
-}
-
-bool py_checkinstance(py_Ref self, py_Type type) {
-    if(py_isinstance(self, type)) return true;
-    return TypeError("expected '%t' or its subclass, got '%t'", type, self->type);
-}
-
-bool py_isinstance(py_Ref obj, py_Type type) { return py_issubclass(obj->type, type); }
-
-bool py_issubclass(py_Type derived, py_Type base) {
-    assert(derived != 0 && base != 0);
-    py_TypeInfo* derived_ti = pk_typeinfo(derived);
-    py_TypeInfo* base_ti = pk_typeinfo(base);
-    do {
-        if(derived_ti == base_ti) return true;
-        derived_ti = derived_ti->base_ti;
-    } while(derived_ti);
-    return false;
-}
-
-py_Type py_typeof(py_Ref self) { return self->type; }
-
-py_Type py_gettype(const char* module, py_Name name) {
-    py_Ref mod;
-    if(module != NULL) {
-        mod = py_getmodule(module);
-        if(!mod) return tp_nil;
-    } else {
-        mod = pk_current_vm->builtins;
-    }
-    py_Ref object = py_getdict(mod, name);
-    if(object && py_istype(object, tp_type)) return py_totype(object);
-    return tp_nil;
-}
-// src/public/py_method.c
-/* staticmethod */
-
-static bool staticmethod__new__(int argc, py_Ref argv) {
-    PY_CHECK_ARGC(2);
-    py_newobject(py_retval(), tp_staticmethod, 1, 0);
-    py_setslot(py_retval(), 0, py_arg(1));
-    return true;
-}
-
-py_Type pk_staticmethod__register() {
-    py_Type type = pk_newtype("staticmethod", tp_object, NULL, NULL, false, true);
-
-    py_bindmagic(type, __new__, staticmethod__new__);
-    return type;
-}
-
-/* classmethod */
-static bool classmethod__new__(int argc, py_Ref argv) {
-    PY_CHECK_ARGC(2);
-    py_newobject(py_retval(), tp_classmethod, 1, 0);
-    py_setslot(py_retval(), 0, py_arg(1));
-    return true;
-}
-
-py_Type pk_classmethod__register() {
-    py_Type type = pk_newtype("classmethod", tp_object, NULL, NULL, false, true);
-
-    py_bindmagic(type, __new__, classmethod__new__);
-    return type;
-}
-
-/* boundmethod */
-static bool boundmethod__self__(int argc, py_Ref argv) {
-    PY_CHECK_ARGC(1);
-    py_assign(py_retval(), py_getslot(argv, 0));
-    return true;
-}
-
-static bool boundmethod__func__(int argc, py_Ref argv) {
-    PY_CHECK_ARGC(1);
-    py_assign(py_retval(), py_getslot(argv, 1));
-    return true;
-}
-
-static bool boundmethod__eq__(int argc, py_Ref argv) {
-    PY_CHECK_ARGC(2);
-    if(!py_istype(py_arg(1), tp_boundmethod)) {
-        py_newbool(py_retval(), false);
+bool py_castint(py_Ref self, int64_t* out) {
+    if(self->type == tp_int) {
+        *out = self->_i64;
         return true;
     }
-    for(int i = 0; i < 2; i++) {
-        int res = py_equal(py_getslot(&argv[0], i), py_getslot(&argv[1], i));
-        if(res == -1) return false;
-        if(!res) {
-            py_newbool(py_retval(), false);
-            return true;
-        }
-    }
-    py_newbool(py_retval(), true);
-    return true;
+    return TypeError("expected 'int', got '%t'", self->type);
 }
 
-static bool boundmethod__ne__(int argc, py_Ref argv) {
-    bool ok = boundmethod__eq__(argc, argv);
-    if(!ok) return false;
-    bool res = py_tobool(py_retval());
-    py_newbool(py_retval(), !res);
-    return true;
+bool py_tobool(py_Ref self) {
+    assert(self->type == tp_bool);
+    return self->_bool;
 }
 
-py_Type pk_boundmethod__register() {
-    py_Type type = pk_newtype("boundmethod", tp_object, NULL, NULL, false, true);
-    py_bindproperty(type, "__self__", boundmethod__self__, NULL);
-    py_bindproperty(type, "__func__", boundmethod__func__, NULL);
-    py_bindmagic(type, __eq__, boundmethod__eq__);
-    py_bindmagic(type, __ne__, boundmethod__ne__);
-    return type;
+py_Type py_totype(py_Ref self) {
+    assert(self->type == tp_type);
+    py_TypeInfo* ud = py_touserdata(self);
+    return ud->index;
 }
-// src/public/py_dict.c
+
+void* py_touserdata(py_Ref self) {
+    assert(self && self->is_ptr);
+    return PyObject__userdata(self->_obj);
+}
+
+const char* py_tostr(py_Ref self) { return pk_tostr(self)->data; }
+
+const char* py_tostrn(py_Ref self, int* size) {
+    c11_string* ud = pk_tostr(self);
+    *size = ud->size;
+    return ud->data;
+}
+
+c11_sv py_tosv(py_Ref self) {
+    c11_string* ud = pk_tostr(self);
+    return c11_string__sv(ud);
+}
+
+unsigned char* py_tobytes(py_Ref self, int* size) {
+    assert(self->type == tp_bytes);
+    c11_bytes* ud = PyObject__userdata(self->_obj);
+    *size = ud->size;
+    return ud->data;
+}
+
+void py_bytes_resize(py_Ref self, int size) {
+    assert(self->type == tp_bytes);
+    c11_bytes* ud = PyObject__userdata(self->_obj);
+    if(size > ud->size) c11__abort("bytes can only be resized down: %d > %d", ud->size, size);
+    ud->size = size;
+}
+
+// src/public/PyDict.c
 typedef struct {
     Dict* dict;  // weakref for slot 0
     Dict dict_backup;
@@ -10361,16 +11103,17 @@ static void Dict__set_index(Dict* self, uint32_t index, uint32_t value) {
     }
 }
 
+// Dict__probe won't raise exception for string keys
 static bool Dict__probe(Dict* self,
                         py_TValue* key,
                         uint64_t* p_hash,
                         uint32_t* p_idx,
                         DictEntry** p_entry) {
-    py_i64 h_user;
-    if(!py_hash(key, &h_user)) return false;
     if(py_isstr(key)) {
-        *p_hash = (uint64_t)h_user;
+        *p_hash = c11_sv__hash(py_tosv(key));
     } else {
+        py_i64 h_user;
+        if(!py_hash(key, &h_user)) return false;
         *p_hash = Dict__hash_2nd((uint64_t)h_user);
     }
     uint32_t mask = self->capacity - 1;
@@ -10380,13 +11123,23 @@ static bool Dict__probe(Dict* self,
         if(idx2 == self->null_index_value) break;
         DictEntry* entry = c11__at(DictEntry, &self->entries, idx2);
         if(entry->hash == (*p_hash)) {
-            int res = py_equal(&entry->key, key);
-            if(res == 1) {
-                *p_idx = idx;
-                *p_entry = entry;
-                return true;
+            if(py_isstr(&entry->key) && py_isstr(key)) {
+                c11_sv lhs = py_tosv(&entry->key);
+                c11_sv rhs = py_tosv(key);
+                if(c11__sveq(lhs, rhs)) {
+                    *p_idx = idx;
+                    *p_entry = entry;
+                    return true;
+                }
+            } else {
+                int res = py_equal(&entry->key, key);
+                if(res == 1) {
+                    *p_idx = idx;
+                    *p_entry = entry;
+                    return true;
+                }
+                if(res == -1) return false;  // error
             }
-            if(res == -1) return false;  // error
         }
         // try next index
         idx = Dict__step(idx);
@@ -10577,11 +11330,12 @@ void py_newdict(py_OutRef out) {
 }
 
 static bool dict__init__(int argc, py_Ref argv) {
-    py_newnone(py_retval());
     if(argc > 2) return TypeError("dict.__init__() takes at most 2 arguments (%d given)", argc);
-    if(argc == 1) return true;
+    if(argc == 1) {
+        py_newnone(py_retval());
+        return true;
+    }
     assert(argc == 2);
-
     py_TValue* p;
     int length = pk_arrayview(py_arg(1), &p);
     if(length == -1) { return TypeError("dict.__init__() expects a list or tuple"); }
@@ -10596,6 +11350,7 @@ static bool dict__init__(int argc, py_Ref argv) {
         py_Ref val = py_tuple_getitem(tuple, 1);
         if(!Dict__set(self, key, val)) return false;
     }
+    py_newnone(py_retval());
     return true;
 }
 
@@ -10617,7 +11372,9 @@ static bool dict__getitem__(int argc, py_Ref argv) {
 static bool dict__setitem__(int argc, py_Ref argv) {
     PY_CHECK_ARGC(3);
     Dict* self = py_touserdata(argv);
-    return Dict__set(self, py_arg(1), py_arg(2));
+    bool ok = Dict__set(self, py_arg(1), py_arg(2));
+    if(ok) py_newnone(py_retval());
+    return ok;
 }
 
 static bool dict__delitem__(int argc, py_Ref argv) {
@@ -10861,10 +11618,18 @@ bool dict_items__next__(int argc, py_Ref argv) {
     return StopIteration();
 }
 
+bool dict_items__len__(int argc, py_Ref argv) {
+    PY_CHECK_ARGC(1);
+    DictIterator* iter = py_touserdata(py_arg(0));
+    py_newint(py_retval(), iter->dict->length);
+    return true;
+}
+
 py_Type pk_dict_items__register() {
     py_Type type = pk_newtype("dict_iterator", tp_object, NULL, NULL, false, true);
     py_bindmagic(type, __iter__, pk_wrapper__self);
     py_bindmagic(type, __next__, dict_items__next__);
+    py_bindmagic(type, __len__, dict_items__len__);
     return type;
 }
 
@@ -10953,286 +11718,191 @@ bool py_dict_apply(py_Ref self, bool (*f)(py_Ref, py_Ref, void*), void* ctx) {
 }
 
 #undef Dict__step
-// src/public/py_range.c
-typedef struct Range {
-    py_i64 start;
-    py_i64 stop;
-    py_i64 step;
-} Range;
+// src/public/PyTuple.c
+py_ObjectRef py_newtuple(py_OutRef out, int n) {
+    VM* vm = pk_current_vm;
+    PyObject* obj = ManagedHeap__gcnew(&vm->heap, tp_tuple, n, 0);
+    out->type = tp_tuple;
+    out->is_ptr = true;
+    out->_obj = obj;
+    return PyObject__slots(obj);
+}
 
-static bool range__new__(int argc, py_Ref argv) {
-    Range* ud = py_newobject(py_retval(), tp_range, 0, sizeof(Range));
-    switch(argc - 1) {  // skip cls
-        case 1: {
-            PY_CHECK_ARG_TYPE(1, tp_int);
-            ud->start = 0;
-            ud->stop = py_toint(py_arg(1));
-            ud->step = 1;
-            break;
+py_Ref py_tuple_getitem(py_Ref self, int i) { return py_getslot(self, i); }
+
+py_Ref py_tuple_data(py_Ref self) { return PyObject__slots(self->_obj); }
+
+void py_tuple_setitem(py_Ref self, int i, py_Ref val) { py_setslot(self, i, val); }
+
+int py_tuple_len(py_Ref self) { return self->_obj->slots; }
+
+//////////////
+static bool tuple__len__(int argc, py_Ref argv) {
+    py_newint(py_retval(), py_tuple_len(argv));
+    return true;
+}
+
+static bool tuple__repr__(int argc, py_Ref argv) {
+    c11_sbuf buf;
+    c11_sbuf__ctor(&buf);
+    c11_sbuf__write_char(&buf, '(');
+    int length = py_tuple_len(argv);
+    for(int i = 0; i < length; i++) {
+        py_TValue* val = py_getslot(argv, i);
+        bool ok = py_repr(val);
+        if(!ok) {
+            c11_sbuf__dtor(&buf);
+            return false;
         }
-        case 2:
-            PY_CHECK_ARG_TYPE(1, tp_int);
-            PY_CHECK_ARG_TYPE(2, tp_int);
-            ud->start = py_toint(py_arg(1));
-            ud->stop = py_toint(py_arg(2));
-            ud->step = 1;
-            break;
-        case 3:
-            PY_CHECK_ARG_TYPE(1, tp_int);
-            PY_CHECK_ARG_TYPE(2, tp_int);
-            PY_CHECK_ARG_TYPE(3, tp_int);
-            ud->start = py_toint(py_arg(1));
-            ud->stop = py_toint(py_arg(2));
-            ud->step = py_toint(py_arg(3));
-            break;
-        default: return TypeError("range() expected at most 3 arguments, got %d", argc - 1);
+        c11_sbuf__write_sv(&buf, py_tosv(py_retval()));
+        if(i != length - 1) c11_sbuf__write_cstr(&buf, ", ");
     }
-    if(ud->step == 0) return ValueError("range() step must not be zero");
+    if(length == 1) c11_sbuf__write_char(&buf, ',');
+    c11_sbuf__write_char(&buf, ')');
+    c11_sbuf__py_submit(&buf, py_retval());
     return true;
 }
 
-static bool range__iter__(int argc, py_Ref argv) {
-    PY_CHECK_ARGC(1);
-    return py_tpcall(tp_range_iterator, 1, argv);
+static bool tuple__new__(int argc, py_Ref argv) {
+    if(argc == 1 + 0) {
+        py_newtuple(py_retval(), 0);
+        return true;
+    }
+    if(argc == 1 + 1) {
+        bool ok = py_tpcall(tp_list, 1, py_arg(1));
+        if(!ok) return false;
+        py_Ref tmp = py_pushtmp();
+        *tmp = *py_retval();  // backup the list
+        int length = py_list_len(tmp);
+        py_Ref p = py_newtuple(py_retval(), length);
+        for(int i = 0; i < py_tuple_len(py_retval()); i++) {
+            p[i] = *py_list_getitem(tmp, i);
+        }
+        py_pop();
+        return true;
+    }
+    return TypeError("tuple() takes at most 1 argument");
 }
 
-py_Type pk_range__register() {
-    py_Type type = pk_newtype("range", tp_object, NULL, NULL, false, true);
-
-    py_bindmagic(type, __new__, range__new__);
-    py_bindmagic(type, __iter__, range__iter__);
-    return type;
-}
-
-typedef struct RangeIterator {
-    Range range;
-    py_i64 current;
-} RangeIterator;
-
-static bool range_iterator__new__(int argc, py_Ref argv) {
+static bool tuple__getitem__(int argc, py_Ref argv) {
     PY_CHECK_ARGC(2);
-    PY_CHECK_ARG_TYPE(1, tp_range);
-    RangeIterator* ud = py_newobject(py_retval(), tp_range_iterator, 0, sizeof(RangeIterator));
-    ud->range = *(Range*)py_touserdata(py_arg(1));
-    ud->current = ud->range.start;
-    return true;
-}
-
-bool range_iterator__next__(int argc, py_Ref argv) {
-    PY_CHECK_ARGC(1);
-    RangeIterator* ud = py_touserdata(argv);
-    if(ud->range.step > 0) {
-        if(ud->current >= ud->range.stop) return StopIteration();
+    int length = py_tuple_len(argv);
+    py_Ref _1 = py_arg(1);
+    if(_1->type == tp_int) {
+        int index = py_toint(py_arg(1));
+        if(!pk__normalize_index(&index, length)) return false;
+        *py_retval() = *py_getslot(argv, index);
+        return true;
+    } else if(_1->type == tp_slice) {
+        int start, stop, step;
+        bool ok = pk__parse_int_slice(_1, length, &start, &stop, &step);
+        if(!ok) return false;
+        py_Ref tmp = py_pushtmp();
+        py_newlist(tmp);
+        PK_SLICE_LOOP(i, start, stop, step) py_list_append(tmp, py_getslot(argv, i));
+        // convert list to tuple
+        py_Ref p = py_newtuple(py_retval(), py_list_len(tmp));
+        for(int i = 0; i < py_tuple_len(py_retval()); i++) {
+            p[i] = *py_list_getitem(tmp, i);
+        }
+        py_pop();
+        return true;
     } else {
-        if(ud->current <= ud->range.stop) return StopIteration();
+        return TypeError("tuple indices must be integers");
     }
-    py_newint(py_retval(), ud->current);
-    ud->current += ud->range.step;
+}
+
+static bool tuple__eq__(int argc, py_Ref argv) {
+    return pk_wrapper__arrayequal(tp_tuple, argc, argv);
+}
+
+static bool tuple__ne__(int argc, py_Ref argv) {
+    if(!tuple__eq__(argc, argv)) return false;
+    if(py_isbool(py_retval())) {
+        bool res = py_tobool(py_retval());
+        py_newbool(py_retval(), !res);
+    }
     return true;
 }
 
-py_Type pk_range_iterator__register() {
-    py_Type type = pk_newtype("range_iterator", tp_object, NULL, NULL, false, true);
-
-    py_bindmagic(type, __new__, range_iterator__new__);
-    py_bindmagic(type, __iter__, pk_wrapper__self);
-    py_bindmagic(type, __next__, range_iterator__next__);
-    return type;
-}
-// src/public/exec.c
-#include <assert.h>
-
-py_Type pk_code__register() {
-    py_Type type = pk_newtype("code", tp_object, NULL, (py_Dtor)CodeObject__dtor, false, true);
-    return type;
-}
-
-bool _py_compile(CodeObject* out,
-                 const char* source,
-                 const char* filename,
-                 enum py_CompileMode mode,
-                 bool is_dynamic) {
-    VM* vm = pk_current_vm;
-    SourceData_ src = SourceData__rcnew(source, filename, mode, is_dynamic);
-    Error* err = pk_compile(src, out);
-    if(err) {
-        py_exception(tp_SyntaxError, err->msg);
-        py_BaseException__stpush(NULL, &vm->curr_exception, err->src, err->lineno, NULL);
-        PK_DECREF(src);
-
-        PK_DECREF(err->src);
-        PK_FREE(err);
-        return false;
-    }
-    PK_DECREF(src);
-    return true;
-}
-
-bool py_compile(const char* source,
-                const char* filename,
-                enum py_CompileMode mode,
-                bool is_dynamic) {
-    CodeObject co;
-    bool ok = _py_compile(&co, source, filename, mode, is_dynamic);
-    if(ok) {
-        // compile success
-        CodeObject* ud = py_newobject(py_retval(), tp_code, 0, sizeof(CodeObject));
-        *ud = co;
-    }
-    return ok;
-}
-
-bool pk_exec(CodeObject* co, py_Ref module) {
-    VM* vm = pk_current_vm;
-    if(!module) module = vm->main;
-    assert(module->type == tp_module);
-
-    py_StackRef sp = vm->stack.sp;
-    py_Frame* frame = Frame__new(co, sp, module, module, py_NIL(), true);
-    VM__push_frame(vm, frame);
-    FrameResult res = VM__run_top_frame(vm);
-    if(res == RES_ERROR) return false;
-    assert(res == RES_RETURN);
-    return true;
-}
-
-bool pk_execdyn(CodeObject* co, py_Ref module, py_Ref globals, py_Ref locals) {
-    VM* vm = pk_current_vm;
-    if(!module) module = vm->main;
-    assert(module->type == tp_module);
-
-    py_StackRef sp = vm->stack.sp;
-    assert(globals != NULL && locals != NULL);
-
-    // check globals
-    if(globals->type == tp_namedict) {
-        globals = py_getslot(globals, 0);
-        assert(globals->type == tp_module);
-    } else {
-        if(!py_istype(globals, tp_dict)) { return TypeError("globals must be a dict object"); }
-    }
-    // check locals
-    switch(locals->type) {
-        case tp_locals: break;
-        case tp_dict: break;
-        case tp_nil: break;
-        default: return TypeError("locals must be a dict object");
-    }
-
-    py_Frame* frame = Frame__new(co, sp, module, globals, locals, true);
-    VM__push_frame(vm, frame);
-    FrameResult res = VM__run_top_frame(vm);
-    if(res == RES_ERROR) return false;
-    assert(res == RES_RETURN);
-    return true;
-}
-
-bool py_exec(const char* source, const char* filename, enum py_CompileMode mode, py_Ref module) {
-    CodeObject co;
-    if(!_py_compile(&co, source, filename, mode, false)) return false;
-    bool ok = pk_exec(&co, module);
-    CodeObject__dtor(&co);
-    return ok;
-}
-
-bool py_eval(const char* source, py_Ref module) {
-    return py_exec(source, "<string>", EVAL_MODE, module);
-}
-// src/public/py_mappingproxy.c
-#include <stdbool.h>
-
-void pk_mappingproxy__namedict(py_Ref out, py_Ref object) {
-    py_newobject(out, tp_namedict, 1, 0);
-    assert(object->is_ptr && object->_obj->slots == -1);
-    py_setslot(out, 0, object);
-}
-
-static bool namedict__getitem__(int argc, py_Ref argv) {
+static bool tuple__lt__(int argc, py_Ref argv) {
     PY_CHECK_ARGC(2);
-    PY_CHECK_ARG_TYPE(1, tp_str);
-    py_Name name = py_namev(py_tosv(py_arg(1)));
-    py_Ref res = py_getdict(py_getslot(argv, 0), name);
-    if(!res) return KeyError(py_arg(1));
-    py_assign(py_retval(), res);
+    if(!py_istype(py_arg(1), tp_tuple)) {
+        py_newnotimplemented(py_retval());
+        return true;
+    }
+    py_TValue *p0, *p1;
+    int lhs_length = py_tuple_len(py_arg(0));
+    int rhs_length = py_tuple_len(py_arg(1));
+    p0 = py_tuple_data(py_arg(0));
+    p1 = py_tuple_data(py_arg(1));
+    int length = lhs_length < rhs_length ? lhs_length : rhs_length;
+    for(int i = 0; i < length; i++) {
+        int res_lt = py_less(p0 + i, p1 + i);
+        if(res_lt == -1) return false;
+        if(res_lt) {
+            py_newbool(py_retval(), true);
+            return true;
+        } else {
+            int res_eq = py_equal(p0 + i, p1 + i);
+            if(res_eq == -1) return false;
+            if(!res_eq) {
+                py_newbool(py_retval(), false);
+                return true;
+            }
+        }
+    }
+    py_newbool(py_retval(), lhs_length < rhs_length);
     return true;
 }
 
-static bool namedict__get(int argc, py_Ref argv) {
-    PY_CHECK_ARGC(3);
-    PY_CHECK_ARG_TYPE(1, tp_str);
-    py_Name name = py_namev(py_tosv(py_arg(1)));
-    py_Ref res = py_getdict(py_getslot(argv, 0), name);
-    py_assign(py_retval(), res ? res : py_arg(2));
-    return true;
-}
-
-static bool namedict__setitem__(int argc, py_Ref argv) {
-    PY_CHECK_ARGC(3);
-    PY_CHECK_ARG_TYPE(1, tp_str);
-    py_Name name = py_namev(py_tosv(py_arg(1)));
-    py_setdict(py_getslot(argv, 0), name, py_arg(2));
-    py_newnone(py_retval());
-    return true;
-}
-
-static bool namedict__delitem__(int argc, py_Ref argv) {
-    PY_CHECK_ARGC(2);
-    PY_CHECK_ARG_TYPE(1, tp_str);
-    py_Name name = py_namev(py_tosv(py_arg(1)));
-    if(!py_deldict(py_getslot(argv, 0), name)) return KeyError(py_arg(1));
-    py_newnone(py_retval());
-    return true;
-}
-
-static bool namedict__contains__(int argc, py_Ref argv) {
-    PY_CHECK_ARGC(2);
-    PY_CHECK_ARG_TYPE(1, tp_str);
-    py_Name name = py_namev(py_tosv(py_arg(1)));
-    py_Ref res = py_getdict(py_getslot(argv, 0), name);
-    py_newbool(py_retval(), res != NULL);
-    return true;
-}
-
-static bool namedict_items(int argc, py_Ref argv) {
+static bool tuple__iter__(int argc, py_Ref argv) {
     PY_CHECK_ARGC(1);
-    py_Ref object = py_getslot(argv, 0);
-    NameDict* dict = PyObject__dict(object->_obj);
-    py_newlist(py_retval());
-    for(int i = 0; i < dict->capacity; i++) {
-        NameDict_KV* kv = &dict->items[i];
-        if(kv->key == NULL) continue;
-        py_Ref slot = py_list_emplace(py_retval());
-        py_Ref p = py_newtuple(slot, 2);
-        p[0] = *py_name2ref(kv->key);
-        p[1] = kv->value;
-    }
+    tuple_iterator* ud = py_newobject(py_retval(), tp_tuple_iterator, 1, sizeof(tuple_iterator));
+    ud->p = py_tuple_data(argv);
+    ud->length = py_tuple_len(argv);
+    ud->index = 0;
+    py_setslot(py_retval(), 0, argv);  // keep a reference to the object
     return true;
 }
 
-static bool namedict_clear(int argc, py_Ref argv) {
+static bool tuple__contains__(int argc, py_Ref argv) {
+    PY_CHECK_ARGC(2);
+    return pk_arraycontains(py_arg(0), py_arg(1));
+}
+
+static bool tuple__hash__(int argc, py_Ref argv) {
     PY_CHECK_ARGC(1);
-    py_Ref object = py_getslot(argv, 0);
-    NameDict* dict = PyObject__dict(object->_obj);
-    NameDict__clear(dict);
-    py_newnone(py_retval());
+    int length = py_tuple_len(argv);
+    py_TValue* data = py_tuple_data(argv);
+    uint64_t x = 1000003;
+    for(int i = 0; i < length; i++) {
+        py_i64 y;
+        if(!py_hash(&data[i], &y)) return false;
+        // recommended by Github Copilot
+        x = x ^ (y + 0x9e3779b9 + (x << 6) + (x >> 2));
+    }
+    py_newint(py_retval(), x);
     return true;
 }
 
-py_Type pk_namedict__register() {
-    py_Type type = pk_newtype("namedict", tp_object, NULL, NULL, false, true);
+py_Type pk_tuple__register() {
+    py_Type type = pk_newtype("tuple", tp_object, NULL, NULL, false, true);
 
-    py_bindmagic(type, __getitem__, namedict__getitem__);
-    py_bindmagic(type, __setitem__, namedict__setitem__);
-    py_bindmagic(type, __delitem__, namedict__delitem__);
-    py_bindmagic(type, __contains__, namedict__contains__);
-    py_setdict(py_tpobject(type), __hash__, py_None());
-    py_bindmethod(type, "items", namedict_items);
-    py_bindmethod(type, "clear", namedict_clear);
-    py_bindmethod(type, "get", namedict__get);
+    py_bindmagic(type, __len__, tuple__len__);
+    py_bindmagic(type, __repr__, tuple__repr__);
+    py_bindmagic(type, __new__, tuple__new__);
+    py_bindmagic(type, __getitem__, tuple__getitem__);
+    py_bindmagic(type, __eq__, tuple__eq__);
+    py_bindmagic(type, __ne__, tuple__ne__);
+    py_bindmagic(type, __lt__, tuple__lt__);
+    py_bindmagic(type, __iter__, tuple__iter__);
+    py_bindmagic(type, __contains__, tuple__contains__);
+    py_bindmagic(type, __hash__, tuple__hash__);
     return type;
 }
 
-// src/public/py_list.c
+// src/public/PyList.c
 void py_newlist(py_OutRef out) {
     List* ud = py_newobject(out, tp_list, 0, sizeof(List));
     c11_vector__ctor(ud, sizeof(py_TValue));
@@ -11670,60 +12340,1363 @@ py_Type pk_list__register() {
     return type;
 }
 
-// src/public/cast.c
-int64_t py_toint(py_Ref self) {
-    assert(self->type == tp_int);
-    return self->_i64;
+// src/debugger/dap.c
+#include <stdbool.h>
+#include <stdio.h>
+#if PK_ENABLE_OS
+
+#define DAP_COMMAND_LIST(X)                                                                        \
+    X(initialize)                                                                                  \
+    X(setBreakpoints)                                                                              \
+    X(attach)                                                                                      \
+    X(launch)                                                                                      \
+    X(next)                                                                                        \
+    X(stepIn)                                                                                      \
+    X(stepOut)                                                                                     \
+    X(continue)                                                                                    \
+    X(stackTrace)                                                                                  \
+    X(scopes)                                                                                      \
+    X(variables)                                                                                   \
+    X(threads)                                                                                     \
+    X(configurationDone)                                                                           \
+    X(ready)                                                                                       \
+    X(evaluate)                                                                                    \
+    X(exceptionInfo)
+
+#define DECLARE_HANDLE_FN(name) void c11_dap_handle_##name(py_Ref arguments, c11_sbuf*);
+DAP_COMMAND_LIST(DECLARE_HANDLE_FN)
+#undef DECLARE_ARG_FN
+
+typedef void (*c11_dap_arg_parser_fn)(py_Ref, c11_sbuf*);
+
+typedef struct {
+    const char* command;
+    c11_dap_arg_parser_fn parser;
+} dap_command_entry;
+
+#define DAP_ENTRY(name) {#name, c11_dap_handle_##name},
+static dap_command_entry dap_command_table[] = {
+    DAP_COMMAND_LIST(DAP_ENTRY){NULL, NULL}
+};
+
+#undef DAP_ENTRY
+
+static struct c11_dap_server {
+    int dap_next_seq;
+    char buffer_data[1024];
+    char* buffer_begin;
+    int buffer_length;
+    c11_socket_handler server;
+    c11_socket_handler toclient;
+    bool isconfiguredone;
+    bool isfirstatttach;
+    bool isUserCode;
+    bool isAttached;
+    bool isclientready;
+} server;
+
+void c11_dap_handle_initialize(py_Ref arguments, c11_sbuf* buffer) {
+    c11_sbuf__write_cstr(buffer,
+                         "\"body\":{"
+                         "\"supportsConfigurationDoneRequest\":true,"
+                         "\"supportsExceptionInfoRequest\":true"
+                         "}");
+    c11_sbuf__write_char(buffer, ',');
 }
 
-void* py_totrivial(py_Ref self) { return &self->_chars; }
+void c11_dap_handle_attach(py_Ref arguments, c11_sbuf* buffer) { server.isfirstatttach = true; }
 
-double py_tofloat(py_Ref self) {
-    assert(self->type == tp_float);
-    return self->_f64;
+void c11_dap_handle_launch(py_Ref arguments, c11_sbuf* buffer) { server.isfirstatttach = true; }
+
+void c11_dap_handle_ready(py_Ref arguments, c11_sbuf* buffer) { server.isclientready = true; }
+
+void c11_dap_handle_next(py_Ref arguments, c11_sbuf* buffer) {
+    c11_debugger_set_step_mode(C11_STEP_OVER);
 }
 
-bool py_castfloat(py_Ref self, double* out) {
-    switch(self->type) {
-        case tp_int: *out = (double)self->_i64; return true;
-        case tp_float: *out = self->_f64; return true;
-        default: return TypeError("expected 'int' or 'float', got '%t'", self->type);
+void c11_dap_handle_stepIn(py_Ref arguments, c11_sbuf* buffer) {
+    c11_debugger_set_step_mode(C11_STEP_IN);
+}
+
+void c11_dap_handle_stepOut(py_Ref arguments, c11_sbuf* buffer) {
+    c11_debugger_set_step_mode(C11_STEP_OUT);
+}
+
+void c11_dap_handle_continue(py_Ref arguments, c11_sbuf* buffer) {
+    c11_debugger_set_step_mode(C11_STEP_CONTINUE);
+}
+
+void c11_dap_handle_threads(py_Ref arguments, c11_sbuf* buffer) {
+    c11_sbuf__write_cstr(buffer,
+                         "\"body\":{\"threads\":["
+                         "{\"id\":1,\"name\":\"MainThread\"}"
+                         "]}");
+    c11_sbuf__write_char(buffer, ',');
+}
+
+void c11_dap_handle_configurationDone(py_Ref arguments, c11_sbuf* buffer) {
+    server.isconfiguredone = true;
+}
+
+inline static void c11_dap_build_Breakpoint(int id, int line, c11_sbuf* buffer) {
+    pk_sprintf(buffer, "{\"id\":%d,\"verified\":true,\"line\":%d}", id, line);
+}
+
+void c11_dap_handle_setBreakpoints(py_Ref arguments, c11_sbuf* buffer) {
+    if(!py_smarteval("_0['source']['path']", NULL, arguments)) {
+        py_printexc();
+        return;
+    }
+    const char* sourcename = c11_strdup(py_tostr(py_retval()));
+    if(!py_smarteval("[bp['line'] for bp in _0['breakpoints']]", NULL, arguments)) {
+        py_printexc();
+        return;
+    }
+    int bp_numbers = c11_debugger_reset_breakpoints_by_source(sourcename);
+    c11_sbuf__write_cstr(buffer, "\"body\":");
+    c11_sbuf__write_cstr(buffer, "{\"breakpoints\":[");
+    for(int i = 0; i < py_list_len(py_retval()); i++) {
+        if(i != 0) c11_sbuf__write_char(buffer, ',');
+        int line = py_toint(py_list_getitem(py_retval(), i));
+        c11_debugger_setbreakpoint(sourcename, line);
+        c11_dap_build_Breakpoint(i + bp_numbers, line, buffer);
+    }
+    c11_sbuf__write_cstr(buffer, "]}");
+    c11_sbuf__write_char(buffer, ',');
+    PK_FREE((void*)sourcename);
+}
+
+inline static void c11_dap_build_ExceptionInfo(const char* exc_type, const char* exc_message, c11_sbuf* buffer) {
+    const char* safe_type = exc_type ? exc_type : "UnknownException";
+    const char* safe_message = exc_message ? exc_message : "No additional details available";
+
+    c11_sv type_sv = {.data = safe_type, .size = strlen(safe_type)};
+    c11_sv message_sv = {.data = safe_message, .size = strlen(safe_message)};
+
+    c11_sbuf combined_buffer;
+    c11_sbuf__ctor(&combined_buffer);
+    pk_sprintf(&combined_buffer, "%s: %s", safe_type, safe_message);
+    c11_string* combined_details = c11_sbuf__submit(&combined_buffer);
+
+    pk_sprintf(buffer, 
+        "{\"exceptionId\":%Q,"
+        "\"description\":%Q,"
+        "\"breakMode\":\"unhandled\"}",
+        type_sv,
+        (c11_sv){.data = combined_details->data, .size = combined_details->size}
+    );
+
+    c11_string__delete(combined_details);
+}
+
+void c11_dap_handle_exceptionInfo(py_Ref arguments, c11_sbuf* buffer) {
+    const char* message;
+    const char* name = c11_debugger_excinfo(&message);
+    c11_sbuf__write_cstr(buffer, "\"body\":");
+    c11_dap_build_ExceptionInfo(name, message, buffer);
+    c11_sbuf__write_char(buffer, ',');
+}
+
+
+void c11_dap_handle_stackTrace(py_Ref arguments, c11_sbuf* buffer) {
+    c11_sbuf__write_cstr(buffer, "\"body\":");
+    c11_debugger_frames(buffer);
+    c11_sbuf__write_char(buffer, ',');
+}
+
+void c11_dap_handle_evaluate(py_Ref arguments, c11_sbuf* buffer) {
+    int res = py_dict_getitem_by_str(arguments, "expression");
+    if(res <= 0) {
+        py_printexc();
+        c11__abort("[DEBUGGER ERROR] no expression found in evaluate request");
+    }
+    // [eval, nil, expression,  globals, locals]
+    // vectorcall would pop the above 5 items
+    // so we don't need to pop them manually
+    py_StackRef p0 = py_peek(0);
+    py_Ref py_eval = py_pushtmp();
+    py_pushnil();
+    py_Ref expression = py_pushtmp();
+    py_assign(expression, py_retval());
+    py_assign(py_eval, py_getbuiltin(py_name("eval")));
+    py_newglobals(py_pushtmp());
+    py_newlocals(py_pushtmp());
+    bool ok = py_vectorcall(3, 0);
+
+    char* result = NULL;
+    c11_sbuf__write_cstr(buffer, "\"body\":");
+    if(!ok) {
+        result = py_formatexc();
+        py_clearexc(p0);
+    } else {
+        py_Ref py_result = py_pushtmp();
+        py_assign(py_result, py_retval());
+        py_str(py_result);
+        py_assign(py_result, py_retval());
+        result = c11_strdup(py_tostr(py_result));
+        py_pop();
+    }
+
+    c11_sv result_sv = {.data = result, .size = strlen(result)};
+    pk_sprintf(buffer, "{\"result\":%Q,\"variablesReference\":0}", result_sv);
+    PK_FREE((void*)result);
+    c11_sbuf__write_char(buffer, ',');
+}
+
+void c11_dap_handle_scopes(py_Ref arguments, c11_sbuf* buffer) {
+    int res = py_dict_getitem_by_str(arguments, "frameId");
+    if(res <= 0) {
+        if(res == 0) {
+            c11__abort("[DEBUGGER ERROR] no frameID found in scopes request");
+        } else {
+            py_printexc();
+            c11__abort("[DEBUGGER ERROR] an error occurred while parsing request frameId");
+        }
+        return;
+    }
+    int frameid = py_toint(py_retval());
+    c11_sbuf__write_cstr(buffer, "\"body\":");
+    c11_debugger_scopes(frameid, buffer);
+    c11_sbuf__write_char(buffer, ',');
+}
+
+void c11_dap_handle_variables(py_Ref arguments, c11_sbuf* buffer) {
+    int res = py_dict_getitem_by_str(arguments, "variablesReference");
+    if(res <= 0) {
+        if(res == 0) {
+            printf("[DEBUGGER ERROR] no frameID found\n");
+        } else {
+            py_printexc();
+        }
+        return;
+    }
+    int variablesReference = py_toint(py_retval());
+    c11_sbuf__write_cstr(buffer, "\"body\":");
+    c11_debugger_unfold_var(variablesReference, buffer);
+    c11_sbuf__write_char(buffer, ',');
+}
+
+const char* c11_dap_handle_request(const char* message) {
+    if(!py_json_loads(message)) {
+        py_printexc();
+        c11__abort("[DEBUGGER ERROR] invalid JSON request");
+    }
+    py_Ref py_request = py_pushtmp();
+    py_Ref py_arguments = py_pushtmp();
+    py_Ref py_command = py_pushtmp();
+    py_assign(py_request, py_retval());
+
+    int res = py_dict_getitem_by_str(py_request, "command");
+    if(res == -1) {
+        py_printexc();
+        c11__abort("[DEBUGGER ERROR] an error occurred while parsing request");
+    } else if(res == 0) {
+        c11__abort("[DEBUGGER ERROR] no command found in request");
+    }
+    py_assign(py_command, py_retval());
+    const char* command = py_tostr(py_command);
+
+    res = py_dict_getitem_by_str(py_request, "arguments");
+    if(res == -1) {
+        py_printexc();
+        c11__abort("[DEBUGGER ERROR] an error occurred while parsing request arguments");
+    }
+    py_assign(py_arguments, py_retval());
+
+    res = py_dict_getitem_by_str(py_request, "seq");
+    if(res == -1) {
+        py_printexc();
+        c11__abort("[DEBUGGER ERROR] an error occurred while parsing request sequence number");
+    }
+    int request_seq = (res == 1) ? py_toint(py_retval()) : 0;
+
+    c11_sbuf response_buffer;
+    c11_sbuf__ctor(&response_buffer);
+    pk_sprintf(&response_buffer,
+               "{\"seq\":%d,\"type\":\"response\",\"request_seq\":%d,\"command\":\"%s\",",
+               server.dap_next_seq++,
+               request_seq,
+               command);
+    for(dap_command_entry* entry = dap_command_table; entry->command != NULL; entry++) {
+        if(strcmp(entry->command, command) == 0) {
+            entry->parser(py_arguments, &response_buffer);
+            break;
+        }
+    }
+    c11_sbuf__write_cstr(&response_buffer, "\"success\":true}");
+
+    c11_string* c11_string_response = c11_sbuf__submit(&response_buffer);
+    const char* response = c11_strdup(c11_string_response->data);
+    c11_string__delete(c11_string_response);
+
+    py_pop();  // py_arguments
+    py_pop();  // py_request
+    py_pop();  // py_command
+
+    return response;
+}
+
+void c11_dap_send_event(const char* event_name, const char* body_json) {
+    c11_sbuf buffer;
+    char header[64];
+    c11_sbuf__ctor(&buffer);
+    pk_sprintf(&buffer,
+               "{\"seq\":%d,\"type\":\"event\",\"event\":\"%s\",\"body\":%s}",
+               server.dap_next_seq++,
+               event_name,
+               body_json);
+    c11_string* json = c11_sbuf__submit(&buffer);
+    int json_len = json->size;
+    int header_len = snprintf(header, sizeof(header), "Content-Length: %d\r\n\r\n", json_len);
+    c11_socket_send(server.toclient, header, header_len);
+    c11_socket_send(server.toclient, json->data, json_len);
+    c11_string__delete(json);
+}
+
+void c11_dap_send_output_event(const char* category, const char* fmt, ...) {
+    va_list args;
+    va_start(args, fmt);
+    c11_sbuf output;
+    c11_sbuf__ctor(&output);
+    pk_vsprintf(&output, fmt, args);
+    va_end(args);
+
+    c11_sbuf buffer;
+    c11_string* output_json = c11_sbuf__submit(&output);
+    c11_sv sv_output = {.data = output_json->data, .size = output_json->size};
+    c11_sbuf__ctor(&buffer);
+    pk_sprintf(&buffer, "{\"category\":\"%s\",\"output\":%Q}", category, sv_output);
+    c11_string* body_json = c11_sbuf__submit(&buffer);
+    c11_dap_send_event("output", body_json->data);
+    c11_string__delete(body_json);
+    c11_string__delete(output_json);
+}
+
+void c11_dap_send_stop_event(C11_STOP_REASON reason) {
+    if(reason == C11_DEBUGGER_NOSTOP) return;
+    const char* reason_str = "unknown";
+    switch(reason) {
+        case C11_DEBUGGER_STEP: reason_str = "step"; break;
+        case C11_DEBUGGER_EXCEPTION: reason_str = "exception"; break;
+        case C11_DEBUGGER_BP: reason_str = "breakpoint"; break;
+        default: break;
+    }
+    c11_sbuf buf;
+    c11_sbuf__ctor(&buf);
+    pk_sprintf(&buf, "{\"reason\":\"%s\",\"threadId\":1,\"allThreadsStopped\":true", reason_str);
+    c11_sbuf__write_char(&buf, '}');
+    c11_string* body_json = c11_sbuf__submit(&buf);
+    c11_dap_send_event("stopped", body_json->data);
+    c11_string__delete(body_json);
+}
+
+void c11_dap_send_exited_event(int exitCode) {
+    char body[64];
+    snprintf(body, sizeof(body), "{\"exitCode\":%d}", exitCode);
+    c11_dap_send_event("exited", body);
+}
+
+void c11_dap_send_fatal_event(const char* message) {
+    char body[128];
+    snprintf(body, sizeof(body), "{\"message\":\"%s\"}", message);
+    c11_dap_send_event("pkpy/fatalError", body);
+}
+
+void c11_dap_send_initialized_event() { c11_dap_send_event("initialized", "{}"); }
+
+int c11_dap_read_content_length(const char* buffer, int* header_length) {
+    const char* length_begin = strstr(buffer, "Content-Length: ");
+    if(!length_begin) {
+        printf("[DEBUGGER ERROR] : no Content-Length filed found\n");
+        *header_length = 0;
+        return -1;
+    }
+    length_begin += strlen("Content-Length: ");
+    const char* length_end = strstr(length_begin, "\r\n\r\n");
+    if(!length_end) {
+        printf("[DEBUGGER ERROR] : the seperator should br \\r\\n\\r\\n\n");
+        *header_length = 0;
+        return -1;
+    }
+    char* endptr = NULL;
+    long value = strtol(length_begin, &endptr, 10);
+    if(endptr == length_begin) {
+        printf("[DEBUGGER EORRO] : the length field is empty\n");
+        *header_length = 0;
+        return -1;
+    }
+    *header_length = (int)(endptr - buffer) + 4;
+    return (int)value;
+}
+
+const char* c11_dap_read_message() {
+    int message_length =
+        c11_socket_recv(server.toclient, server.buffer_begin, 1024 - server.buffer_length);
+    if(message_length == 0) {
+        printf("[DEBUGGER INFO] : client quit\n");
+        exit(0);
+    }
+    if(message_length < 0) { return NULL; }
+    server.buffer_length += message_length;
+    if(server.buffer_length == 0) return NULL;
+    int header_length;
+    int content_length = c11_dap_read_content_length(server.buffer_begin, &header_length);
+    if(content_length <= 0 || header_length <= 0) {
+        printf("[DEBUGGER ERROR]: invalid DAP header\n");
+        server.buffer_length = 0;
+        server.buffer_begin = server.buffer_data;
+        return NULL;
+    }
+    server.buffer_begin += header_length;
+    server.buffer_length -= header_length;
+    c11_sbuf result;
+    c11_sbuf__ctor(&result);
+    while(content_length > server.buffer_length) {
+        c11_sbuf__write_cstrn(&result, server.buffer_begin, server.buffer_length);
+        content_length -= server.buffer_length;
+        message_length = c11_socket_recv(server.toclient, server.buffer_data, 1024);
+        if(message_length == 0) {
+            printf("[DEBUGGER INFO] : client quit\n");
+            exit(0);
+        }
+        if(message_length < 0) continue;
+        server.buffer_begin = server.buffer_data;
+        server.buffer_length = message_length;
+    }
+    c11_sbuf__write_cstrn(&result, server.buffer_begin, content_length);
+    server.buffer_begin += content_length;
+    server.buffer_length -= content_length;
+    memmove(server.buffer_data, server.buffer_begin, server.buffer_length);
+    server.buffer_begin = server.buffer_data;
+    c11_string* tmp_result = c11_sbuf__submit(&result);
+    const char* dap_message = c11_strdup(tmp_result->data);
+    c11_string__delete(tmp_result);
+    return dap_message;
+}
+
+void c11_dap_init_server(const char* hostname, unsigned short port) {
+    server.dap_next_seq = 1;
+    server.isconfiguredone = false;
+    server.isclientready = false;
+    server.isfirstatttach = false;
+    server.isUserCode = false;
+    server.isAttached = false;
+    server.buffer_begin = server.buffer_data;
+    server.server = c11_socket_create(C11_AF_INET, C11_SOCK_STREAM, 0);
+    c11_socket_bind(server.server, hostname, port);
+    c11_socket_listen(server.server, 0);
+    // c11_dap_send_output_event("console", "[DEBUGGER INFO] : listen on %s:%hu\n",hostname,port);
+    printf("[DEBUGGER INFO] : listen on %s:%hu\n", hostname, port);
+}
+
+void c11_dap_waitforclient(const char* hostname, unsigned short port) {
+    server.toclient = c11_socket_accept(server.server, NULL, NULL);
+}
+
+inline static void c11_dap_handle_message() {
+    const char* message = c11_dap_read_message();
+    if(message == NULL) { return; }
+    // c11_dap_send_output_event("console", "[DEBUGGER LOG] : read request %s\n", message);
+    const char* response_content = c11_dap_handle_request(message);
+    if(response_content != NULL) {
+        // c11_dap_send_output_event("console",
+        //                           "[DEBUGGER LOG] : send response %s\n",
+        //                           response_content);
+    }
+    c11_sbuf buffer;
+    c11_sbuf__ctor(&buffer);
+    pk_sprintf(&buffer, "Content-Length: %d\r\n\r\n%s", strlen(response_content), response_content);
+    c11_string* response = c11_sbuf__submit(&buffer);
+    c11_socket_send(server.toclient, response->data, response->size);
+    PK_FREE((void*)message);
+    PK_FREE((void*)response_content);
+    c11_string__delete(response);
+}
+
+void c11_dap_configure_debugger() {
+    while(server.isconfiguredone == false) {
+        c11_dap_handle_message();
+        if(server.isfirstatttach) {
+            c11_dap_send_initialized_event();
+            server.isfirstatttach = false;
+            server.isAttached = true;
+            server.isUserCode = true;
+        } else if(server.isclientready) {
+            server.isclientready = false;
+            return;
+        }
+    }
+    // c11_dap_send_output_event("console", "[DEBUGGER INFO] : client configure done\n");
+}
+
+void c11_dap_tracefunc(py_Frame* frame, enum py_TraceEvent event) {
+    py_sys_settrace(NULL, false);
+    server.isUserCode = false;
+    C11_DEBUGGER_STATUS result = c11_debugger_on_trace(frame, event);
+    if(result == C11_DEBUGGER_EXIT) {
+        // c11_dap_send_output_event("console", "[DEBUGGER INFO] : program exit\n");
+        c11_dap_send_exited_event(0);
+        exit(0);
+    }
+    if(result != C11_DEBUGGER_SUCCESS) {
+        const char* message = NULL;
+        switch(result) {
+            case C11_DEBUGGER_FILEPATH_ERROR:
+                message = "Invalid py_file path: '..' forbidden, './' only allowed at start.";
+                break;
+            case C11_DEBUGGER_UNKNOW_ERROR:
+            default: message = "Unknown debugger failure."; break;
+        }
+        if(message) { c11_dap_send_fatal_event(message); }
+        c11_dap_send_exited_event(1);
+        exit(1);
+    }
+    c11_dap_handle_message();
+    C11_STOP_REASON reason = c11_debugger_should_pause();
+    if(reason == C11_DEBUGGER_NOSTOP) {
+        py_sys_settrace(c11_dap_tracefunc, false);
+        server.isUserCode = true;
+        return;
+    }
+    c11_dap_send_stop_event(reason);
+    while(c11_debugger_should_keep_pause()) {
+        c11_dap_handle_message();
+    }
+    server.isUserCode = true;
+    py_sys_settrace(c11_dap_tracefunc, false);
+}
+
+void py_debugger_waitforattach(const char* hostname, unsigned short port) {
+    c11_debugger_init();
+    c11_dap_init_server(hostname, port);
+    while(!server.isconfiguredone) {
+        c11_dap_waitforclient(hostname, port);
+        c11_dap_configure_debugger();
+        if(!server.isconfiguredone) {
+            c11_socket_close(server.toclient);
+            // c11_dap_send_output_event("console", "[DEBUGGER INFO] : An clinet is ready\n");
+        }
+    }
+    c11_socket_set_block(server.toclient, 0);
+    py_sys_settrace(c11_dap_tracefunc, true);
+}
+
+void py_debugger_exit(int exitCode) { c11_dap_send_exited_event(exitCode); }
+
+int py_debugger_status() { 
+    if(!server.isAttached) {
+        return 0;
+    }
+    return server.isUserCode ? 1 : 2;
+ }
+
+void py_debugger_exceptionbreakpoint(py_Ref exc) {
+    assert(py_isinstance(exc, tp_BaseException));
+
+    py_sys_settrace(NULL, true);
+    server.isUserCode = false;
+
+    c11_debugger_exception_on_trace(exc);
+    for(;;) {
+        C11_STOP_REASON reason = c11_debugger_should_pause();
+        c11_dap_send_stop_event(reason);
+        while(c11_debugger_should_keep_pause()) {
+            c11_dap_handle_message();
+        }
     }
 }
 
-bool py_castfloat32(py_Ref self, float* out) {
-    switch(self->type) {
-        case tp_int: *out = (float)self->_i64; return true;
-        case tp_float: *out = (float)self->_f64; return true;
-        default: return TypeError("expected 'int' or 'float', got '%t'", self->type);
-    }
+#endif // PK_ENABLE_OS
+// src/debugger/core.c
+#include <ctype.h>
+
+#if PK_ENABLE_OS
+
+typedef struct c11_debugger_breakpoint {
+    const char* sourcename;
+    int lineno;
+} c11_debugger_breakpoint;
+
+typedef struct c11_debugger_scope_index {
+    int locals_ref;
+    int globals_ref;
+} c11_debugger_scope_index;
+
+#define SMALLMAP_T__HEADER
+#define SMALLMAP_T__SOURCE
+#define K int
+#define V c11_debugger_scope_index
+#define NAME c11_smallmap_d2index
+#if !defined(SMALLMAP_T__HEADER) && !defined(SMALLMAP_T__SOURCE)
+#include "pocketpy/common/vector.h"
+#include "pocketpy/common/utils.h"
+#include "pocketpy/config.h"
+
+#define SMALLMAP_T__HEADER
+#define SMALLMAP_T__SOURCE
+/* Input */
+#define K int
+#define V float
+#define NAME c11_smallmap_d2f
+#endif
+
+/* Optional Input */
+#ifndef less
+#define less(a, b) ((a) < (b))
+#endif
+
+#ifndef equal
+#define equal(a, b) ((a) == (b))
+#endif
+
+/* Temporary macros */
+#define partial_less(a, b) less((a).key, (b))
+#define CONCAT(A, B) CONCAT_(A, B)
+#define CONCAT_(A, B) A##B
+
+#define KV CONCAT(NAME, _KV)
+#define METHOD(name) CONCAT(NAME, CONCAT(__, name))
+
+#ifdef SMALLMAP_T__HEADER
+/* Declaration */
+typedef struct {
+    K key;
+    V value;
+} KV;
+
+typedef c11_vector NAME;
+
+void METHOD(ctor)(NAME* self);
+void METHOD(dtor)(NAME* self);
+NAME* METHOD(new)();
+void METHOD(delete)(NAME* self);
+void METHOD(set)(NAME* self, K key, V value);
+V* METHOD(try_get)(const NAME* self, K key);
+V METHOD(get)(const NAME* self, K key, V default_value);
+bool METHOD(contains)(const NAME* self, K key);
+bool METHOD(del)(NAME* self, K key);
+void METHOD(clear)(NAME* self);
+
+#endif
+
+#ifdef SMALLMAP_T__SOURCE
+/* Implementation */
+
+void METHOD(ctor)(NAME* self) {
+    c11_vector__ctor(self, sizeof(KV));
+    c11_vector__reserve(self, 4);
 }
 
-bool py_castint(py_Ref self, int64_t* out) {
-    if(self->type == tp_int) {
-        *out = self->_i64;
+void METHOD(dtor)(NAME* self) { c11_vector__dtor(self); }
+
+NAME* METHOD(new)() {
+    NAME* self = PK_MALLOC(sizeof(NAME));
+    METHOD(ctor)(self);
+    return self;
+}
+
+void METHOD(delete)(NAME* self) {
+    METHOD(dtor)(self);
+    PK_FREE(self);
+}
+
+void METHOD(set)(NAME* self, K key, V value) {
+    int index;
+    c11__lower_bound(KV, self->data, self->length, key, partial_less, &index);
+    if(index != self->length) {
+        KV* it = c11__at(KV, self, index);
+        if(equal(it->key, key)) {
+            it->value = value;
+            return;
+        }
+    }
+    KV kv = {key, value};
+    c11_vector__insert(KV, self, index, kv);
+}
+
+V* METHOD(try_get)(const NAME* self, K key) {
+    int index;
+    c11__lower_bound(KV, self->data, self->length, key, partial_less, &index);
+    if(index != self->length) {
+        KV* it = c11__at(KV, self, index);
+        if(equal(it->key, key)) return &it->value;
+    }
+    return NULL;
+}
+
+V METHOD(get)(const NAME* self, K key, V default_value) {
+    V* p = METHOD(try_get)(self, key);
+    return p ? *p : default_value;
+}
+
+bool METHOD(contains)(const NAME* self, K key) { return METHOD(try_get)(self, key) != NULL; }
+
+bool METHOD(del)(NAME* self, K key) {
+    int index;
+    c11__lower_bound(KV, self->data, self->length, key, partial_less, &index);
+    if(index != self->length) {
+        KV* it = c11__at(KV, self, index);
+        if(equal(it->key, key)) {
+            c11_vector__erase(KV, self, index);
+            return true;
+        }
+    }
+    return false;
+}
+
+void METHOD(clear)(NAME* self) { c11_vector__clear(self); }
+
+#endif
+
+/* Undefine all macros */
+#undef KV
+#undef METHOD
+#undef CONCAT
+#undef CONCAT_
+
+#undef K
+#undef V
+#undef NAME
+#undef less
+#undef partial_less
+#undef equal
+
+#undef SMALLMAP_T__SOURCE
+#undef SMALLMAP_T__HEADER
+
+static struct c11_debugger {
+    py_Frame* current_frame;
+    const char* current_filename;
+    const char* current_excname;
+    const char* current_excmessage;
+    enum py_TraceEvent current_event;
+
+    int curr_stack_depth;
+    int current_line;
+    int pause_allowed_depth;
+    int step_line;
+    C11_STEP_MODE step_mode;
+    bool keep_suspend;
+    bool isexceptionmode;
+
+    c11_vector* exception_stacktrace;
+    c11_vector breakpoints;
+    c11_vector py_frames;
+    c11_smallmap_d2index scopes_query_cache;
+
+#define python_vars py_r7()
+
+} debugger;
+
+inline static void init_structures() {
+    c11_vector__ctor(&debugger.breakpoints, sizeof(c11_debugger_breakpoint));
+    c11_vector__ctor(&debugger.py_frames, sizeof(py_Frame*));
+    c11_smallmap_d2index__ctor(&debugger.scopes_query_cache);
+    py_newlist(python_vars);
+    py_newnone(py_list_emplace(python_vars));
+}
+
+inline static void clear_structures() {
+    c11_vector__clear(&debugger.py_frames);
+    c11_smallmap_d2index__clear(&debugger.scopes_query_cache);
+    py_list_clear(python_vars);
+    py_newnone(py_list_emplace(python_vars));
+}
+
+inline static py_Ref get_variable(int var_ref) {
+    assert(var_ref < py_list_len(python_vars) && var_ref > 0);
+    return py_list_getitem(python_vars, var_ref);
+}
+
+const inline static char* format_filepath(const char* path) {
+    if(strstr(path, "..")) { return NULL; }
+    if(strstr(path + 1, "./") || strstr(path + 1, ".\\")) { return NULL; }
+    if(path[0] == '.' && (path[1] == '/' || path[1] == '\\')) { return path + 2; }
+    return path;
+}
+
+void c11_debugger_init() {
+    debugger.curr_stack_depth = 0;
+    debugger.current_line = -1;
+    debugger.pause_allowed_depth = -1;
+    debugger.step_line = -1;
+    debugger.keep_suspend = false;
+    debugger.isexceptionmode = false;
+    debugger.step_mode = C11_STEP_CONTINUE;
+    init_structures();
+}
+
+C11_DEBUGGER_STATUS c11_debugger_on_trace(py_Frame* frame, enum py_TraceEvent event) {
+    debugger.current_frame = frame;
+    debugger.current_event = event;
+    const char* source_name = py_Frame_sourceloc(debugger.current_frame, &debugger.current_line);
+    debugger.current_filename = format_filepath(source_name);
+    if(debugger.current_filename == NULL) { return C11_DEBUGGER_FILEPATH_ERROR; }
+    clear_structures();
+    switch(event) {
+        case TRACE_EVENT_PUSH: debugger.curr_stack_depth++; break;
+        case TRACE_EVENT_POP: debugger.curr_stack_depth--; break;
+        default: break;
+    }
+    // if(debugger.curr_stack_depth == 0) return C11_DEBUGGER_EXIT;
+    return C11_DEBUGGER_SUCCESS;
+}
+
+void c11_debugger_exception_on_trace(py_Ref exc) {
+    BaseException* ud = py_touserdata(exc);
+    c11_vector* stacktrace = &ud->stacktrace;
+    const char* name = py_tpname(exc->type);
+    const char* message = safe_stringify_exception(exc);
+    debugger.exception_stacktrace = stacktrace;
+    debugger.isexceptionmode = true;
+    debugger.current_excname = name;
+    debugger.current_excmessage = message;
+    clear_structures();
+    py_assign(py_list_getitem(python_vars, 0), exc);
+    py_clearexc(NULL);
+}
+
+const char* c11_debugger_excinfo(const char** message) {
+    *message = debugger.current_excmessage;
+    return debugger.current_excname;
+}
+
+void c11_debugger_set_step_mode(C11_STEP_MODE mode) {
+    switch(mode) {
+        case C11_STEP_IN: debugger.pause_allowed_depth = INT32_MAX; break;
+        case C11_STEP_OVER:
+            debugger.pause_allowed_depth = debugger.curr_stack_depth;
+            debugger.step_line = debugger.current_line;
+            break;
+        case C11_STEP_OUT: debugger.pause_allowed_depth = debugger.curr_stack_depth - 1; break;
+        case C11_STEP_CONTINUE: debugger.pause_allowed_depth = -1; break;
+        default: break;
+    }
+    debugger.step_mode = mode;
+    debugger.keep_suspend = false;
+}
+
+int c11_debugger_setbreakpoint(const char* filename, int lineno) {
+    c11_debugger_breakpoint breakpoint = {.sourcename = c11_strdup(filename), .lineno = lineno};
+    c11_vector__push(c11_debugger_breakpoint, &debugger.breakpoints, breakpoint);
+    return debugger.breakpoints.length;
+}
+
+int c11_debugger_reset_breakpoints_by_source(const char* sourcesname) {
+    c11_vector tmp_breakpoints;
+    c11_vector__ctor(&tmp_breakpoints, sizeof(c11_debugger_breakpoint));
+
+    c11__foreach(c11_debugger_breakpoint, &debugger.breakpoints, it) {
+        if(strcmp(it->sourcename, sourcesname) != 0) {
+            c11_debugger_breakpoint* dst =
+                (c11_debugger_breakpoint*)c11_vector__emplace(&tmp_breakpoints);
+            *dst = *it;
+        } else {
+            PK_FREE((void*)it->sourcename);
+        }
+    }
+
+    c11_vector__swap(&tmp_breakpoints, &debugger.breakpoints);
+    c11_vector__dtor(&tmp_breakpoints);
+    return debugger.breakpoints.length;
+}
+
+bool c11_debugger_path_equal(const char* path1, const char* path2) {
+    if(path1 == NULL || path2 == NULL) return false;
+    while(*path1 && *path2) {
+        char c1 = (*path1 == '\\') ? '/' : *path1;
+        char c2 = (*path2 == '\\') ? '/' : *path2;
+        c1 = (char)tolower((unsigned char)c1);
+        c2 = (char)tolower((unsigned char)c2);
+        if(c1 != c2) return false;
+        path1++;
+        path2++;
+    }
+    return *path1 == *path2;
+}
+
+C11_STOP_REASON c11_debugger_should_pause() {
+    if(debugger.current_event == TRACE_EVENT_POP && !debugger.isexceptionmode)
+        return C11_DEBUGGER_NOSTOP;
+    if(py_checkexc() && debugger.isexceptionmode == false)
+        return C11_DEBUGGER_NOSTOP;
+    C11_STOP_REASON pause_resaon = C11_DEBUGGER_NOSTOP;
+    int is_out = debugger.curr_stack_depth <= debugger.pause_allowed_depth;
+    int is_new_line = debugger.current_line != debugger.step_line;
+    switch(debugger.step_mode) {
+        case C11_STEP_IN: pause_resaon = C11_DEBUGGER_STEP; break;
+        case C11_STEP_OVER:
+            if(is_new_line && is_out) pause_resaon = C11_DEBUGGER_STEP;
+            break;
+        case C11_STEP_OUT:
+            if(is_out) pause_resaon = C11_DEBUGGER_STEP;
+            break;
+        case C11_STEP_CONTINUE:
+        default: break;
+    }
+    if(debugger.step_mode == C11_STEP_CONTINUE) {
+        c11__foreach(c11_debugger_breakpoint, &debugger.breakpoints, bp) {
+            if(c11_debugger_path_equal(debugger.current_filename, bp->sourcename) &&
+               debugger.current_line == bp->lineno) {
+                pause_resaon = C11_DEBUGGER_BP;
+                break;
+            }
+        }
+    }
+    if(debugger.isexceptionmode) pause_resaon = C11_DEBUGGER_EXCEPTION;
+    if(pause_resaon != C11_DEBUGGER_NOSTOP) { debugger.keep_suspend = true; }
+    return pause_resaon;
+}
+
+int c11_debugger_should_keep_pause(void) { return debugger.keep_suspend; }
+
+inline static c11_sv sv_from_cstr(const char* str) {
+    c11_sv sv = {.data = str, .size = strlen(str)};
+    return sv;
+}
+
+const inline static char* get_basename(const char* path) {
+    const char* last_slash = strrchr(path, '/');
+#if defined(_WIN32) || defined(_WIN64)
+    const char* last_backslash = strrchr(path, '\\');
+    if(!last_slash || (last_backslash && last_backslash > last_slash)) {
+        last_slash = last_backslash;
+    }
+#endif
+    return last_slash ? last_slash + 1 : path;
+}
+
+void c11_debugger_normal_frames(c11_sbuf* buffer) {
+    c11_sbuf__write_cstr(buffer, "{\"stackFrames\": [");
+    int idx = 0;
+    py_Frame* now_frame = debugger.current_frame;
+    debugger.py_frames.length = 0;
+    while(now_frame) {
+        if(idx > 0) c11_sbuf__write_char(buffer, ',');
+        int line;
+        const char* filename = py_Frame_sourceloc(now_frame, &line);
+        const char* basename = get_basename(filename);
+        const char* modname = now_frame->co->name->data;
+        pk_sprintf(
+            buffer,
+            "{\"id\": %d, \"name\": %Q, \"line\": %d, \"column\": 1, \"source\": {\"name\": %Q, \"path\": %Q}}",
+            idx,
+            sv_from_cstr(modname),
+            line,
+            sv_from_cstr(basename),
+            sv_from_cstr(filename));
+        c11_vector__push(py_Frame*, &debugger.py_frames, now_frame);
+        now_frame = now_frame->f_back;
+        idx++;
+    }
+    pk_sprintf(buffer, "], \"totalFrames\": %d}", idx);
+}
+
+void c11_debugger_exception_frames(c11_sbuf* buffer) {
+    c11_sbuf__write_cstr(buffer, "{\"stackFrames\": [");
+    int idx = 0;
+    c11__foreach(BaseExceptionFrame, debugger.exception_stacktrace, it) {
+        if(idx > 0) c11_sbuf__write_char(buffer, ',');
+        int line = it->lineno;
+        const char* filename = it->src->filename->data;
+        const char* basename = get_basename(filename);
+        const char* modname = it->name == NULL ? basename : it->name->data;
+        pk_sprintf(
+            buffer,
+            "{\"id\": %d, \"name\": %Q, \"line\": %d, \"column\": 1, \"source\": {\"name\": %Q, \"path\": %Q}}",
+            idx,
+            sv_from_cstr(modname),
+            line,
+            sv_from_cstr(basename),
+            sv_from_cstr(filename));
+        idx++;
+    }
+    pk_sprintf(buffer, "], \"totalFrames\": %d}", idx);
+}
+
+void c11_debugger_frames(c11_sbuf* buffer) {
+    debugger.isexceptionmode ? c11_debugger_exception_frames(buffer)
+                             : c11_debugger_normal_frames(buffer);
+}
+
+inline static c11_debugger_scope_index append_new_scope(int frameid) {
+    assert(frameid < debugger.py_frames.length);
+    py_Frame* requested_frame = c11__getitem(py_Frame*, &debugger.py_frames, frameid);
+    int base_index = py_list_len(python_vars);
+    py_Ref new_locals = py_list_emplace(python_vars);
+    py_Frame_newlocals(requested_frame, new_locals);
+    py_Ref new_globals = py_list_emplace(python_vars);
+    py_Frame_newglobals(requested_frame, new_globals);
+    c11_debugger_scope_index result = {.locals_ref = base_index, .globals_ref = base_index + 1};
+    return result;
+}
+
+inline static c11_debugger_scope_index append_new_exception_scope(int frameid) {
+    assert(frameid < debugger.exception_stacktrace->length);
+    BaseExceptionFrame* requested_frame =
+        c11__at(BaseExceptionFrame, debugger.exception_stacktrace, frameid);
+    int base_index = py_list_len(python_vars);
+    py_list_append(python_vars, &requested_frame->locals);
+    py_list_append(python_vars, &requested_frame->globals);
+    c11_debugger_scope_index result = {.locals_ref = base_index, .globals_ref = base_index + 1};
+    return result;
+}
+
+void c11_debugger_scopes(int frameid, c11_sbuf* buffer) {
+    // query cache
+    c11_debugger_scope_index* result =
+        c11_smallmap_d2index__try_get(&debugger.scopes_query_cache, frameid);
+
+    c11_sbuf__write_cstr(buffer, "{\"scopes\":");
+    const char* scopes_fmt =
+        "[{\"name\": \"locals\", \"variablesReference\": %d, \"expensive\": false}, "
+        "{\"name\": \"globals\", \"variablesReference\": %d, \"expensive\": true}]";
+    if(result != NULL) {
+        pk_sprintf(buffer, scopes_fmt, result->locals_ref, result->globals_ref);
+    } else {
+        c11_debugger_scope_index new_record = debugger.isexceptionmode
+                                                  ? append_new_exception_scope(frameid)
+                                                  : append_new_scope(frameid);
+        c11_smallmap_d2index__set(&debugger.scopes_query_cache, frameid, new_record);
+        pk_sprintf(buffer, scopes_fmt, new_record.locals_ref, new_record.globals_ref);
+    }
+    c11_sbuf__write_char(buffer, '}');
+}
+
+bool c11_debugger_unfold_var(int var_id, c11_sbuf* buffer) {
+    py_Ref var = get_variable(var_id);
+    if(!var) return false;
+
+    // 1. extend
+    const char* expand_code = NULL;
+    switch(py_typeof(var)) {
+        case tp_dict:
+        case tp_namedict: expand_code = "[(k,v) for k,v in _0.items()]"; break;
+        case tp_list:
+        case tp_tuple: expand_code = "[(f'[{i}]',v) for i,v in enumerate(_0)]"; break;
+        default: expand_code = "[(k,v) for k,v in _0.__dict__.items()]"; break;
+    }
+    if(!py_smarteval(expand_code, NULL, var)) {
+        py_printexc();
+        return false;
+    }
+    py_Ref kv_list = py_pushtmp();
+    py_assign(kv_list, py_retval());
+    // 2. prepare base_ref
+    int base_index = py_list_len(python_vars);
+    py_Ref base_var_ref = py_pushtmp();
+    py_newint(base_var_ref, base_index);
+
+    // 3. construct DAP JSON and extend python_vars
+    py_Ref dap_obj = py_pushtmp();
+    py_newdict(dap_obj);
+    const char* dap_code =
+        "_2['variables'] = []\n"
+        "var_ref = _1\n"
+        "for k, v in _0:\n"
+        "    has_children = isinstance(v, (dict, list, tuple)) or v.__dict__ is not None\n"
+        "    _2['variables'].append({\n"
+        "        'name': k if type(k) == str else str(k),\n"
+        "        'value': repr(v) if type(v) == str else str(v),\n"
+        "        'variablesReference': var_ref if has_children else 0,\n"
+        "        'type': type(v).__name__\n"
+        "    })\n"
+        "    if has_children: var_ref += 1\n";
+    if(!py_smartexec(dap_code, NULL, kv_list, base_var_ref, dap_obj)) {
+        py_printexc();
+        return false;
+    }
+
+    // 4. extend python_vars
+    if(!py_smartexec(
+           "_0.extend([v for k, v in _1 if isinstance(v, (dict, list, tuple)) or v.__dict__ is not None])",
+           NULL,
+           python_vars,
+           kv_list)) {
+        py_printexc();
+        return false;
+    }
+
+    // 5. dump & write
+    if(!py_json_dumps(dap_obj, 0)) {
+        // printf("dap_obj: %s\n", py_tpname(py_typeof(dap_obj)));
+        py_printexc();
+        return false;
+    }
+
+    c11_sbuf__write_cstr(buffer, py_tostr(py_retval()));
+
+    // 6. clear
+    py_pop();  // dap_obj
+    py_pop();  // base_var_ref
+    py_pop();  // kv_list
+    return true;
+}
+
+#undef python_vars
+
+#endif  // PK_ENABLE_OS
+
+// src/bindings/py_method.c
+/* staticmethod */
+
+static bool staticmethod__new__(int argc, py_Ref argv) {
+    PY_CHECK_ARGC(2);
+    py_newobject(py_retval(), tp_staticmethod, 1, 0);
+    py_setslot(py_retval(), 0, py_arg(1));
+    return true;
+}
+
+py_Type pk_staticmethod__register() {
+    py_Type type = pk_newtype("staticmethod", tp_object, NULL, NULL, false, true);
+
+    py_bindmagic(type, __new__, staticmethod__new__);
+    return type;
+}
+
+/* classmethod */
+static bool classmethod__new__(int argc, py_Ref argv) {
+    PY_CHECK_ARGC(2);
+    py_newobject(py_retval(), tp_classmethod, 1, 0);
+    py_setslot(py_retval(), 0, py_arg(1));
+    return true;
+}
+
+py_Type pk_classmethod__register() {
+    py_Type type = pk_newtype("classmethod", tp_object, NULL, NULL, false, true);
+
+    py_bindmagic(type, __new__, classmethod__new__);
+    return type;
+}
+
+/* boundmethod */
+static bool boundmethod__self__(int argc, py_Ref argv) {
+    PY_CHECK_ARGC(1);
+    py_assign(py_retval(), py_getslot(argv, 0));
+    return true;
+}
+
+static bool boundmethod__func__(int argc, py_Ref argv) {
+    PY_CHECK_ARGC(1);
+    py_assign(py_retval(), py_getslot(argv, 1));
+    return true;
+}
+
+static bool boundmethod__eq__(int argc, py_Ref argv) {
+    PY_CHECK_ARGC(2);
+    if(!py_istype(py_arg(1), tp_boundmethod)) {
+        py_newbool(py_retval(), false);
         return true;
     }
-    return TypeError("expected 'int', got '%t'", self->type);
+    for(int i = 0; i < 2; i++) {
+        int res = py_equal(py_getslot(&argv[0], i), py_getslot(&argv[1], i));
+        if(res == -1) return false;
+        if(!res) {
+            py_newbool(py_retval(), false);
+            return true;
+        }
+    }
+    py_newbool(py_retval(), true);
+    return true;
 }
 
-bool py_tobool(py_Ref self) {
-    assert(self->type == tp_bool);
-    return self->_bool;
+static bool boundmethod__ne__(int argc, py_Ref argv) {
+    bool ok = boundmethod__eq__(argc, argv);
+    if(!ok) return false;
+    bool res = py_tobool(py_retval());
+    py_newbool(py_retval(), !res);
+    return true;
 }
 
-py_Type py_totype(py_Ref self) {
-    assert(self->type == tp_type);
-    py_TypeInfo* ud = py_touserdata(self);
-    return ud->index;
+py_Type pk_boundmethod__register() {
+    py_Type type = pk_newtype("boundmethod", tp_object, NULL, NULL, false, true);
+    py_bindproperty(type, "__self__", boundmethod__self__, NULL);
+    py_bindproperty(type, "__func__", boundmethod__func__, NULL);
+    py_bindmagic(type, __eq__, boundmethod__eq__);
+    py_bindmagic(type, __ne__, boundmethod__ne__);
+    return type;
+}
+// src/bindings/py_range.c
+typedef struct Range {
+    py_i64 start;
+    py_i64 stop;
+    py_i64 step;
+} Range;
+
+static bool range__new__(int argc, py_Ref argv) {
+    Range* ud = py_newobject(py_retval(), tp_range, 0, sizeof(Range));
+    switch(argc - 1) {  // skip cls
+        case 1: {
+            PY_CHECK_ARG_TYPE(1, tp_int);
+            ud->start = 0;
+            ud->stop = py_toint(py_arg(1));
+            ud->step = 1;
+            break;
+        }
+        case 2:
+            PY_CHECK_ARG_TYPE(1, tp_int);
+            PY_CHECK_ARG_TYPE(2, tp_int);
+            ud->start = py_toint(py_arg(1));
+            ud->stop = py_toint(py_arg(2));
+            ud->step = 1;
+            break;
+        case 3:
+            PY_CHECK_ARG_TYPE(1, tp_int);
+            PY_CHECK_ARG_TYPE(2, tp_int);
+            PY_CHECK_ARG_TYPE(3, tp_int);
+            ud->start = py_toint(py_arg(1));
+            ud->stop = py_toint(py_arg(2));
+            ud->step = py_toint(py_arg(3));
+            break;
+        default: return TypeError("range() expected at most 3 arguments, got %d", argc - 1);
+    }
+    if(ud->step == 0) return ValueError("range() step must not be zero");
+    return true;
 }
 
-void* py_touserdata(py_Ref self) {
-    assert(self && self->is_ptr);
-    return PyObject__userdata(self->_obj);
+static bool range__iter__(int argc, py_Ref argv) {
+    PY_CHECK_ARGC(1);
+    return py_tpcall(tp_range_iterator, 1, argv);
 }
 
-// src/public/py_property.c
+py_Type pk_range__register() {
+    py_Type type = pk_newtype("range", tp_object, NULL, NULL, false, true);
+
+    py_bindmagic(type, __new__, range__new__);
+    py_bindmagic(type, __iter__, range__iter__);
+    return type;
+}
+
+typedef struct RangeIterator {
+    Range range;
+    py_i64 current;
+} RangeIterator;
+
+static bool range_iterator__new__(int argc, py_Ref argv) {
+    PY_CHECK_ARGC(2);
+    PY_CHECK_ARG_TYPE(1, tp_range);
+    RangeIterator* ud = py_newobject(py_retval(), tp_range_iterator, 0, sizeof(RangeIterator));
+    ud->range = *(Range*)py_touserdata(py_arg(1));
+    ud->current = ud->range.start;
+    return true;
+}
+
+bool range_iterator__next__(int argc, py_Ref argv) {
+    PY_CHECK_ARGC(1);
+    RangeIterator* ud = py_touserdata(argv);
+    if(ud->range.step > 0) {
+        if(ud->current >= ud->range.stop) return StopIteration();
+    } else {
+        if(ud->current <= ud->range.stop) return StopIteration();
+    }
+    py_newint(py_retval(), ud->current);
+    ud->current += ud->range.step;
+    return true;
+}
+
+py_Type pk_range_iterator__register() {
+    py_Type type = pk_newtype("range_iterator", tp_object, NULL, NULL, false, true);
+
+    py_bindmagic(type, __new__, range_iterator__new__);
+    py_bindmagic(type, __iter__, pk_wrapper__self);
+    py_bindmagic(type, __next__, range_iterator__next__);
+    return type;
+}
+// src/bindings/py_mappingproxy.c
+#include <stdbool.h>
+
+void pk_mappingproxy__namedict(py_Ref out, py_Ref object) {
+    py_newobject(out, tp_namedict, 1, 0);
+    assert(object->is_ptr && object->_obj->slots == -1);
+    py_setslot(out, 0, object);
+}
+
+static bool namedict__getitem__(int argc, py_Ref argv) {
+    PY_CHECK_ARGC(2);
+    PY_CHECK_ARG_TYPE(1, tp_str);
+    py_Name name = py_namev(py_tosv(py_arg(1)));
+    py_Ref res = py_getdict(py_getslot(argv, 0), name);
+    if(!res) return KeyError(py_arg(1));
+    py_assign(py_retval(), res);
+    return true;
+}
+
+static bool namedict__get(int argc, py_Ref argv) {
+    PY_CHECK_ARGC(3);
+    PY_CHECK_ARG_TYPE(1, tp_str);
+    py_Name name = py_namev(py_tosv(py_arg(1)));
+    py_Ref res = py_getdict(py_getslot(argv, 0), name);
+    py_assign(py_retval(), res ? res : py_arg(2));
+    return true;
+}
+
+static bool namedict__setitem__(int argc, py_Ref argv) {
+    PY_CHECK_ARGC(3);
+    PY_CHECK_ARG_TYPE(1, tp_str);
+    py_Name name = py_namev(py_tosv(py_arg(1)));
+    py_setdict(py_getslot(argv, 0), name, py_arg(2));
+    py_newnone(py_retval());
+    return true;
+}
+
+static bool namedict__delitem__(int argc, py_Ref argv) {
+    PY_CHECK_ARGC(2);
+    PY_CHECK_ARG_TYPE(1, tp_str);
+    py_Name name = py_namev(py_tosv(py_arg(1)));
+    if(!py_deldict(py_getslot(argv, 0), name)) return KeyError(py_arg(1));
+    py_newnone(py_retval());
+    return true;
+}
+
+static bool namedict__contains__(int argc, py_Ref argv) {
+    PY_CHECK_ARGC(2);
+    PY_CHECK_ARG_TYPE(1, tp_str);
+    py_Name name = py_namev(py_tosv(py_arg(1)));
+    py_Ref res = py_getdict(py_getslot(argv, 0), name);
+    py_newbool(py_retval(), res != NULL);
+    return true;
+}
+
+static bool namedict_items(int argc, py_Ref argv) {
+    PY_CHECK_ARGC(1);
+    py_Ref object = py_getslot(argv, 0);
+    NameDict* dict = PyObject__dict(object->_obj);
+    py_newlist(py_retval());
+    for(int i = 0; i < dict->capacity; i++) {
+        NameDict_KV* kv = &dict->items[i];
+        if(kv->key == NULL) continue;
+        py_Ref slot = py_list_emplace(py_retval());
+        py_Ref p = py_newtuple(slot, 2);
+        p[0] = *py_name2ref(kv->key);
+        p[1] = kv->value;
+    }
+    return true;
+}
+
+static bool namedict_clear(int argc, py_Ref argv) {
+    PY_CHECK_ARGC(1);
+    py_Ref object = py_getslot(argv, 0);
+    NameDict* dict = PyObject__dict(object->_obj);
+    NameDict__clear(dict);
+    py_newnone(py_retval());
+    return true;
+}
+
+py_Type pk_namedict__register() {
+    py_Type type = pk_newtype("namedict", tp_object, NULL, NULL, false, true);
+
+    py_bindmagic(type, __getitem__, namedict__getitem__);
+    py_bindmagic(type, __setitem__, namedict__setitem__);
+    py_bindmagic(type, __delitem__, namedict__delitem__);
+    py_bindmagic(type, __contains__, namedict__contains__);
+    py_setdict(py_tpobject(type), __hash__, py_None());
+    py_bindmethod(type, "items", namedict_items);
+    py_bindmethod(type, "clear", namedict_clear);
+    py_bindmethod(type, "get", namedict__get);
+    return type;
+}
+
+// src/bindings/py_property.c
 static bool property__new__(int argc, py_Ref argv) {
     py_newobject(py_retval(), tp_property, 2, 0);
     if(argc == 1 + 1) {
@@ -11770,815 +13743,7 @@ py_Type pk_property__register() {
     return type;
 }
 
-// src/public/py_slice.c
-void py_newslice(py_OutRef out) {
-    VM* vm = pk_current_vm;
-    PyObject* obj = ManagedHeap__gcnew(&vm->heap, tp_slice, 3, 0);
-    out->type = tp_slice;
-    out->is_ptr = true;
-    out->_obj = obj;
-}
-
-static bool slice__new__(int argc, py_Ref argv) {
-    PY_CHECK_ARGC(1 + 3);
-    py_Ref slice = py_retval();
-    py_newslice(slice);
-    py_setslot(slice, 0, py_arg(1));
-    py_setslot(slice, 1, py_arg(2));
-    py_setslot(slice, 2, py_arg(3));
-    return true;
-}
-
-static bool slice__repr__(int argc, py_Ref argv) {
-    c11_sbuf buf;
-    c11_sbuf__ctor(&buf);
-    c11_sbuf__write_cstr(&buf, "slice(");
-    for(int i = 0; i < 3; i++) {
-        py_TValue* val = py_getslot(argv, i);
-        bool ok = py_repr(val);
-        if(!ok) {
-            c11_sbuf__dtor(&buf);
-            return false;
-        }
-        c11_sbuf__write_sv(&buf, py_tosv(py_retval()));
-        if(i != 2) c11_sbuf__write_cstr(&buf, ", ");
-    }
-    c11_sbuf__write_char(&buf, ')');
-    c11_sbuf__py_submit(&buf, py_retval());
-    return true;
-}
-
-static bool slice_start(int argc, py_Ref argv) {
-    py_Ref self = py_arg(0);
-    py_TValue* val = py_getslot(self, 0);
-    py_assign(py_retval(), val);
-    return true;
-}
-
-static bool slice_stop(int argc, py_Ref argv) {
-    py_Ref self = py_arg(0);
-    py_TValue* val = py_getslot(self, 1);
-    py_assign(py_retval(), val);
-    return true;
-}
-
-static bool slice_step(int argc, py_Ref argv) {
-    py_Ref self = py_arg(0);
-    py_TValue* val = py_getslot(self, 2);
-    py_assign(py_retval(), val);
-    return true;
-}
-
-static bool slice__eq__(int argc, py_Ref argv) {
-    py_Ref self = py_arg(0);
-    py_Ref other = py_arg(1);
-    if(!py_istype(other, tp_slice)) {
-        py_newnotimplemented(py_retval());
-        return true;
-    }
-    for(int i = 0; i < 3; i++) {
-        py_Ref lhs = py_getslot(self, i);
-        py_Ref rhs = py_getslot(other, i);
-        int res = py_equal(lhs, rhs);
-        if(res == -1) return false;
-        if(res == 0) {
-            py_newbool(py_retval(), false);
-            return true;
-        }
-    }
-    py_newbool(py_retval(), true);
-    return true;
-}
-
-static bool slice__ne__(int argc, py_Ref argv) {
-    bool ok = slice__eq__(argc, argv);
-    if(!ok) return false;
-    py_Ref res = py_retval();
-    if(py_isbool(res)) py_newbool(py_retval(), !py_tobool(res));
-    return true;
-}
-
-py_Type pk_slice__register() {
-    py_Type type = pk_newtype("slice", tp_object, NULL, NULL, false, true);
-
-    py_bindmagic(type, __new__, slice__new__);
-    py_bindmagic(type, __repr__, slice__repr__);
-    py_bindmagic(type, __eq__, slice__eq__);
-    py_bindmagic(type, __ne__, slice__ne__);
-
-    py_setdict(py_tpobject(type), __hash__, py_None());
-
-    py_bindproperty(type, "start", slice_start, NULL);
-    py_bindproperty(type, "stop", slice_stop, NULL);
-    py_bindproperty(type, "step", slice_step, NULL);
-    return type;
-}
-// src/public/stack_ops.c
-py_Ref py_getreg(int i) { return pk_current_vm->reg + i; }
-
-void py_setreg(int i, py_Ref val) { pk_current_vm->reg[i] = *val; }
-
-PK_INLINE py_Ref py_getdict(py_Ref self, py_Name name) {
-    assert(self && self->is_ptr);
-    return NameDict__try_get(PyObject__dict(self->_obj), name);
-}
-
-PK_INLINE void py_setdict(py_Ref self, py_Name name, py_Ref val) {
-    assert(self && self->is_ptr);
-    NameDict__set(PyObject__dict(self->_obj), name, val);
-}
-
-py_ItemRef py_emplacedict(py_Ref self, py_Name name) {
-    py_setdict(self, name, py_NIL());
-    return py_getdict(self, name);
-}
-
-bool py_applydict(py_Ref self, bool (*f)(py_Name, py_Ref, void*), void* ctx) {
-    assert(self && self->is_ptr);
-    NameDict* dict = PyObject__dict(self->_obj);
-    for(int i = 0; i < dict->capacity; i++) {
-        NameDict_KV* kv = &dict->items[i];
-        if(kv->key == NULL) continue;
-        bool ok = f(kv->key, &kv->value, ctx);
-        if(!ok) return false;
-    }
-    return true;
-}
-
-void py_cleardict(py_Ref self) {
-    assert(self && self->is_ptr);
-    NameDict* dict = PyObject__dict(self->_obj);
-    NameDict__clear(dict);
-}
-
-bool py_deldict(py_Ref self, py_Name name) {
-    assert(self && self->is_ptr);
-    return NameDict__del(PyObject__dict(self->_obj), name);
-}
-
-py_Ref py_getslot(py_Ref self, int i) {
-    assert(self && self->is_ptr);
-    assert(i >= 0 && i < self->_obj->slots);
-    return PyObject__slots(self->_obj) + i;
-}
-
-void py_setslot(py_Ref self, int i, py_Ref val) {
-    assert(self && self->is_ptr);
-    assert(i >= 0 && i < self->_obj->slots);
-    PyObject__slots(self->_obj)[i] = *val;
-}
-
-py_StackRef py_inspect_currentfunction() {
-    VM* vm = pk_current_vm;
-    if(vm->curr_decl_based_function) return vm->curr_decl_based_function;
-    py_Frame* frame = vm->top_frame;
-    if(!frame || frame->is_locals_special) return NULL;
-    return frame->p0;
-}
-
-py_GlobalRef py_inspect_currentmodule() {
-    py_Frame* frame = pk_current_vm->top_frame;
-    if(!frame) return NULL;
-    return frame->module;
-}
-
-py_Frame* py_inspect_currentframe() { return pk_current_vm->top_frame; }
-
-/* Stack References */
-py_Ref py_peek(int i) {
-    assert(i <= 0);
-    return pk_current_vm->stack.sp + i;
-}
-
-void py_pop() {
-    VM* vm = pk_current_vm;
-    vm->stack.sp--;
-}
-
-void py_shrink(int n) {
-    VM* vm = pk_current_vm;
-    vm->stack.sp -= n;
-}
-
-void py_push(py_Ref src) {
-    VM* vm = pk_current_vm;
-    *vm->stack.sp++ = *src;
-}
-
-void py_pushnil() {
-    VM* vm = pk_current_vm;
-    py_newnil(vm->stack.sp++);
-}
-
-void py_pushnone() {
-    VM* vm = pk_current_vm;
-    py_newnone(vm->stack.sp++);
-}
-
-void py_pushname(py_Name name) {
-    VM* vm = pk_current_vm;
-    py_newint(vm->stack.sp++, (uintptr_t)name);
-}
-
-py_Ref py_pushtmp() {
-    VM* vm = pk_current_vm;
-    return vm->stack.sp++;
-}
-// src/public/internal.c
-_Thread_local VM* pk_current_vm;
-
-static bool pk_initialized;
-static bool pk_finalized;
-
-static VM pk_default_vm;
-static VM* pk_all_vm[16];
-static py_TValue _True, _False, _None, _NIL;
-
-void py_initialize() {
-    c11__rtassert(!pk_finalized);
-
-    if(pk_initialized) {
-        // c11__abort("py_initialize() can only be called once!");
-        return;
-    }
-
-    pk_names_initialize();
-
-    // check endianness
-    int x = 1;
-    bool is_little_endian = *(char*)&x == 1;
-    if(!is_little_endian) c11__abort("is_little_endian != true");
-
-    static_assert(sizeof(py_TValue) == 24, "sizeof(py_TValue) != 24");
-    static_assert(offsetof(py_TValue, extra) == 4, "offsetof(py_TValue, extra) != 4");
-
-    pk_current_vm = pk_all_vm[0] = &pk_default_vm;
-
-    // initialize some convenient references
-    py_newbool(&_True, true);
-    py_newbool(&_False, false);
-    py_newnone(&_None);
-    py_newnil(&_NIL);
-    VM__ctor(&pk_default_vm);
-
-    pk_initialized = true;
-}
-
-void* py_malloc(size_t size) { return PK_MALLOC(size); }
-
-void* py_realloc(void* ptr, size_t size) { return PK_REALLOC(ptr, size); }
-
-void py_free(void* ptr) { PK_FREE(ptr); }
-
-py_GlobalRef py_True() { return &_True; }
-
-py_GlobalRef py_False() { return &_False; }
-
-py_GlobalRef py_None() { return &_None; }
-
-py_GlobalRef py_NIL() { return &_NIL; }
-
-void py_finalize() {
-    if(pk_finalized) c11__abort("py_finalize() can only be called once!");
-    pk_finalized = true;
-
-    for(int i = 1; i < 16; i++) {
-        VM* vm = pk_all_vm[i];
-        if(vm) {
-            // temp fix https://github.com/pocketpy/pocketpy/issues/315
-            // TODO: refactor VM__ctor and VM__dtor
-            pk_current_vm = vm;
-            VM__dtor(vm);
-            PK_FREE(vm);
-        }
-    }
-    pk_current_vm = &pk_default_vm;
-    VM__dtor(&pk_default_vm);
-    pk_current_vm = NULL;
-
-    pk_names_finalize();
-}
-
-void py_switchvm(int index) {
-    if(index < 0 || index >= 16) c11__abort("invalid vm index");
-    if(!pk_all_vm[index]) {
-        pk_current_vm = pk_all_vm[index] = PK_MALLOC(sizeof(VM));
-        memset(pk_current_vm, 0, sizeof(VM));
-        VM__ctor(pk_all_vm[index]);
-    } else {
-        pk_current_vm = pk_all_vm[index];
-    }
-}
-
-void py_resetvm() {
-    VM* vm = pk_current_vm;
-    VM__dtor(vm);
-    memset(vm, 0, sizeof(VM));
-    VM__ctor(vm);
-}
-
-void py_resetallvm() {
-    for(int i = 0; i < 16; i++) {
-        py_switchvm(i);
-        py_resetvm();
-    }
-    py_switchvm(0);
-}
-
-int py_currentvm() {
-    for(int i = 0; i < 16; i++) {
-        if(pk_all_vm[i] == pk_current_vm) return i;
-    }
-    return -1;
-}
-
-void* py_getvmctx() { return pk_current_vm->ctx; }
-
-void py_setvmctx(void* ctx) { pk_current_vm->ctx = ctx; }
-
-void py_sys_setargv(int argc, char** argv) {
-    py_GlobalRef sys = py_getmodule("sys");
-    py_Ref argv_list = py_getdict(sys, py_name("argv"));
-    py_list_clear(argv_list);
-    for(int i = 0; i < argc; i++) {
-        py_newstr(py_list_emplace(argv_list), argv[i]);
-    }
-}
-
-py_Callbacks* py_callbacks() { return &pk_current_vm->callbacks; }
-
-const char* pk_opname(Opcode op) {
-    const static char* OP_NAMES[] = {
-#define OPCODE(name) #name,
-#ifdef OPCODE
-
-/**************************/
-OPCODE(NO_OP)
-/**************************/
-OPCODE(POP_TOP)
-OPCODE(DUP_TOP)
-OPCODE(DUP_TOP_TWO)
-OPCODE(ROT_TWO)
-OPCODE(ROT_THREE)
-OPCODE(PRINT_EXPR)
-/**************************/
-OPCODE(LOAD_CONST)
-OPCODE(LOAD_NONE)
-OPCODE(LOAD_TRUE)
-OPCODE(LOAD_FALSE)
-/**************************/
-OPCODE(LOAD_SMALL_INT)
-/**************************/
-OPCODE(LOAD_ELLIPSIS)
-OPCODE(LOAD_FUNCTION)
-OPCODE(LOAD_NULL)
-/**************************/
-OPCODE(LOAD_FAST)
-OPCODE(LOAD_NAME)
-OPCODE(LOAD_NONLOCAL)
-OPCODE(LOAD_GLOBAL)
-OPCODE(LOAD_ATTR)
-OPCODE(LOAD_CLASS_GLOBAL)
-OPCODE(LOAD_METHOD)
-OPCODE(LOAD_SUBSCR)
-
-OPCODE(STORE_FAST)
-OPCODE(STORE_NAME)
-OPCODE(STORE_GLOBAL)
-OPCODE(STORE_ATTR)
-OPCODE(STORE_SUBSCR)
-
-OPCODE(DELETE_FAST)
-OPCODE(DELETE_NAME)
-OPCODE(DELETE_GLOBAL)
-OPCODE(DELETE_ATTR)
-OPCODE(DELETE_SUBSCR)
-/**************************/
-OPCODE(BUILD_IMAG)
-OPCODE(BUILD_BYTES)
-OPCODE(BUILD_TUPLE)
-OPCODE(BUILD_LIST)
-OPCODE(BUILD_DICT)
-OPCODE(BUILD_SET)
-OPCODE(BUILD_SLICE)
-OPCODE(BUILD_STRING)
-/**************************/
-OPCODE(BINARY_ADD)
-OPCODE(BINARY_SUB)
-OPCODE(BINARY_MUL)
-OPCODE(BINARY_TRUEDIV)
-OPCODE(BINARY_FLOORDIV)
-OPCODE(BINARY_MOD)
-OPCODE(BINARY_POW)
-OPCODE(BINARY_LSHIFT)
-OPCODE(BINARY_RSHIFT)
-OPCODE(BINARY_AND)
-OPCODE(BINARY_OR)
-OPCODE(BINARY_XOR)
-OPCODE(BINARY_MATMUL)
-OPCODE(COMPARE_LT)
-OPCODE(COMPARE_LE)
-OPCODE(COMPARE_EQ)
-OPCODE(COMPARE_NE)
-OPCODE(COMPARE_GT)
-OPCODE(COMPARE_GE)
-OPCODE(IS_OP)
-OPCODE(CONTAINS_OP)
-/**************************/
-OPCODE(JUMP_FORWARD)
-OPCODE(POP_JUMP_IF_NOT_MATCH)
-OPCODE(POP_JUMP_IF_FALSE)
-OPCODE(POP_JUMP_IF_TRUE)
-OPCODE(JUMP_IF_TRUE_OR_POP)
-OPCODE(JUMP_IF_FALSE_OR_POP)
-OPCODE(SHORTCUT_IF_FALSE_OR_POP)
-OPCODE(LOOP_CONTINUE)
-OPCODE(LOOP_BREAK)
-/**************************/
-OPCODE(CALL)
-OPCODE(CALL_VARGS)
-/**************************/
-OPCODE(RETURN_VALUE)
-OPCODE(YIELD_VALUE)
-OPCODE(FOR_ITER_YIELD_VALUE)
-/**************************/
-OPCODE(LIST_APPEND)
-OPCODE(DICT_ADD)
-OPCODE(SET_ADD)
-/**************************/
-OPCODE(UNARY_NEGATIVE)
-OPCODE(UNARY_NOT)
-OPCODE(UNARY_STAR)
-OPCODE(UNARY_INVERT)
-/**************************/
-OPCODE(GET_ITER)
-OPCODE(FOR_ITER)
-/**************************/
-OPCODE(IMPORT_PATH)
-OPCODE(POP_IMPORT_STAR)
-/**************************/
-OPCODE(UNPACK_SEQUENCE)
-OPCODE(UNPACK_EX)
-/**************************/
-OPCODE(BEGIN_CLASS)
-OPCODE(END_CLASS)
-OPCODE(STORE_CLASS_ATTR)
-OPCODE(ADD_CLASS_ANNOTATION)
-/**************************/
-OPCODE(WITH_ENTER)
-OPCODE(WITH_EXIT)
-/**************************/
-OPCODE(TRY_ENTER)
-OPCODE(EXCEPTION_MATCH)
-OPCODE(RAISE)
-OPCODE(RAISE_ASSERT)
-OPCODE(RE_RAISE)
-OPCODE(PUSH_EXCEPTION)
-OPCODE(BEGIN_EXC_HANDLING)
-OPCODE(END_EXC_HANDLING)
-OPCODE(BEGIN_FINALLY)
-OPCODE(END_FINALLY)
-/**************************/
-OPCODE(FORMAT_STRING)
-/**************************/
-#endif
-
-#undef OPCODE
-    };
-    return OP_NAMES[op];
-}
-
-bool py_call(py_Ref f, int argc, py_Ref argv) {
-    if(f->type == tp_nativefunc) {
-        return py_callcfunc(f->_cfunc, argc, argv);
-    } else {
-        py_push(f);
-        py_pushnil();
-        for(int i = 0; i < argc; i++)
-            py_push(py_offset(argv, i));
-        bool ok = py_vectorcall(argc, 0);
-        return ok;
-    }
-}
-
-#ifndef NDEBUG
-bool py_callcfunc(py_CFunction f, int argc, py_Ref argv) {
-    py_StackRef p0 = py_peek(0);
-    // NOTE: sometimes users are using `py_retval()` to pass `argv`
-    // It will be reset to `nil` and cause an exception
-    py_newnil(py_retval());
-    bool ok = f(argc, argv);
-    if(!ok) {
-        if(!py_checkexc(true)) {
-            c11__abort("py_CFunction returns `false` but no exception is set!");
-        }
-        return false;
-    }
-    if(py_peek(0) != p0) {
-        c11__abort("py_CFunction corrupts the stack! Did you forget to call `py_pop()`?");
-    }
-    if(py_isnil(py_retval())) {
-        c11__abort(
-            "py_CFunction returns nothing! Did you forget to call `py_newnone(py_retval())`?");
-    }
-    if(py_checkexc(true)) {
-        const char* name = py_tpname(pk_current_vm->curr_exception.type);
-        c11__abort("py_CFunction returns `true`, but `%s` was set!", name);
-    }
-    return true;
-}
-#endif
-
-bool py_vectorcall(uint16_t argc, uint16_t kwargc) {
-    return VM__vectorcall(pk_current_vm, argc, kwargc, false) != RES_ERROR;
-}
-
-PK_INLINE py_Ref py_retval() { return &pk_current_vm->last_retval; }
-
-bool py_pushmethod(py_Name name) {
-    bool ok = pk_loadmethod(py_peek(-1), name);
-    if(ok) pk_current_vm->stack.sp++;
-    return ok;
-}
-
-bool pk_loadmethod(py_StackRef self, py_Name name) {
-    // NOTE: `out` and `out_self` may overlap with `self`
-    py_Type type;
-
-    if(name == __new__) {
-        // __new__ acts like a @staticmethod
-        if(self->type == tp_type) {
-            // T.__new__(...)
-            type = py_totype(self);
-        } else if(self->type == tp_super) {
-            // super(T, obj).__new__(...)
-            type = *(py_Type*)py_touserdata(self);
-        } else {
-            // invalid usage of `__new__`
-            return false;
-        }
-        py_Ref cls_var = py_tpfindmagic(type, name);
-        if(cls_var) {
-            self[0] = *cls_var;
-            self[1] = *py_NIL();
-            return true;
-        }
-        return false;
-    }
-
-    py_TValue self_bak;  // to avoid overlapping
-    // handle super() proxy
-    if(py_istype(self, tp_super)) {
-        type = *(py_Type*)py_touserdata(self);
-        // BUG: here we modify `self` which refers to the stack directly
-        // If `pk_loadmethod` fails, `self` will be corrupted
-        self_bak = *py_getslot(self, 0);
-    } else {
-        type = self->type;
-        self_bak = *self;
-    }
-
-    py_TypeInfo* ti = pk_typeinfo(type);
-
-    if(ti->getunboundmethod) {
-        bool ok = ti->getunboundmethod(self, name);
-        if(ok) {
-            assert(py_retval()->type == tp_nativefunc || py_retval()->type == tp_function);
-            self[0] = *py_retval();
-            self[1] = self_bak;
-            return true;
-        } else {
-            return false;
-        }
-    }
-
-    py_Ref cls_var = pk_tpfindname(ti, name);
-    if(cls_var != NULL) {
-        switch(cls_var->type) {
-            case tp_function:
-            case tp_nativefunc: {
-                self[0] = *cls_var;
-                self[1] = self_bak;
-                break;
-            }
-            case tp_staticmethod:
-                self[0] = *py_getslot(cls_var, 0);
-                self[1] = *py_NIL();
-                break;
-            case tp_classmethod:
-                self[0] = *py_getslot(cls_var, 0);
-                self[1] = ti->self;
-                break;
-            default: c11__unreachable();
-        }
-        return true;
-    }
-    return false;
-}
-
-bool py_tpcall(py_Type type, int argc, py_Ref argv) {
-    return py_call(py_tpobject(type), argc, argv);
-}
-
-bool pk_callmagic(py_Name name, int argc, py_Ref argv) {
-    assert(argc >= 1);
-    // assert(py_ismagicname(name));
-    py_Ref tmp = py_tpfindmagic(argv->type, name);
-    if(!tmp) return AttributeError(argv, name);
-    return py_call(tmp, argc, argv);
-}
-
-bool StopIteration() {
-    bool ok = py_tpcall(tp_StopIteration, 0, NULL);
-    if(!ok) return false;
-    return py_raise(py_retval());
-}
-
-// src/public/py_tuple.c
-py_ObjectRef py_newtuple(py_OutRef out, int n) {
-    VM* vm = pk_current_vm;
-    PyObject* obj = ManagedHeap__gcnew(&vm->heap, tp_tuple, n, 0);
-    out->type = tp_tuple;
-    out->is_ptr = true;
-    out->_obj = obj;
-    return PyObject__slots(obj);
-}
-
-py_Ref py_tuple_getitem(py_Ref self, int i) { return py_getslot(self, i); }
-
-py_Ref py_tuple_data(py_Ref self) { return PyObject__slots(self->_obj); }
-
-void py_tuple_setitem(py_Ref self, int i, py_Ref val) { py_setslot(self, i, val); }
-
-int py_tuple_len(py_Ref self) { return self->_obj->slots; }
-
-//////////////
-static bool tuple__len__(int argc, py_Ref argv) {
-    py_newint(py_retval(), py_tuple_len(argv));
-    return true;
-}
-
-static bool tuple__repr__(int argc, py_Ref argv) {
-    c11_sbuf buf;
-    c11_sbuf__ctor(&buf);
-    c11_sbuf__write_char(&buf, '(');
-    int length = py_tuple_len(argv);
-    for(int i = 0; i < length; i++) {
-        py_TValue* val = py_getslot(argv, i);
-        bool ok = py_repr(val);
-        if(!ok) {
-            c11_sbuf__dtor(&buf);
-            return false;
-        }
-        c11_sbuf__write_sv(&buf, py_tosv(py_retval()));
-        if(i != length - 1) c11_sbuf__write_cstr(&buf, ", ");
-    }
-    if(length == 1) c11_sbuf__write_char(&buf, ',');
-    c11_sbuf__write_char(&buf, ')');
-    c11_sbuf__py_submit(&buf, py_retval());
-    return true;
-}
-
-static bool tuple__new__(int argc, py_Ref argv) {
-    if(argc == 1 + 0) {
-        py_newtuple(py_retval(), 0);
-        return true;
-    }
-    if(argc == 1 + 1) {
-        bool ok = py_tpcall(tp_list, 1, py_arg(1));
-        if(!ok) return false;
-        py_Ref tmp = py_pushtmp();
-        *tmp = *py_retval();  // backup the list
-        int length = py_list_len(tmp);
-        py_Ref p = py_newtuple(py_retval(), length);
-        for(int i = 0; i < py_tuple_len(py_retval()); i++) {
-            p[i] = *py_list_getitem(tmp, i);
-        }
-        py_pop();
-        return true;
-    }
-    return TypeError("tuple() takes at most 1 argument");
-}
-
-static bool tuple__getitem__(int argc, py_Ref argv) {
-    PY_CHECK_ARGC(2);
-    int length = py_tuple_len(argv);
-    py_Ref _1 = py_arg(1);
-    if(_1->type == tp_int) {
-        int index = py_toint(py_arg(1));
-        if(!pk__normalize_index(&index, length)) return false;
-        *py_retval() = *py_getslot(argv, index);
-        return true;
-    } else if(_1->type == tp_slice) {
-        int start, stop, step;
-        bool ok = pk__parse_int_slice(_1, length, &start, &stop, &step);
-        if(!ok) return false;
-        py_Ref tmp = py_pushtmp();
-        py_newlist(tmp);
-        PK_SLICE_LOOP(i, start, stop, step) py_list_append(tmp, py_getslot(argv, i));
-        // convert list to tuple
-        py_Ref p = py_newtuple(py_retval(), py_list_len(tmp));
-        for(int i = 0; i < py_tuple_len(py_retval()); i++) {
-            p[i] = *py_list_getitem(tmp, i);
-        }
-        py_pop();
-        return true;
-    } else {
-        return TypeError("tuple indices must be integers");
-    }
-}
-
-static bool tuple__eq__(int argc, py_Ref argv) {
-    return pk_wrapper__arrayequal(tp_tuple, argc, argv);
-}
-
-static bool tuple__ne__(int argc, py_Ref argv) {
-    if(!tuple__eq__(argc, argv)) return false;
-    if(py_isbool(py_retval())) {
-        bool res = py_tobool(py_retval());
-        py_newbool(py_retval(), !res);
-    }
-    return true;
-}
-
-static bool tuple__lt__(int argc, py_Ref argv) {
-    PY_CHECK_ARGC(2);
-    if(!py_istype(py_arg(1), tp_tuple)) {
-        py_newnotimplemented(py_retval());
-        return true;
-    }
-    py_TValue *p0, *p1;
-    int lhs_length = py_tuple_len(py_arg(0));
-    int rhs_length = py_tuple_len(py_arg(1));
-    p0 = py_tuple_data(py_arg(0));
-    p1 = py_tuple_data(py_arg(1));
-    int length = lhs_length < rhs_length ? lhs_length : rhs_length;
-    for(int i = 0; i < length; i++) {
-        int res_lt = py_less(p0 + i, p1 + i);
-        if(res_lt == -1) return false;
-        if(res_lt) {
-            py_newbool(py_retval(), true);
-            return true;
-        } else {
-            int res_eq = py_equal(p0 + i, p1 + i);
-            if(res_eq == -1) return false;
-            if(!res_eq) {
-                py_newbool(py_retval(), false);
-                return true;
-            }
-        }
-    }
-    py_newbool(py_retval(), lhs_length < rhs_length);
-    return true;
-}
-
-static bool tuple__iter__(int argc, py_Ref argv) {
-    PY_CHECK_ARGC(1);
-    tuple_iterator* ud = py_newobject(py_retval(), tp_tuple_iterator, 1, sizeof(tuple_iterator));
-    ud->p = py_tuple_data(argv);
-    ud->length = py_tuple_len(argv);
-    ud->index = 0;
-    py_setslot(py_retval(), 0, argv);  // keep a reference to the object
-    return true;
-}
-
-static bool tuple__contains__(int argc, py_Ref argv) {
-    PY_CHECK_ARGC(2);
-    return pk_arraycontains(py_arg(0), py_arg(1));
-}
-
-static bool tuple__hash__(int argc, py_Ref argv) {
-    PY_CHECK_ARGC(1);
-    int length = py_tuple_len(argv);
-    py_TValue* data = py_tuple_data(argv);
-    uint64_t x = 1000003;
-    for(int i = 0; i < length; i++) {
-        py_i64 y;
-        if(!py_hash(&data[i], &y)) return false;
-        // recommended by Github Copilot
-        x = x ^ (y + 0x9e3779b9 + (x << 6) + (x >> 2));
-    }
-    py_newint(py_retval(), x);
-    return true;
-}
-
-py_Type pk_tuple__register() {
-    py_Type type = pk_newtype("tuple", tp_object, NULL, NULL, false, true);
-
-    py_bindmagic(type, __len__, tuple__len__);
-    py_bindmagic(type, __repr__, tuple__repr__);
-    py_bindmagic(type, __new__, tuple__new__);
-    py_bindmagic(type, __getitem__, tuple__getitem__);
-    py_bindmagic(type, __eq__, tuple__eq__);
-    py_bindmagic(type, __ne__, tuple__ne__);
-    py_bindmagic(type, __lt__, tuple__lt__);
-    py_bindmagic(type, __iter__, tuple__iter__);
-    py_bindmagic(type, __contains__, tuple__contains__);
-    py_bindmagic(type, __hash__, tuple__hash__);
-    return type;
-}
-
-// src/public/py_array.c
+// src/bindings/py_array.c
 int pk_arrayview(py_Ref self, py_TValue** p) {
     if(self->type == tp_list) {
         *p = py_list_data(self);
@@ -12670,284 +13835,7 @@ py_Type pk_tuple_iterator__register() {
     return type;
 }
 
-// src/public/py_exception.c
-void py_BaseException__stpush(py_Frame* frame,
-                              py_Ref self,
-                              SourceData_ src,
-                              int lineno,
-                              const char* func_name) {
-    BaseException* ud = py_touserdata(self);
-    int max_frame_dumps = py_debugger_isattached() ? 31 : 7;
-    if(ud->stacktrace.length >= max_frame_dumps) return;
-    BaseExceptionFrame* frame_dump = c11_vector__emplace(&ud->stacktrace);
-    PK_INCREF(src);
-    frame_dump->src = src;
-    frame_dump->lineno = lineno;
-    frame_dump->name = func_name ? c11_string__new(func_name) : NULL;
-
-    if(py_debugger_isattached()) {
-        if(frame != NULL) {
-            py_Frame_newlocals(frame, &frame_dump->locals);
-            py_Frame_newglobals(frame, &frame_dump->globals);
-        } else {
-            py_newdict(&frame_dump->locals);
-            py_newdict(&frame_dump->globals);
-        }
-    }
-}
-
-static void BaseException__dtor(void* ud) {
-    BaseException* self = (BaseException*)ud;
-    c11__foreach(BaseExceptionFrame, &self->stacktrace, it) {
-        PK_DECREF(it->src);
-        if(it->name) c11_string__delete(it->name);
-    }
-    c11_vector__dtor(&self->stacktrace);
-}
-
-static bool _py_BaseException__new__(int argc, py_Ref argv) {
-    py_Type cls = py_totype(argv);
-    BaseException* ud = py_newobject(py_retval(), cls, 0, sizeof(BaseException));
-    py_newnil(&ud->args);
-    py_newnil(&ud->inner_exc);
-    c11_vector__ctor(&ud->stacktrace, sizeof(BaseExceptionFrame));
-    return true;
-}
-
-static bool _py_BaseException__init__(int argc, py_Ref argv) {
-    BaseException* ud = py_touserdata(argv);
-    py_newnone(py_retval());
-    if(argc == 1 + 0) return true;
-    if(argc == 1 + 1) {
-        py_assign(&ud->args, &argv[1]);
-        return true;
-    }
-    return TypeError("__init__() takes at most 1 arguments but %d were given", argc - 1);
-}
-
-static bool _py_BaseException__repr__(int argc, py_Ref argv) {
-    PY_CHECK_ARGC(1);
-    BaseException* ud = py_touserdata(argv);
-    c11_sbuf ss;
-    c11_sbuf__ctor(&ss);
-    pk_sprintf(&ss, "%t(", argv->type);
-    py_Ref args = &ud->args;
-    if(!py_isnil(args)) {
-        if(!py_repr(args)) return false;
-        c11_sbuf__write_sv(&ss, py_tosv(py_retval()));
-    }
-    c11_sbuf__write_char(&ss, ')');
-    c11_sbuf__py_submit(&ss, py_retval());
-    return true;
-}
-
-static bool _py_BaseException__str__(int argc, py_Ref argv) {
-    PY_CHECK_ARGC(1);
-    BaseException* ud = py_touserdata(argv);
-    c11_sbuf ss;
-    c11_sbuf__ctor(&ss);
-    py_Ref args = &ud->args;
-    if(!py_isnil(args)) {
-        if(argv->type == tp_KeyError) {
-            if(!py_repr(args)) return false;
-        } else {
-            if(!py_str(args)) return false;
-        }
-        c11_sbuf__write_sv(&ss, py_tosv(py_retval()));
-    }
-    c11_sbuf__py_submit(&ss, py_retval());
-    return true;
-}
-
-static bool BaseException_args(int argc, py_Ref argv) {
-    BaseException* ud = py_touserdata(argv);
-    PY_CHECK_ARGC(1);
-    py_Ref args = &ud->args;
-    if(!py_isnil(args)) {
-        py_Ref p = py_newtuple(py_retval(), 1);
-        p[0] = *args;
-    } else {
-        py_newtuple(py_retval(), 0);
-    }
-    return true;
-}
-
-static bool StopIteration_value(int argc, py_Ref argv) {
-    BaseException* ud = py_touserdata(argv);
-    PY_CHECK_ARGC(1);
-    py_Ref args = &ud->args;
-    if(py_isnil(args)) {
-        py_newnone(py_retval());
-    } else {
-        py_assign(py_retval(), args);
-    }
-    return true;
-}
-
-py_Type pk_BaseException__register() {
-    py_Type type = pk_newtype("BaseException", tp_object, NULL, BaseException__dtor, false, false);
-
-    py_bindmagic(type, __new__, _py_BaseException__new__);
-    py_bindmagic(type, __init__, _py_BaseException__init__);
-    py_bindmagic(type, __repr__, _py_BaseException__repr__);
-    py_bindmagic(type, __str__, _py_BaseException__str__);
-    py_bindproperty(type, "args", BaseException_args, NULL);
-    return type;
-}
-
-py_Type pk_Exception__register() {
-    py_Type type = pk_newtype("Exception", tp_BaseException, NULL, NULL, false, false);
-    return type;
-}
-
-py_Type pk_StopIteration__register() {
-    py_Type type = pk_newtype("StopIteration", tp_Exception, NULL, NULL, false, false);
-    py_bindproperty(type, "value", StopIteration_value, NULL);
-    return type;
-}
-
-//////////////////////////////////////////////////
-bool py_checkexc(bool ignore_handled) {
-    VM* vm = pk_current_vm;
-    if(ignore_handled && vm->is_curr_exc_handled) return false;
-    return !py_isnil(&vm->curr_exception);
-}
-
-bool py_matchexc(py_Type type) {
-    VM* vm = pk_current_vm;
-    if(vm->is_curr_exc_handled) return false;
-    if(py_isnil(&vm->curr_exception)) return false;
-    bool ok = py_issubclass(vm->curr_exception.type, type);
-    if(ok) {
-        // if match, then the exception is handled
-        vm->is_curr_exc_handled = true;
-        vm->last_retval = vm->curr_exception;
-    }
-    return ok;
-}
-
-void py_clearexc(py_StackRef p0) {
-    VM* vm = pk_current_vm;
-    vm->curr_exception = *py_NIL();
-    vm->is_curr_exc_handled = false;
-    /* Don't clear this, because StopIteration() may corrupt the class definition */
-    // vm->curr_class = NULL;
-    vm->curr_decl_based_function = NULL;
-    if(p0) vm->stack.sp = p0;
-}
-
-static void c11_sbuf__write_exc(c11_sbuf* self, py_Ref exc) {
-    if(true) { c11_sbuf__write_cstr(self, "Traceback (most recent call last):\n"); }
-
-    BaseException* ud = py_touserdata(exc);
-
-    for(int i = ud->stacktrace.length - 1; i >= 0; i--) {
-        BaseExceptionFrame* frame = c11__at(BaseExceptionFrame, &ud->stacktrace, i);
-        SourceData__snapshot(frame->src,
-                             self,
-                             frame->lineno,
-                             NULL,
-                             frame->name ? frame->name->data : NULL);
-        c11_sbuf__write_char(self, '\n');
-    }
-
-    const char* name = py_tpname(exc->type);
-    const char* message;
-    bool ok = py_str(exc);
-    if(!ok || !py_isstr(py_retval())) {
-        message = "<exception str() failed>";
-    } else {
-        message = py_tostr(py_retval());
-    }
-
-    c11_sbuf__write_cstr(self, name);
-    c11_sbuf__write_cstr(self, ": ");
-    c11_sbuf__write_cstr(self, message);
-}
-
-void py_printexc() {
-    char* msg = py_formatexc();
-    if(!msg) return;
-    pk_current_vm->callbacks.print(msg);
-    pk_current_vm->callbacks.print("\n");
-    PK_FREE(msg);
-}
-
-char* py_formatexc() {
-    VM* vm = pk_current_vm;
-    if(py_isnil(&vm->curr_exception)) return NULL;
-
-    // when you call `py_formatexc()`, you are handling the exception
-    vm->is_curr_exc_handled = true;
-
-    c11_sbuf ss;
-    c11_sbuf__ctor(&ss);
-
-    BaseException* ud = py_touserdata(&vm->curr_exception);
-    py_Ref inner = &ud->inner_exc;
-    if(py_isnil(inner)) {
-        c11_sbuf__write_exc(&ss, &vm->curr_exception);
-    } else {
-        c11_sbuf__write_exc(&ss, inner);
-        c11_sbuf__write_cstr(
-            &ss,
-            "\n\nDuring handling of the above exception, another exception occurred:\n\n");
-        c11_sbuf__write_exc(&ss, &vm->curr_exception);
-    }
-
-    c11_string* res = c11_sbuf__submit(&ss);
-    char* dup = PK_MALLOC(res->size + 1);
-    memcpy(dup, res->data, res->size);
-    dup[res->size] = '\0';
-    c11_string__delete(res);
-
-    if(py_debugger_isattached()) py_debugger_exceptionbreakpoint(&vm->curr_exception);
-    return dup;
-}
-
-bool py_exception(py_Type type, const char* fmt, ...) {
-#ifndef NDEBUG
-    if(py_checkexc(true)) {
-        const char* name = py_tpname(pk_current_vm->curr_exception.type);
-        c11__abort("py_exception(): `%s` was already set!", name);
-    }
-#endif
-
-    c11_sbuf buf;
-    c11_sbuf__ctor(&buf);
-    va_list args;
-    va_start(args, fmt);
-    pk_vsprintf(&buf, fmt, args);
-    va_end(args);
-
-    py_Ref message = py_pushtmp();
-    c11_sbuf__py_submit(&buf, message);
-
-    bool ok = py_tpcall(type, 1, message);
-    if(!ok) return false;
-    py_pop();
-
-    return py_raise(py_retval());
-}
-
-bool py_raise(py_Ref exc) {
-    assert(py_isinstance(exc, tp_BaseException));
-    VM* vm = pk_current_vm;
-    if(!py_isnil(&vm->curr_exception)) {
-        BaseException* ud = py_touserdata(&vm->curr_exception);
-        ud->inner_exc = vm->curr_exception;
-    }
-    vm->curr_exception = *exc;
-    vm->is_curr_exc_handled = false;
-    return false;
-}
-
-bool KeyError(py_Ref key) {
-    bool ok = py_tpcall(tp_KeyError, 1, key);
-    if(!ok) return false;
-    return py_raise(py_retval());
-}
-// src/public/py_number.c
+// src/bindings/py_number.c
 #include <math.h>
 
 static bool try_castfloat(py_Ref self, double* out) {
@@ -13095,6 +13983,44 @@ static py_i64 cpy11__fast_mod(py_i64 a, py_i64 b) {
     return b < 0 ? -res : res;
 }
 
+// https://github.com/python/cpython/blob/3.11/Objects/floatobject.c#L677
+static void cpy11__float_div_mod(double vx, double wx, double *floordiv, double *mod)
+{
+    double div;
+    *mod = fmod(vx, wx);
+    /* fmod is typically exact, so vx-mod is *mathematically* an
+       exact multiple of wx.  But this is fp arithmetic, and fp
+       vx - mod is an approximation; the result is that div may
+       not be an exact integral value after the division, although
+       it will always be very close to one.
+    */
+    div = (vx - *mod) / wx;
+    if (*mod) {
+        /* ensure the remainder has the same sign as the denominator */
+        if ((wx < 0) != (*mod < 0)) {
+            *mod += wx;
+            div -= 1.0;
+        }
+    }
+    else {
+        /* the remainder is zero, and in the presence of signed zeroes
+           fmod returns different results across platforms; ensure
+           it has the same sign as the denominator. */
+        *mod = copysign(0.0, wx);
+    }
+    /* snap quotient to nearest integral value */
+    if (div) {
+        *floordiv = floor(div);
+        if (div - *floordiv > 0.5) {
+            *floordiv += 1.0;
+        }
+    }
+    else {
+        /* div is zero - get the same sign as the true quotient */
+        *floordiv = copysign(0.0, vx / wx); /* zero w/ sign of vx/wx */
+    }
+}
+
 static bool int__floordiv__(int argc, py_Ref argv) {
     PY_CHECK_ARGC(2);
     py_i64 lhs = py_toint(&argv[0]);
@@ -13121,13 +14047,45 @@ static bool int__mod__(int argc, py_Ref argv) {
     return true;
 }
 
+static bool float__floordiv__(int argc, py_Ref argv) {
+    PY_CHECK_ARGC(2);
+    py_f64 lhs = py_tofloat(&argv[0]);
+    py_f64 rhs;
+    if(try_castfloat(&argv[1], &rhs)) {
+        if(rhs == 0.0) return ZeroDivisionError("float modulo by zero");
+        double q, r;
+        cpy11__float_div_mod(lhs, rhs, &q, &r);
+        py_newfloat(py_retval(), q);
+        return true;
+    }
+    py_newnotimplemented(py_retval());
+    return true;
+}
+
+static bool float__rfloordiv__(int argc, py_Ref argv) {
+    PY_CHECK_ARGC(2);
+    py_f64 rhs = py_tofloat(&argv[0]);
+    py_f64 lhs;
+    if(try_castfloat(&argv[1], &lhs)) {
+        if(rhs == 0.0) return ZeroDivisionError("float modulo by zero");
+        double q, r;
+        cpy11__float_div_mod(lhs, rhs, &q, &r);
+        py_newfloat(py_retval(), q);
+        return true;
+    }
+    py_newnotimplemented(py_retval());
+    return true;
+}
+
 static bool float__mod__(int argc, py_Ref argv) {
     PY_CHECK_ARGC(2);
     py_f64 lhs = py_tofloat(&argv[0]);
     py_f64 rhs;
     if(try_castfloat(&argv[1], &rhs)) {
         if(rhs == 0.0) return ZeroDivisionError("float modulo by zero");
-        py_newfloat(py_retval(), fmod(lhs, rhs));
+        double q, r;
+        cpy11__float_div_mod(lhs, rhs, &q, &r);
+        py_newfloat(py_retval(), r);
         return true;
     }
     py_newnotimplemented(py_retval());
@@ -13140,11 +14098,29 @@ static bool float__rmod__(int argc, py_Ref argv) {
     py_f64 lhs;
     if(try_castfloat(&argv[1], &lhs)) {
         if(rhs == 0.0) return ZeroDivisionError("float modulo by zero");
-        py_newfloat(py_retval(), fmod(lhs, rhs));
+        double q, r;
+        cpy11__float_div_mod(lhs, rhs, &q, &r);
+        py_newfloat(py_retval(), r);
         return true;
     }
     py_newnotimplemented(py_retval());
     return true;
+}
+
+static bool float__divmod__(int argc, py_Ref argv) {
+    PY_CHECK_ARGC(2);
+    py_f64 lhs = py_tofloat(&argv[0]);
+    py_f64 rhs;
+    if(try_castfloat(&argv[1], &rhs)) {
+        if(rhs == 0.0) return ZeroDivisionError("float modulo by zero");
+        double q, r;
+        cpy11__float_div_mod(lhs, rhs, &q, &r);
+        py_Ref p = py_newtuple(py_retval(), 2);
+        py_newfloat(&p[0], q);
+        py_newfloat(&p[1], r);
+        return true;
+    }
+    return TypeError("divmod() expects int or float as divisor");
 }
 
 static bool int__divmod__(int argc, py_Ref argv) {
@@ -13481,8 +14457,11 @@ void pk_number__register() {
     py_bindmagic(tp_int, __divmod__, int__divmod__);
 
     // fmod
+    py_bindmagic(tp_float, __floordiv__, float__floordiv__);
+    py_bindmagic(tp_float, __rfloordiv__, float__rfloordiv__);
     py_bindmagic(tp_float, __mod__, float__mod__);
     py_bindmagic(tp_float, __rmod__, float__rmod__);
+    py_bindmagic(tp_float, __divmod__, float__divmod__);
 
     // int.__invert__ & int.<BITWISE OP>
     py_bindmagic(tp_int, __invert__, int__invert__);
@@ -13511,7 +14490,7 @@ void pk_number__register() {
 #undef DEF_NUM_BINARY_OP
 #undef DEF_INT_BITWISE_OP
 #undef DEF_BOOL_BITWISE
-// src/public/py_object.c
+// src/bindings/py_object.c
 bool pk__object_new(int argc, py_Ref argv) {
     if(argc == 0) return TypeError("object.__new__(): not enough arguments");
     py_TypeInfo* ti = py_touserdata(argv);
@@ -13650,339 +14629,8 @@ void pk_object__register() {
     py_bindproperty(tp_object, "__dict__", object__dict__, NULL);
     py_bindproperty(tp_type, "__annotations__", type__annotations__, NULL);
 }
-// src/public/py_ops.c
-bool py_isidentical(py_Ref lhs, py_Ref rhs) {
-    if(lhs->type != rhs->type) return false;
-    switch(lhs->type) {
-        case tp_int: return lhs->_i64 == rhs->_i64;
-        case tp_float: return lhs->_f64 == rhs->_f64;
-        case tp_bool: return lhs->_bool == rhs->_bool;
-        case tp_str: {
-            if(lhs->is_ptr && rhs->is_ptr) {
-                return lhs->_obj == rhs->_obj;
-            } else {
-                return strcmp(lhs->_chars, rhs->_chars) == 0;
-            }
-        }
-        case tp_nativefunc: return lhs->_cfunc == rhs->_cfunc;
-        case tp_NoneType: return true;
-        case tp_NotImplementedType: return true;
-        case tp_ellipsis: return true;
-        // fallback to pointer comparison
-        default: return lhs->is_ptr && rhs->is_ptr && lhs->_obj == rhs->_obj;
-    }
-}
-
-int py_bool(py_Ref val) {
-    switch(val->type) {
-        case tp_bool: return val->_bool;
-        case tp_int: return val->_i64 != 0;
-        case tp_float: return val->_f64 != 0;
-        case tp_NoneType: return 0;
-        default: {
-            py_Ref tmp = py_tpfindmagic(val->type, __bool__);
-            if(tmp) {
-                if(!py_call(tmp, 1, val)) return -1;
-                if(!py_checkbool(py_retval())) return -1;
-                return py_tobool(py_retval());
-            } else {
-                tmp = py_tpfindmagic(val->type, __len__);
-                if(tmp) {
-                    if(!py_call(tmp, 1, val)) return -1;
-                    if(!py_checkint(py_retval())) return -1;
-                    return py_toint(py_retval());
-                } else {
-                    return 1;  // True
-                }
-            }
-        }
-    }
-}
-
-bool py_hash(py_Ref val, int64_t* out) {
-    py_TypeInfo* ti = pk_typeinfo(val->type);
-    do {
-        py_Ref slot_hash = py_getdict(&ti->self, __hash__);
-        if(slot_hash && py_isnone(slot_hash)) break;
-        py_Ref slot_eq = py_getdict(&ti->self, __eq__);
-        if(slot_eq) {
-            if(!slot_hash) break;
-            if(!py_call(slot_hash, 1, val)) return false;
-            if(!py_checkint(py_retval())) return false;
-            *out = py_toint(py_retval());
-            return true;
-        }
-        ti = ti->base_ti;
-    } while(ti);
-    return TypeError("unhashable type: '%t'", val->type);
-}
-
-bool py_iter(py_Ref val) {
-    py_Ref tmp = py_tpfindmagic(val->type, __iter__);
-    if(!tmp) return TypeError("'%t' object is not iterable", val->type);
-    return py_call(tmp, 1, val);
-}
-
-int py_next(py_Ref val) {
-    VM* vm = pk_current_vm;
-
-    switch(val->type) {
-        case tp_generator:
-            if(generator__next__(1, val)) return 1;
-            break;
-        case tp_array2d_like_iterator:
-            if(array2d_like_iterator__next__(1, val)) return 1;
-            break;
-        case tp_list_iterator:
-            if(list_iterator__next__(1, val)) return 1;
-            break;
-        case tp_tuple_iterator:
-            if(tuple_iterator__next__(1, val)) return 1;
-            break;
-        case tp_dict_iterator:
-            if(dict_items__next__(1, val)) return 1;
-            break;
-        case tp_range_iterator:
-            if(range_iterator__next__(1, val)) return 1;
-            break;
-        case tp_str_iterator:
-            if(str_iterator__next__(1, val)) return 1;
-            break;
-        default: {
-            py_Ref tmp = py_tpfindmagic(val->type, __next__);
-            if(!tmp) {
-                TypeError("'%t' object is not an iterator", val->type);
-                return -1;
-            }
-            if(py_call(tmp, 1, val)) return 1;
-            break;
-        }
-    }
-    if(vm->curr_exception.type == tp_StopIteration) {
-        vm->last_retval = vm->curr_exception;
-        py_clearexc(NULL);
-        return 0;
-    }
-    return -1;
-}
-
-bool py_getattr(py_Ref self, py_Name name) {
-    // https://docs.python.org/3/howto/descriptor.html#invocation-from-an-instance
-    py_TypeInfo* ti = pk_typeinfo(self->type);
-    if(ti->getattribute) return ti->getattribute(self, name);
-
-    py_Ref cls_var = pk_tpfindname(ti, name);
-    if(cls_var) {
-        // handle descriptor
-        if(py_istype(cls_var, tp_property)) {
-            py_Ref getter = py_getslot(cls_var, 0);
-            return py_call(getter, 1, self);
-        }
-    }
-    // handle instance __dict__
-    if(self->is_ptr && self->_obj->slots == -1) {
-        if(!py_istype(self, tp_type)) {
-            py_Ref res = py_getdict(self, name);
-            if(res) {
-                py_assign(py_retval(), res);
-                return true;
-            }
-        } else {
-            // self is a type object
-            py_TypeInfo* inner_type = py_touserdata(self);
-            py_Ref res = pk_tpfindname(inner_type, name);
-            if(res) {
-                if(py_istype(res, tp_staticmethod)) {
-                    res = py_getslot(res, 0);
-                } else if(py_istype(res, tp_classmethod)) {
-                    res = py_getslot(res, 0);
-                    py_newboundmethod(py_retval(), self, res);
-                    return true;
-                }
-                py_assign(py_retval(), res);
-                return true;
-            }
-        }
-    }
-
-    if(cls_var) {
-        // bound method is non-data descriptor
-        switch(cls_var->type) {
-            case tp_function: {
-                if(name == __new__) goto __STATIC_NEW;
-                py_newboundmethod(py_retval(), self, cls_var);
-                return true;
-            }
-            case tp_nativefunc: {
-                if(name == __new__) goto __STATIC_NEW;
-                py_newboundmethod(py_retval(), self, cls_var);
-                return true;
-            }
-            case tp_staticmethod: {
-                py_assign(py_retval(), py_getslot(cls_var, 0));
-                return true;
-            }
-            case tp_classmethod: {
-                py_newboundmethod(py_retval(), &ti->self, py_getslot(cls_var, 0));
-                return true;
-            }
-            default: {
-            __STATIC_NEW:
-                py_assign(py_retval(), cls_var);
-                return true;
-            }
-        }
-    }
-
-    py_Ref fallback = pk_tpfindmagic(ti, __getattr__);
-    if(fallback) {
-        py_push(fallback);
-        py_push(self);
-        py_assign(py_pushtmp(), py_name2ref(name));
-        return py_vectorcall(1, 0);
-    }
-
-    if(self->type == tp_module) {
-        py_ModuleInfo* mi = py_touserdata(self);
-        c11_sbuf buf;
-        c11_sbuf__ctor(&buf);
-        pk_sprintf(&buf, "%v.%n", c11_string__sv(mi->path), name);
-        c11_string* new_path = c11_sbuf__submit(&buf);
-        int res = py_import(new_path->data);
-        c11_string__delete(new_path);
-        if(res == -1) {
-            return false;
-        } else if(res == 1) {
-            return true;
-        }
-    }
-
-    return AttributeError(self, name);
-}
-
-bool py_setattr(py_Ref self, py_Name name, py_Ref val) {
-    py_TypeInfo* ti = pk_typeinfo(self->type);
-    if(ti->setattribute) return ti->setattribute(self, name, val);
-
-    py_Ref cls_var = pk_tpfindname(ti, name);
-    if(cls_var) {
-        // handle descriptor
-        if(py_istype(cls_var, tp_property)) {
-            py_Ref setter = py_getslot(cls_var, 1);
-            if(!py_isnone(setter)) {
-                py_push(setter);
-                py_push(self);
-                py_push(val);
-                return py_vectorcall(1, 0);
-            } else {
-                return TypeError("readonly attribute: '%n'", name);
-            }
-        }
-    }
-
-    // handle instance __dict__
-    if(self->is_ptr && self->_obj->slots == -1) {
-        py_setdict(self, name, val);
-        return true;
-    }
-
-    return TypeError("cannot set attribute");
-}
-
-bool py_delattr(py_Ref self, py_Name name) {
-    py_TypeInfo* ti = pk_typeinfo(self->type);
-    if(ti->delattribute) return ti->delattribute(self, name);
-
-    if(self->is_ptr && self->_obj->slots == -1) {
-        if(py_deldict(self, name)) return true;
-        return AttributeError(self, name);
-    }
-    return TypeError("cannot delete attribute");
-}
-
-bool py_getitem(py_Ref self, py_Ref key) {
-    py_push(self);
-    py_push(key);
-    bool ok = pk_callmagic(__getitem__, 2, py_peek(-2));
-    py_shrink(2);
-    return ok;
-}
-
-bool py_setitem(py_Ref self, py_Ref key, py_Ref val) {
-    py_push(self);
-    py_push(key);
-    py_push(val);
-    bool ok = pk_callmagic(__setitem__, 3, py_peek(-3));
-    py_shrink(3);
-    return ok;
-}
-
-bool py_delitem(py_Ref self, py_Ref key) {
-    py_push(self);
-    py_push(key);
-    bool ok = pk_callmagic(__delitem__, 2, py_peek(-2));
-    py_shrink(2);
-    return ok;
-}
-
-int py_equal(py_Ref lhs, py_Ref rhs) {
-    if(py_isidentical(lhs, rhs)) return 1;
-    if(!py_eq(lhs, rhs)) return -1;
-    return py_bool(py_retval());
-}
-
-int py_less(py_Ref lhs, py_Ref rhs) {
-    if(!py_lt(lhs, rhs)) return -1;
-    return py_bool(py_retval());
-}
-// src/public/py_str.c
-void py_newstr(py_OutRef out, const char* data) { py_newstrv(out, (c11_sv){data, strlen(data)}); }
-
-char* py_newstrn(py_OutRef out, int size) {
-    if(size < 16) {
-        out->type = tp_str;
-        out->is_ptr = false;
-        c11_string* ud = (c11_string*)(&out->extra);
-        c11_string__ctor3(ud, size);
-        return ud->data;
-    }
-    ManagedHeap* heap = &pk_current_vm->heap;
-    int total_size = sizeof(c11_string) + size + 1;
-    PyObject* obj = ManagedHeap__gcnew(heap, tp_str, 0, total_size);
-    c11_string* ud = PyObject__userdata(obj);
-    c11_string__ctor3(ud, size);
-    out->type = tp_str;
-    out->is_ptr = true;
-    out->_obj = obj;
-    return ud->data;
-}
-
-void py_newstrv(py_OutRef out, c11_sv sv) {
-    char* data = py_newstrn(out, sv.size);
-    memcpy(data, sv.data, sv.size);
-}
-
-void py_newfstr(py_OutRef out, const char* fmt, ...) {
-    c11_sbuf buf;
-    c11_sbuf__ctor(&buf);
-    va_list args;
-    va_start(args, fmt);
-    pk_vsprintf(&buf, fmt, args);
-    va_end(args);
-    c11_sbuf__py_submit(&buf, out);
-}
-
-unsigned char* py_newbytes(py_OutRef out, int size) {
-    ManagedHeap* heap = &pk_current_vm->heap;
-    // 4 bytes size + data
-    PyObject* obj = ManagedHeap__gcnew(heap, tp_bytes, 0, sizeof(c11_bytes) + size);
-    c11_bytes* ud = PyObject__userdata(obj);
-    ud->size = size;
-    out->type = tp_bytes;
-    out->is_ptr = true;
-    out->_obj = obj;
-    return ud->data;
-}
+// src/bindings/py_str.c
+#include <stdbool.h>
 
 c11_string* pk_tostr(py_Ref self) {
     assert(self->type == tp_str);
@@ -13991,33 +14639,6 @@ c11_string* pk_tostr(py_Ref self) {
     } else {
         return PyObject__userdata(self->_obj);
     }
-}
-
-const char* py_tostr(py_Ref self) { return pk_tostr(self)->data; }
-
-const char* py_tostrn(py_Ref self, int* size) {
-    c11_string* ud = pk_tostr(self);
-    *size = ud->size;
-    return ud->data;
-}
-
-c11_sv py_tosv(py_Ref self) {
-    c11_string* ud = pk_tostr(self);
-    return c11_string__sv(ud);
-}
-
-unsigned char* py_tobytes(py_Ref self, int* size) {
-    assert(self->type == tp_bytes);
-    c11_bytes* ud = PyObject__userdata(self->_obj);
-    *size = ud->size;
-    return ud->data;
-}
-
-void py_bytes_resize(py_Ref self, int size) {
-    assert(self->type == tp_bytes);
-    c11_bytes* ud = PyObject__userdata(self->_obj);
-    if(size > ud->size) c11__abort("bytes can only be resized down: %d > %d", ud->size, size);
-    ud->size = size;
 }
 
 ////////////////////////////////
@@ -14400,6 +15021,106 @@ static bool str_encode(int argc, py_Ref argv) {
     return true;
 }
 
+static bool str_format(int argc, py_Ref argv) {
+    c11_sv self = py_tosv(argv);
+    py_Ref args = argv + 1;
+    int64_t auto_field_index = -1;
+    bool manual_field_used = false;
+    const char* p_begin = self.data;
+    const char* p_end = self.data + self.size;
+    const char* p = p_begin;
+    c11_sbuf buf;
+    c11_sbuf__ctor(&buf);
+    while(p < p_end) {
+        if(*p == '{') {
+            if((p + 1) < p_end && p[1] == '{') {
+                // '{{' -> '{'
+                c11_sbuf__write_char(&buf, '{');
+                p += 2;
+            } else {
+                if((p + 1) >= p_end) {
+                    c11_sbuf__dtor(&buf);
+                    return ValueError("single '{' encountered in format string");
+                }
+                p++;
+                // parse field
+                c11_sv field = {p, 0};
+                while(p < p_end && *p != '}' && *p != ':') {
+                    p++;
+                }
+                if(p < p_end) field.size = p - field.data;
+                // parse spec
+                c11_sv spec = {p, 0};
+                if(*p == ':') {
+                    while(p < p_end && *p != '}') {
+                        p++;
+                    }
+                    if(p < p_end) spec.size = p - spec.data;
+                }
+                if(p < p_end) {
+                    c11__rtassert(*p == '}');
+                } else {
+                    c11_sbuf__dtor(&buf);
+                    return ValueError("expected '}' before end of string");
+                }
+                // parse auto field
+                int64_t arg_index;
+                if(field.size > 0) {  // {0}
+                    if(auto_field_index >= 0) {
+                        c11_sbuf__dtor(&buf);
+                        return ValueError(
+                            "cannot switch from automatic field numbering to manual field specification");
+                    }
+                    IntParsingResult res = c11__parse_uint(field, &arg_index, 10);
+                    if(res != IntParsing_SUCCESS) {
+                        c11_sbuf__dtor(&buf);
+                        return ValueError("only integer field name is supported");
+                    }
+                    manual_field_used = true;
+                } else {  // {}
+                    if(manual_field_used) {
+                        c11_sbuf__dtor(&buf);
+                        return ValueError(
+                            "cannot switch from manual field specification to automatic field numbering");
+                    }
+                    auto_field_index++;
+                    arg_index = auto_field_index;
+                }
+                // do format
+                if(arg_index < 0 || arg_index >= (argc - 1)) {
+                    c11_sbuf__dtor(&buf);
+                    return IndexError("replacement index %i out of range for positional args tuple",
+                                      arg_index);
+                }
+                bool ok = pk_format_object(pk_current_vm, &args[arg_index], spec);
+                if(!ok) {
+                    c11_sbuf__dtor(&buf);
+                    return false;
+                }
+                // append to buf
+                c11__rtassert(py_isstr(py_retval()));
+                c11_sv formatted = py_tosv(py_retval());
+                c11_sbuf__write_sv(&buf, formatted);
+                p++;  // skip '}'
+            }
+        } else if(*p == '}') {
+            if((p + 1) < p_end && p[1] == '}') {
+                // '}}' -> '}'
+                c11_sbuf__write_char(&buf, '}');
+                p += 2;
+            } else {
+                c11_sbuf__dtor(&buf);
+                return ValueError("single '}' encountered in format string");
+            }
+        } else {
+            c11_sbuf__write_char(&buf, *p);
+            p++;
+        }
+    }
+    c11_sbuf__py_submit(&buf, py_retval());
+    return true;
+}
+
 py_Type pk_str__register() {
     py_Type type = pk_newtype("str", tp_object, NULL, NULL, false, true);
     // no need to dtor because the memory is controlled by the object
@@ -14440,6 +15161,7 @@ py_Type pk_str__register() {
     py_bindmethod(tp_str, "find", str_find);
     py_bindmethod(tp_str, "index", str_index);
     py_bindmethod(tp_str, "encode", str_encode);
+    py_bindmethod(tp_str, "format", str_format);
     return type;
 }
 
@@ -14603,1106 +15325,7 @@ py_Type pk_bytes__register() {
     return type;
 }
 
-bool py_str(py_Ref val) {
-    if(val->type == tp_str) {
-        py_assign(py_retval(), val);
-        return true;
-    }
-    py_Ref tmp = py_tpfindmagic(val->type, __str__);
-    if(!tmp) return py_repr(val);
-    return py_call(tmp, 1, val);
-}
-
-bool py_repr(py_Ref val) { return pk_callmagic(__repr__, 1, val); }
-
-bool py_len(py_Ref val) { return pk_callmagic(__len__, 1, val); }
-
 #undef DEF_STR_CMP_OP
-// src/debugger/dap.c
-#include <stdbool.h>
-#include <stdio.h>
-#if PK_ENABLE_OS
-
-#define DAP_COMMAND_LIST(X)                                                                        \
-    X(initialize)                                                                                  \
-    X(setBreakpoints)                                                                              \
-    X(attach)                                                                                      \
-    X(launch)                                                                                      \
-    X(next)                                                                                        \
-    X(stepIn)                                                                                      \
-    X(stepOut)                                                                                     \
-    X(continue)                                                                                    \
-    X(stackTrace)                                                                                  \
-    X(scopes)                                                                                      \
-    X(variables)                                                                                   \
-    X(threads)                                                                                     \
-    X(configurationDone)                                                                           \
-    X(ready)                                                                                       \
-    X(evaluate)                                                                                    \
-    X(exceptionInfo)
-
-#define DECLARE_HANDLE_FN(name) void c11_dap_handle_##name(py_Ref arguments, c11_sbuf*);
-DAP_COMMAND_LIST(DECLARE_HANDLE_FN)
-#undef DECLARE_ARG_FN
-
-typedef void (*c11_dap_arg_parser_fn)(py_Ref, c11_sbuf*);
-
-typedef struct {
-    const char* command;
-    c11_dap_arg_parser_fn parser;
-} dap_command_entry;
-
-#define DAP_ENTRY(name) {#name, c11_dap_handle_##name},
-static dap_command_entry dap_command_table[] = {
-    DAP_COMMAND_LIST(DAP_ENTRY){NULL, NULL}
-};
-
-#undef DAP_ENTRY
-
-static struct c11_dap_server {
-    int dap_next_seq;
-    char buffer_data[1024];
-    char* buffer_begin;
-    int buffer_length;
-    c11_socket_handler server;
-    c11_socket_handler toclient;
-    bool isconfiguredone;
-    bool isfirstatttach;
-    bool isattach;
-    bool isclientready;
-} server;
-
-void c11_dap_handle_initialize(py_Ref arguments, c11_sbuf* buffer) {
-    c11_sbuf__write_cstr(buffer,
-                         "\"body\":{"
-                         "\"supportsConfigurationDoneRequest\":true,"
-                         "\"supportsExceptionInfoRequest\":true"
-                         "}");
-    c11_sbuf__write_char(buffer, ',');
-}
-
-void c11_dap_handle_attach(py_Ref arguments, c11_sbuf* buffer) { server.isfirstatttach = true; }
-
-void c11_dap_handle_launch(py_Ref arguments, c11_sbuf* buffer) { server.isfirstatttach = true; }
-
-void c11_dap_handle_ready(py_Ref arguments, c11_sbuf* buffer) { server.isclientready = true; }
-
-void c11_dap_handle_next(py_Ref arguments, c11_sbuf* buffer) {
-    c11_debugger_set_step_mode(C11_STEP_OVER);
-}
-
-void c11_dap_handle_stepIn(py_Ref arguments, c11_sbuf* buffer) {
-    c11_debugger_set_step_mode(C11_STEP_IN);
-}
-
-void c11_dap_handle_stepOut(py_Ref arguments, c11_sbuf* buffer) {
-    c11_debugger_set_step_mode(C11_STEP_OUT);
-}
-
-void c11_dap_handle_continue(py_Ref arguments, c11_sbuf* buffer) {
-    c11_debugger_set_step_mode(C11_STEP_CONTINUE);
-}
-
-void c11_dap_handle_threads(py_Ref arguments, c11_sbuf* buffer) {
-    c11_sbuf__write_cstr(buffer,
-                         "\"body\":{\"threads\":["
-                         "{\"id\":1,\"name\":\"MainThread\"}"
-                         "]}");
-    c11_sbuf__write_char(buffer, ',');
-}
-
-void c11_dap_handle_configurationDone(py_Ref arguments, c11_sbuf* buffer) {
-    server.isconfiguredone = true;
-}
-
-inline static void c11_dap_build_Breakpoint(int id, int line, c11_sbuf* buffer) {
-    pk_sprintf(buffer, "{\"id\":%d,\"verified\":true,\"line\":%d}", id, line);
-}
-
-void c11_dap_handle_setBreakpoints(py_Ref arguments, c11_sbuf* buffer) {
-    if(!py_smarteval("_0['source']['path']", NULL, arguments)) {
-        py_printexc();
-        return;
-    }
-    const char* sourcename = c11_strdup(py_tostr(py_retval()));
-    if(!py_smarteval("[bp['line'] for bp in _0['breakpoints']]", NULL, arguments)) {
-        py_printexc();
-        return;
-    }
-    int bp_numbers = c11_debugger_reset_breakpoints_by_source(sourcename);
-    c11_sbuf__write_cstr(buffer, "\"body\":");
-    c11_sbuf__write_cstr(buffer, "{\"breakpoints\":[");
-    for(int i = 0; i < py_list_len(py_retval()); i++) {
-        if(i != 0) c11_sbuf__write_char(buffer, ',');
-        int line = py_toint(py_list_getitem(py_retval(), i));
-        c11_debugger_setbreakpoint(sourcename, line);
-        c11_dap_build_Breakpoint(i + bp_numbers, line, buffer);
-    }
-    c11_sbuf__write_cstr(buffer, "]}");
-    c11_sbuf__write_char(buffer, ',');
-    PK_FREE((void*)sourcename);
-}
-
-inline static void c11_dap_build_ExceptionInfo(const char* exc_type, const char* exc_message, c11_sbuf* buffer) {
-    const char* safe_type = exc_type ? exc_type : "UnknownException";
-    const char* safe_message = exc_message ? exc_message : "No additional details available";
-
-    c11_sv type_sv = {.data = safe_type, .size = strlen(safe_type)};
-    c11_sv message_sv = {.data = safe_message, .size = strlen(safe_message)};
-
-    c11_sbuf combined_buffer;
-    c11_sbuf__ctor(&combined_buffer);
-    pk_sprintf(&combined_buffer, "%s: %s", safe_type, safe_message);
-    c11_string* combined_details = c11_sbuf__submit(&combined_buffer);
-
-    pk_sprintf(buffer, 
-        "{\"exceptionId\":%Q,"
-        "\"description\":%Q,"
-        "\"breakMode\":\"unhandled\"}",
-        type_sv,
-        (c11_sv){.data = combined_details->data, .size = combined_details->size}
-    );
-
-    c11_string__delete(combined_details);
-}
-
-void c11_dap_handle_exceptionInfo(py_Ref arguments, c11_sbuf* buffer) {
-    const char* message;
-    const char* name = c11_debugger_excinfo(&message);
-    c11_sbuf__write_cstr(buffer, "\"body\":");
-    c11_dap_build_ExceptionInfo(name, message, buffer);
-    c11_sbuf__write_char(buffer, ',');
-}
-
-
-void c11_dap_handle_stackTrace(py_Ref arguments, c11_sbuf* buffer) {
-    c11_sbuf__write_cstr(buffer, "\"body\":");
-    c11_debugger_frames(buffer);
-    c11_sbuf__write_char(buffer, ',');
-}
-
-void c11_dap_handle_evaluate(py_Ref arguments, c11_sbuf* buffer) {
-    int res = py_dict_getitem_by_str(arguments, "expression");
-    if(res <= 0) {
-        py_printexc();
-        c11__abort("[DEBUGGER ERROR] no expression found in evaluate request");
-    }
-    // [eval, nil, expression,  globals, locals]
-    // vectorcall would pop the above 5 items
-    // so we don't need to pop them manually
-    py_Ref py_eval = py_pushtmp();
-    py_pushnil();
-    py_Ref expression = py_pushtmp();
-    py_assign(expression, py_retval());
-    py_assign(py_eval, py_getbuiltin(py_name("eval")));
-    py_newglobals(py_pushtmp());
-    py_newlocals(py_pushtmp());
-    bool ok = py_vectorcall(3, 0);
-
-    char* result = NULL;
-    c11_sbuf__write_cstr(buffer, "\"body\":");
-    if(!ok) {
-        result = py_formatexc();
-    } else {
-        py_str(py_retval());
-        result = c11_strdup(py_tostr(py_retval()));
-    }
-
-    c11_sv result_sv = {.data = result, .size = strlen(result)};
-    pk_sprintf(buffer, "{\"result\":%Q,\"variablesReference\":0}", result_sv);
-    PK_FREE((void*)result);
-    c11_sbuf__write_char(buffer, ',');
-}
-
-void c11_dap_handle_scopes(py_Ref arguments, c11_sbuf* buffer) {
-    int res = py_dict_getitem_by_str(arguments, "frameId");
-    if(res <= 0) {
-        if(res == 0) {
-            c11__abort("[DEBUGGER ERROR] no frameID found in scopes request");
-        } else {
-            py_printexc();
-            c11__abort("[DEBUGGER ERROR] an error occurred while parsing request frameId");
-        }
-        return;
-    }
-    int frameid = py_toint(py_retval());
-    c11_sbuf__write_cstr(buffer, "\"body\":");
-    c11_debugger_scopes(frameid, buffer);
-    c11_sbuf__write_char(buffer, ',');
-}
-
-void c11_dap_handle_variables(py_Ref arguments, c11_sbuf* buffer) {
-    int res = py_dict_getitem_by_str(arguments, "variablesReference");
-    if(res <= 0) {
-        if(res == 0) {
-            printf("[DEBUGGER ERROR] no frameID found\n");
-        } else {
-            py_printexc();
-        }
-        return;
-    }
-    int variablesReference = py_toint(py_retval());
-    c11_sbuf__write_cstr(buffer, "\"body\":");
-    c11_debugger_unfold_var(variablesReference, buffer);
-    c11_sbuf__write_char(buffer, ',');
-}
-
-const char* c11_dap_handle_request(const char* message) {
-    if(!py_json_loads(message)) {
-        py_printexc();
-        c11__abort("[DEBUGGER ERROR] invalid JSON request");
-    }
-    py_Ref py_request = py_pushtmp();
-    py_Ref py_arguments = py_pushtmp();
-    py_Ref py_command = py_pushtmp();
-    py_assign(py_request, py_retval());
-
-    int res = py_dict_getitem_by_str(py_request, "command");
-    if(res == -1) {
-        py_printexc();
-        c11__abort("[DEBUGGER ERROR] an error occurred while parsing request");
-    } else if(res == 0) {
-        c11__abort("[DEBUGGER ERROR] no command found in request");
-    }
-    py_assign(py_command, py_retval());
-    const char* command = py_tostr(py_command);
-
-    res = py_dict_getitem_by_str(py_request, "arguments");
-    if(res == -1) {
-        py_printexc();
-        c11__abort("[DEBUGGER ERROR] an error occurred while parsing request arguments");
-    }
-    py_assign(py_arguments, py_retval());
-
-    res = py_dict_getitem_by_str(py_request, "seq");
-    if(res == -1) {
-        py_printexc();
-        c11__abort("[DEBUGGER ERROR] an error occurred while parsing request sequence number");
-    }
-    int request_seq = (res == 1) ? py_toint(py_retval()) : 0;
-
-    c11_sbuf response_buffer;
-    c11_sbuf__ctor(&response_buffer);
-    pk_sprintf(&response_buffer,
-               "{\"seq\":%d,\"type\":\"response\",\"request_seq\":%d,\"command\":\"%s\",",
-               server.dap_next_seq++,
-               request_seq,
-               command);
-    for(dap_command_entry* entry = dap_command_table; entry->command != NULL; entry++) {
-        if(strcmp(entry->command, command) == 0) {
-            entry->parser(py_arguments, &response_buffer);
-            break;
-        }
-    }
-    c11_sbuf__write_cstr(&response_buffer, "\"success\":true}");
-
-    c11_string* c11_string_response = c11_sbuf__submit(&response_buffer);
-    const char* response = c11_strdup(c11_string_response->data);
-    c11_string__delete(c11_string_response);
-
-    py_pop();  // py_arguments
-    py_pop();  // py_request
-    py_pop();  // py_command
-
-    return response;
-}
-
-void c11_dap_send_event(const char* event_name, const char* body_json) {
-    c11_sbuf buffer;
-    char header[64];
-    c11_sbuf__ctor(&buffer);
-    pk_sprintf(&buffer,
-               "{\"seq\":%d,\"type\":\"event\",\"event\":\"%s\",\"body\":%s}",
-               server.dap_next_seq++,
-               event_name,
-               body_json);
-    c11_string* json = c11_sbuf__submit(&buffer);
-    int json_len = json->size;
-    int header_len = snprintf(header, sizeof(header), "Content-Length: %d\r\n\r\n", json_len);
-    c11_socket_send(server.toclient, header, header_len);
-    c11_socket_send(server.toclient, json->data, json_len);
-    c11_string__delete(json);
-}
-
-void c11_dap_send_output_event(const char* category, const char* fmt, ...) {
-    va_list args;
-    va_start(args, fmt);
-    c11_sbuf output;
-    c11_sbuf__ctor(&output);
-    pk_vsprintf(&output, fmt, args);
-    va_end(args);
-
-    c11_sbuf buffer;
-    c11_string* output_json = c11_sbuf__submit(&output);
-    c11_sv sv_output = {.data = output_json->data, .size = output_json->size};
-    c11_sbuf__ctor(&buffer);
-    pk_sprintf(&buffer, "{\"category\":\"%s\",\"output\":%Q}", category, sv_output);
-    c11_string* body_json = c11_sbuf__submit(&buffer);
-    c11_dap_send_event("output", body_json->data);
-    c11_string__delete(body_json);
-    c11_string__delete(output_json);
-}
-
-void c11_dap_send_stop_event(C11_STOP_REASON reason) {
-    if(reason == C11_DEBUGGER_NOSTOP) return;
-    const char* reason_str = "unknown";
-    switch(reason) {
-        case C11_DEBUGGER_STEP: reason_str = "step"; break;
-        case C11_DEBUGGER_EXCEPTION: reason_str = "exception"; break;
-        case C11_DEBUGGER_BP: reason_str = "breakpoint"; break;
-        default: break;
-    }
-    c11_sbuf buf;
-    c11_sbuf__ctor(&buf);
-    pk_sprintf(&buf, "{\"reason\":\"%s\",\"threadId\":1,\"allThreadsStopped\":true", reason_str);
-    c11_sbuf__write_char(&buf, '}');
-    c11_string* body_json = c11_sbuf__submit(&buf);
-    c11_dap_send_event("stopped", body_json->data);
-    c11_string__delete(body_json);
-}
-
-void c11_dap_send_exited_event(int exitCode) {
-    char body[64];
-    snprintf(body, sizeof(body), "{\"exitCode\":%d}", exitCode);
-    c11_dap_send_event("exited", body);
-}
-
-void c11_dap_send_fatal_event(const char* message) {
-    char body[128];
-    snprintf(body, sizeof(body), "{\"message\":\"%s\"}", message);
-    c11_dap_send_event("pkpy/fatalError", body);
-}
-
-void c11_dap_send_initialized_event() { c11_dap_send_event("initialized", "{}"); }
-
-int c11_dap_read_content_length(const char* buffer, int* header_length) {
-    const char* length_begin = strstr(buffer, "Content-Length: ");
-    if(!length_begin) {
-        printf("[DEBUGGER ERROR] : no Content-Length filed found\n");
-        *header_length = 0;
-        return -1;
-    }
-    length_begin += strlen("Content-Length: ");
-    const char* length_end = strstr(length_begin, "\r\n\r\n");
-    if(!length_end) {
-        printf("[DEBUGGER ERROR] : the seperator should br \\r\\n\\r\\n\n");
-        *header_length = 0;
-        return -1;
-    }
-    char* endptr = NULL;
-    long value = strtol(length_begin, &endptr, 10);
-    if(endptr == length_begin) {
-        printf("[DEBUGGER EORRO] : the length field is empty\n");
-        *header_length = 0;
-        return -1;
-    }
-    *header_length = (int)(endptr - buffer) + 4;
-    return (int)value;
-}
-
-const char* c11_dap_read_message() {
-    int message_length =
-        c11_socket_recv(server.toclient, server.buffer_begin, 1024 - server.buffer_length);
-    if(message_length == 0) {
-        printf("[DEBUGGER INFO] : client quit\n");
-        exit(0);
-    }
-    if(message_length < 0) { return NULL; }
-    server.buffer_length += message_length;
-    if(server.buffer_length == 0) return NULL;
-    int header_length;
-    int content_length = c11_dap_read_content_length(server.buffer_begin, &header_length);
-    if(content_length <= 0 || header_length <= 0) {
-        printf("[DEBUGGER ERROR]: invalid DAP header\n");
-        server.buffer_length = 0;
-        server.buffer_begin = server.buffer_data;
-        return NULL;
-    }
-    server.buffer_begin += header_length;
-    server.buffer_length -= header_length;
-    c11_sbuf result;
-    c11_sbuf__ctor(&result);
-    while(content_length > server.buffer_length) {
-        c11_sbuf__write_cstrn(&result, server.buffer_begin, server.buffer_length);
-        content_length -= server.buffer_length;
-        message_length = c11_socket_recv(server.toclient, server.buffer_data, 1024);
-        if(message_length == 0) {
-            printf("[DEBUGGER INFO] : client quit\n");
-            exit(0);
-        }
-        if(message_length < 0) continue;
-        server.buffer_begin = server.buffer_data;
-        server.buffer_length = message_length;
-    }
-    c11_sbuf__write_cstrn(&result, server.buffer_begin, content_length);
-    server.buffer_begin += content_length;
-    server.buffer_length -= content_length;
-    memmove(server.buffer_data, server.buffer_begin, server.buffer_length);
-    server.buffer_begin = server.buffer_data;
-    c11_string* tmp_result = c11_sbuf__submit(&result);
-    const char* dap_message = c11_strdup(tmp_result->data);
-    c11_string__delete(tmp_result);
-    return dap_message;
-}
-
-void c11_dap_init_server(const char* hostname, unsigned short port) {
-    server.dap_next_seq = 1;
-    server.isconfiguredone = false;
-    server.isclientready = false;
-    server.isfirstatttach = false;
-    server.isattach = false;
-    server.buffer_begin = server.buffer_data;
-    server.server = c11_socket_create(C11_AF_INET, C11_SOCK_STREAM, 0);
-    c11_socket_bind(server.server, hostname, port);
-    c11_socket_listen(server.server, 0);
-    // c11_dap_send_output_event("console", "[DEBUGGER INFO] : listen on %s:%hu\n",hostname,port);
-    printf("[DEBUGGER INFO] : listen on %s:%hu\n", hostname, port);
-}
-
-void c11_dap_waitforclient(const char* hostname, unsigned short port) {
-    server.toclient = c11_socket_accept(server.server, NULL, NULL);
-}
-
-inline static void c11_dap_handle_message() {
-    const char* message = c11_dap_read_message();
-    if(message == NULL) { return; }
-    // c11_dap_send_output_event("console", "[DEBUGGER LOG] : read request %s\n", message);
-    const char* response_content = c11_dap_handle_request(message);
-    if(response_content != NULL) {
-        // c11_dap_send_output_event("console",
-        //                           "[DEBUGGER LOG] : send response %s\n",
-        //                           response_content);
-    }
-    c11_sbuf buffer;
-    c11_sbuf__ctor(&buffer);
-    pk_sprintf(&buffer, "Content-Length: %d\r\n\r\n%s", strlen(response_content), response_content);
-    c11_string* response = c11_sbuf__submit(&buffer);
-    c11_socket_send(server.toclient, response->data, response->size);
-    PK_FREE((void*)message);
-    PK_FREE((void*)response_content);
-    c11_string__delete(response);
-}
-
-void c11_dap_configure_debugger() {
-    while(server.isconfiguredone == false) {
-        c11_dap_handle_message();
-        if(server.isfirstatttach) {
-            c11_dap_send_initialized_event();
-            server.isfirstatttach = false;
-            server.isattach = true;
-        } else if(server.isclientready) {
-            server.isclientready = false;
-            return;
-        }
-    }
-    // c11_dap_send_output_event("console", "[DEBUGGER INFO] : client configure done\n");
-}
-
-void c11_dap_tracefunc(py_Frame* frame, enum py_TraceEvent event) {
-    py_sys_settrace(NULL, false);
-    server.isattach = false;
-    C11_DEBUGGER_STATUS result = c11_debugger_on_trace(frame, event);
-    if(result == C11_DEBUGGER_EXIT) {
-        // c11_dap_send_output_event("console", "[DEBUGGER INFO] : program exit\n");
-        c11_dap_send_exited_event(0);
-        exit(0);
-    }
-    if(result != C11_DEBUGGER_SUCCESS) {
-        const char* message = NULL;
-        switch(result) {
-            case C11_DEBUGGER_FILEPATH_ERROR:
-                message = "Invalid py_file path: '..' forbidden, './' only allowed at start.";
-                break;
-            case C11_DEBUGGER_UNKNOW_ERROR:
-            default: message = "Unknown debugger failure."; break;
-        }
-        if(message) { c11_dap_send_fatal_event(message); }
-        c11_dap_send_exited_event(1);
-        exit(1);
-    }
-    c11_dap_handle_message();
-    C11_STOP_REASON reason = c11_debugger_should_pause();
-    if(reason == C11_DEBUGGER_NOSTOP) {
-        py_sys_settrace(c11_dap_tracefunc, false);
-        server.isattach = true;
-        return;
-    }
-    c11_dap_send_stop_event(reason);
-    while(c11_debugger_should_keep_pause()) {
-        c11_dap_handle_message();
-    }
-    server.isattach = true;
-    py_sys_settrace(c11_dap_tracefunc, false);
-}
-
-void py_debugger_waitforattach(const char* hostname, unsigned short port) {
-    c11_debugger_init();
-    c11_dap_init_server(hostname, port);
-    while(!server.isconfiguredone) {
-        c11_dap_waitforclient(hostname, port);
-        c11_dap_configure_debugger();
-        if(!server.isconfiguredone) {
-            c11_socket_close(server.toclient);
-            // c11_dap_send_output_event("console", "[DEBUGGER INFO] : An clinet is ready\n");
-        }
-    }
-    c11_socket_set_block(server.toclient, 0);
-    py_sys_settrace(c11_dap_tracefunc, true);
-}
-
-void py_debugger_exit(int exitCode) { c11_dap_send_exited_event(exitCode); }
-
-bool py_debugger_isattached() { return server.isattach; }
-
-void py_debugger_exceptionbreakpoint(py_Ref exc) {
-    assert(py_isinstance(exc, tp_BaseException));
-
-    py_sys_settrace(NULL, true);
-    server.isattach = false;
-
-    c11_debugger_exception_on_trace(exc);
-    for(;;) {
-        C11_STOP_REASON reason = c11_debugger_should_pause();
-        c11_dap_send_stop_event(reason);
-        while(c11_debugger_should_keep_pause()) {
-            c11_dap_handle_message();
-        }
-    }
-}
-
-#endif // PK_ENABLE_OS
-// src/debugger/core.c
-#include <ctype.h>
-
-#if PK_ENABLE_OS
-
-typedef struct c11_debugger_breakpoint {
-    const char* sourcename;
-    int lineno;
-} c11_debugger_breakpoint;
-
-typedef struct c11_debugger_scope_index {
-    int locals_ref;
-    int globals_ref;
-} c11_debugger_scope_index;
-
-#define SMALLMAP_T__HEADER
-#define SMALLMAP_T__SOURCE
-#define K int
-#define V c11_debugger_scope_index
-#define NAME c11_smallmap_d2index
-#if !defined(SMALLMAP_T__HEADER) && !defined(SMALLMAP_T__SOURCE)
-#include "pocketpy/common/vector.h"
-#include "pocketpy/common/utils.h"
-#include "pocketpy/config.h"
-
-#define SMALLMAP_T__HEADER
-#define SMALLMAP_T__SOURCE
-/* Input */
-#define K int
-#define V float
-#define NAME c11_smallmap_d2f
-#endif
-
-/* Optional Input */
-#ifndef less
-#define less(a, b) ((a) < (b))
-#endif
-
-#ifndef equal
-#define equal(a, b) ((a) == (b))
-#endif
-
-/* Temporary macros */
-#define partial_less(a, b) less((a).key, (b))
-#define CONCAT(A, B) CONCAT_(A, B)
-#define CONCAT_(A, B) A##B
-
-#define KV CONCAT(NAME, _KV)
-#define METHOD(name) CONCAT(NAME, CONCAT(__, name))
-
-#ifdef SMALLMAP_T__HEADER
-/* Declaration */
-typedef struct {
-    K key;
-    V value;
-} KV;
-
-typedef c11_vector NAME;
-
-void METHOD(ctor)(NAME* self);
-void METHOD(dtor)(NAME* self);
-NAME* METHOD(new)();
-void METHOD(delete)(NAME* self);
-void METHOD(set)(NAME* self, K key, V value);
-V* METHOD(try_get)(const NAME* self, K key);
-V METHOD(get)(const NAME* self, K key, V default_value);
-bool METHOD(contains)(const NAME* self, K key);
-bool METHOD(del)(NAME* self, K key);
-void METHOD(clear)(NAME* self);
-
-#endif
-
-#ifdef SMALLMAP_T__SOURCE
-/* Implementation */
-
-void METHOD(ctor)(NAME* self) {
-    c11_vector__ctor(self, sizeof(KV));
-    c11_vector__reserve(self, 4);
-}
-
-void METHOD(dtor)(NAME* self) { c11_vector__dtor(self); }
-
-NAME* METHOD(new)() {
-    NAME* self = PK_MALLOC(sizeof(NAME));
-    METHOD(ctor)(self);
-    return self;
-}
-
-void METHOD(delete)(NAME* self) {
-    METHOD(dtor)(self);
-    PK_FREE(self);
-}
-
-void METHOD(set)(NAME* self, K key, V value) {
-    int index;
-    c11__lower_bound(KV, self->data, self->length, key, partial_less, &index);
-    if(index != self->length) {
-        KV* it = c11__at(KV, self, index);
-        if(equal(it->key, key)) {
-            it->value = value;
-            return;
-        }
-    }
-    KV kv = {key, value};
-    c11_vector__insert(KV, self, index, kv);
-}
-
-V* METHOD(try_get)(const NAME* self, K key) {
-    int index;
-    c11__lower_bound(KV, self->data, self->length, key, partial_less, &index);
-    if(index != self->length) {
-        KV* it = c11__at(KV, self, index);
-        if(equal(it->key, key)) return &it->value;
-    }
-    return NULL;
-}
-
-V METHOD(get)(const NAME* self, K key, V default_value) {
-    V* p = METHOD(try_get)(self, key);
-    return p ? *p : default_value;
-}
-
-bool METHOD(contains)(const NAME* self, K key) { return METHOD(try_get)(self, key) != NULL; }
-
-bool METHOD(del)(NAME* self, K key) {
-    int index;
-    c11__lower_bound(KV, self->data, self->length, key, partial_less, &index);
-    if(index != self->length) {
-        KV* it = c11__at(KV, self, index);
-        if(equal(it->key, key)) {
-            c11_vector__erase(KV, self, index);
-            return true;
-        }
-    }
-    return false;
-}
-
-void METHOD(clear)(NAME* self) { c11_vector__clear(self); }
-
-#endif
-
-/* Undefine all macros */
-#undef KV
-#undef METHOD
-#undef CONCAT
-#undef CONCAT_
-
-#undef K
-#undef V
-#undef NAME
-#undef less
-#undef partial_less
-#undef equal
-
-#undef SMALLMAP_T__SOURCE
-#undef SMALLMAP_T__HEADER
-
-static struct c11_debugger {
-    py_Frame* current_frame;
-    const char* current_filename;
-    const char* current_excname;
-    const char* current_excmessage;
-    enum py_TraceEvent current_event;
-
-    int curr_stack_depth;
-    int current_line;
-    int pause_allowed_depth;
-    int step_line;
-    C11_STEP_MODE step_mode;
-    bool keep_suspend;
-    bool isexceptionmode;
-
-    c11_vector* exception_stacktrace;
-    c11_vector breakpoints;
-    c11_vector py_frames;
-    c11_smallmap_d2index scopes_query_cache;
-
-#define python_vars py_r7()
-
-} debugger;
-
-inline static void init_structures() {
-    c11_vector__ctor(&debugger.breakpoints, sizeof(c11_debugger_breakpoint));
-    c11_vector__ctor(&debugger.py_frames, sizeof(py_Frame*));
-    c11_smallmap_d2index__ctor(&debugger.scopes_query_cache);
-    py_newlist(python_vars);
-    py_newnone(py_list_emplace(python_vars));
-}
-
-inline static void clear_structures() {
-    c11_vector__clear(&debugger.py_frames);
-    c11_smallmap_d2index__clear(&debugger.scopes_query_cache);
-    py_list_clear(python_vars);
-    py_newnone(py_list_emplace(python_vars));
-}
-
-inline static py_Ref get_variable(int var_ref) {
-    assert(var_ref < py_list_len(python_vars) && var_ref > 0);
-    return py_list_getitem(python_vars, var_ref);
-}
-
-const inline static char* format_filepath(const char* path) {
-    if(strstr(path, "..")) { return NULL; }
-    if(strstr(path + 1, "./") || strstr(path + 1, ".\\")) { return NULL; }
-    if(path[0] == '.' && (path[1] == '/' || path[1] == '\\')) { return path + 2; }
-    return path;
-}
-
-void c11_debugger_init() {
-    debugger.curr_stack_depth = 0;
-    debugger.current_line = -1;
-    debugger.pause_allowed_depth = -1;
-    debugger.step_line = -1;
-    debugger.keep_suspend = false;
-    debugger.isexceptionmode = false;
-    debugger.step_mode = C11_STEP_CONTINUE;
-    init_structures();
-}
-
-C11_DEBUGGER_STATUS c11_debugger_on_trace(py_Frame* frame, enum py_TraceEvent event) {
-    debugger.current_frame = frame;
-    debugger.current_event = event;
-    const char* source_name = py_Frame_sourceloc(debugger.current_frame, &debugger.current_line);
-    debugger.current_filename = format_filepath(source_name);
-    if(debugger.current_filename == NULL) { return C11_DEBUGGER_FILEPATH_ERROR; }
-    clear_structures();
-    switch(event) {
-        case TRACE_EVENT_PUSH: debugger.curr_stack_depth++; break;
-        case TRACE_EVENT_POP: debugger.curr_stack_depth--; break;
-        default: break;
-    }
-    // if(debugger.curr_stack_depth == 0) return C11_DEBUGGER_EXIT;
-    return C11_DEBUGGER_SUCCESS;
-}
-
-void c11_debugger_exception_on_trace(py_Ref exc) {
-    BaseException* ud = py_touserdata(exc);
-    c11_vector* stacktrace = &ud->stacktrace;
-    const char* name = py_tpname(exc->type);
-    const char* message;
-    bool ok = py_str(exc);
-    if(!ok || !py_isstr(py_retval())) {
-        message = "<exception str() failed>";
-    } else {
-        message = c11_strdup(py_tostr(py_retval()));
-    }
-    debugger.exception_stacktrace = stacktrace;
-    debugger.isexceptionmode = true;
-    debugger.current_excname = name;
-    debugger.current_excmessage = message;
-    clear_structures();
-
-}
-
-const char* c11_debugger_excinfo(const char ** message){
-    *message = debugger.current_excmessage;
-    return debugger.current_excname;
-}
-
-void c11_debugger_set_step_mode(C11_STEP_MODE mode) {
-    switch(mode) {
-        case C11_STEP_IN: debugger.pause_allowed_depth = INT32_MAX; break;
-        case C11_STEP_OVER:
-            debugger.pause_allowed_depth = debugger.curr_stack_depth;
-            debugger.step_line = debugger.current_line;
-            break;
-        case C11_STEP_OUT: debugger.pause_allowed_depth = debugger.curr_stack_depth - 1; break;
-        case C11_STEP_CONTINUE: debugger.pause_allowed_depth = -1; break;
-        default: break;
-    }
-    debugger.step_mode = mode;
-    debugger.keep_suspend = false;
-}
-
-int c11_debugger_setbreakpoint(const char* filename, int lineno) {
-    c11_debugger_breakpoint breakpoint = {.sourcename = c11_strdup(filename), .lineno = lineno};
-    c11_vector__push(c11_debugger_breakpoint, &debugger.breakpoints, breakpoint);
-    return debugger.breakpoints.length;
-}
-
-int c11_debugger_reset_breakpoints_by_source(const char* sourcesname) {
-    c11_vector tmp_breakpoints;
-    c11_vector__ctor(&tmp_breakpoints, sizeof(c11_debugger_breakpoint));
-
-    c11__foreach(c11_debugger_breakpoint, &debugger.breakpoints, it) {
-        if(strcmp(it->sourcename, sourcesname) != 0) {
-            c11_debugger_breakpoint* dst =
-                (c11_debugger_breakpoint*)c11_vector__emplace(&tmp_breakpoints);
-            *dst = *it;
-        } else {
-            PK_FREE((void*)it->sourcename);
-        }
-    }
-
-    c11_vector__swap(&tmp_breakpoints, &debugger.breakpoints);
-    c11_vector__dtor(&tmp_breakpoints);
-    return debugger.breakpoints.length;
-}
-
-bool c11_debugger_path_equal(const char* path1, const char* path2) {
-    if(path1 == NULL || path2 == NULL) return false;
-    while(*path1 && *path2) {
-        char c1 = (*path1 == '\\') ? '/' : *path1;
-        char c2 = (*path2 == '\\') ? '/' : *path2;
-        c1 = (char)tolower((unsigned char)c1);
-        c2 = (char)tolower((unsigned char)c2);
-        if(c1 != c2) return false;
-        path1++;
-        path2++;
-    }
-    return *path1 == *path2;
-}
-
-C11_STOP_REASON c11_debugger_should_pause() {
-    if(debugger.current_event == TRACE_EVENT_POP && !debugger.isexceptionmode) return C11_DEBUGGER_NOSTOP;
-    C11_STOP_REASON pause_resaon = C11_DEBUGGER_NOSTOP;
-    int is_out = debugger.curr_stack_depth <= debugger.pause_allowed_depth;
-    int is_new_line = debugger.current_line != debugger.step_line;
-    switch(debugger.step_mode) {
-        case C11_STEP_IN: pause_resaon = C11_DEBUGGER_STEP; break;
-        case C11_STEP_OVER:
-            if(is_new_line && is_out) pause_resaon = C11_DEBUGGER_STEP;
-            break;
-        case C11_STEP_OUT:
-            if(is_out) pause_resaon = C11_DEBUGGER_STEP;
-            break;
-        case C11_STEP_CONTINUE:
-        default: break;
-    }
-    if(debugger.step_mode == C11_STEP_CONTINUE) {
-        c11__foreach(c11_debugger_breakpoint, &debugger.breakpoints, bp) {
-            if(c11_debugger_path_equal(debugger.current_filename, bp->sourcename) &&
-               debugger.current_line == bp->lineno) {
-                pause_resaon = C11_DEBUGGER_BP;
-                break;
-            }
-        }
-    }
-    if(debugger.isexceptionmode) pause_resaon = C11_DEBUGGER_EXCEPTION;
-    if(pause_resaon != C11_DEBUGGER_NOSTOP) { debugger.keep_suspend = true; }
-    return pause_resaon;
-}
-
-int c11_debugger_should_keep_pause(void) { return debugger.keep_suspend; }
-
-inline static c11_sv sv_from_cstr(const char* str) {
-    c11_sv sv = {.data = str, .size = strlen(str)};
-    return sv;
-}
-
-const inline static char* get_basename(const char* path) {
-    const char* last_slash = strrchr(path, '/');
-#if defined(_WIN32) || defined(_WIN64)
-    const char* last_backslash = strrchr(path, '\\');
-    if(!last_slash || (last_backslash && last_backslash > last_slash)) {
-        last_slash = last_backslash;
-    }
-#endif
-    return last_slash ? last_slash + 1 : path;
-}
-
-void c11_debugger_normal_frames(c11_sbuf* buffer) {
-    c11_sbuf__write_cstr(buffer, "{\"stackFrames\": [");
-    int idx = 0;
-    py_Frame* now_frame = debugger.current_frame;
-    debugger.py_frames.length = 0;
-    while(now_frame) {
-        if(idx > 0) c11_sbuf__write_char(buffer, ',');
-        int line;
-        const char* filename = py_Frame_sourceloc(now_frame, &line);
-        const char* basename = get_basename(filename);
-        const char* modname = now_frame->co->name->data;
-        pk_sprintf(
-            buffer,
-            "{\"id\": %d, \"name\": %Q, \"line\": %d, \"column\": 1, \"source\": {\"name\": %Q, \"path\": %Q}}",
-            idx,
-            sv_from_cstr(modname),
-            line,
-            sv_from_cstr(basename),
-            sv_from_cstr(filename));
-        c11_vector__push(py_Frame*, &debugger.py_frames, now_frame);
-        now_frame = now_frame->f_back;
-        idx++;
-    }
-    pk_sprintf(buffer, "], \"totalFrames\": %d}", idx);
-}
-
-void c11_debugger_exception_frames(c11_sbuf* buffer) {
-    c11_sbuf__write_cstr(buffer, "{\"stackFrames\": [");
-    int idx = 0;
-    c11__foreach(BaseExceptionFrame, debugger.exception_stacktrace, it) {
-        if(idx > 0) c11_sbuf__write_char(buffer, ',');
-        int line = it->lineno;
-        const char* filename = it->src->filename->data;
-        const char* basename = get_basename(filename);
-        const char* modname = it->name == NULL ? basename : it->name->data;
-        pk_sprintf(
-            buffer,
-            "{\"id\": %d, \"name\": %Q, \"line\": %d, \"column\": 1, \"source\": {\"name\": %Q, \"path\": %Q}}",
-            idx,
-            sv_from_cstr(modname),
-            line,
-            sv_from_cstr(basename),
-            sv_from_cstr(filename));
-        idx++;
-    }
-    pk_sprintf(buffer, "], \"totalFrames\": %d}", idx);
-}
-
-void c11_debugger_frames(c11_sbuf* buffer) {
-    debugger.isexceptionmode ? c11_debugger_exception_frames(buffer)
-                             : c11_debugger_normal_frames(buffer);
-}
-
-inline static c11_debugger_scope_index append_new_scope(int frameid) {
-    assert(frameid < debugger.py_frames.length);
-    py_Frame* requested_frame = c11__getitem(py_Frame*, &debugger.py_frames, frameid);
-    int base_index = py_list_len(python_vars);
-    py_Ref new_locals = py_list_emplace(python_vars);
-    py_Ref new_globals = py_list_emplace(python_vars);
-    py_Frame_newlocals(requested_frame, new_locals);
-    py_Frame_newglobals(requested_frame, new_globals);
-    c11_debugger_scope_index result = {.locals_ref = base_index, .globals_ref = base_index + 1};
-    return result;
-}
-
-inline static c11_debugger_scope_index append_new_exception_scope(int frameid) {
-    assert(frameid < debugger.exception_stacktrace->length);
-    BaseExceptionFrame* requested_frame =
-        c11__at(BaseExceptionFrame, debugger.exception_stacktrace, frameid);
-    int base_index = py_list_len(python_vars);
-    py_list_append(python_vars, &requested_frame->locals);
-    py_list_append(python_vars, &requested_frame->globals);
-    c11_debugger_scope_index result = {.locals_ref = base_index, .globals_ref = base_index + 1};
-    return result;
-}
-
-void c11_debugger_scopes(int frameid, c11_sbuf* buffer) {
-    // query cache
-    c11_debugger_scope_index* result =
-        c11_smallmap_d2index__try_get(&debugger.scopes_query_cache, frameid);
-
-    c11_sbuf__write_cstr(buffer, "{\"scopes\":");
-    const char* scopes_fmt =
-        "[{\"name\": \"locals\", \"variablesReference\": %d, \"expensive\": false}, "
-        "{\"name\": \"globals\", \"variablesReference\": %d, \"expensive\": true}]";
-    if(result != NULL) {
-        pk_sprintf(buffer, scopes_fmt, result->locals_ref, result->globals_ref);
-    } else {
-        c11_debugger_scope_index new_record = debugger.isexceptionmode
-                                                  ? append_new_exception_scope(frameid)
-                                                  : append_new_scope(frameid);
-        c11_smallmap_d2index__set(&debugger.scopes_query_cache, frameid, new_record);
-        pk_sprintf(buffer, scopes_fmt, new_record.locals_ref, new_record.globals_ref);
-    }
-    c11_sbuf__write_char(buffer, '}');
-}
-
-bool c11_debugger_unfold_var(int var_id, c11_sbuf* buffer) {
-    py_Ref var = get_variable(var_id);
-    if(!var) return false;
-
-    // 1. extend
-    const char* expand_code = NULL;
-    switch(py_typeof(var)) {
-        case tp_dict:
-        case tp_namedict: expand_code = "[(k,v) for k,v in _0.items()]"; break;
-        case tp_list:
-        case tp_tuple: expand_code = "[(f'[{i}]',v) for i,v in enumerate(_0)]"; break;
-        default: expand_code = "[(k,v) for k,v in _0.__dict__.items()]"; break;
-    }
-    if(!py_smarteval(expand_code, NULL, var)) {
-        py_printexc();
-        return false;
-    }
-    py_Ref kv_list = py_pushtmp();
-    py_assign(kv_list, py_retval());
-    // 2. prepare base_ref
-    int base_index = py_list_len(python_vars);
-    py_Ref base_var_ref = py_pushtmp();
-    py_newint(base_var_ref, base_index);
-
-    // 3. construct DAP JSON and extend python_vars
-    py_Ref dap_obj = py_pushtmp();
-    py_newdict(dap_obj);
-    const char* dap_code =
-        "_2['variables'] = []\n"
-        "var_ref = _1\n"
-        "for k, v in _0:\n"
-        "    has_children = isinstance(v, (dict, list, tuple)) or v.__dict__ is not None\n"
-        "    _2['variables'].append({\n"
-        "        'name': k if type(k) == str else str(k),\n"
-        "        'value': repr(v) if type(v) == str else str(v),\n"
-        "        'variablesReference': var_ref if has_children else 0,\n"
-        "        'type': type(v).__name__\n"
-        "    })\n"
-        "    if has_children: var_ref += 1\n";
-    if(!py_smartexec(dap_code, NULL, kv_list, base_var_ref, dap_obj)) {
-        py_printexc();
-        return false;
-    }
-
-    // 4. extend python_vars
-    if(!py_smartexec(
-           "_0.extend([v for k, v in _1 if isinstance(v, (dict, list, tuple)) or v.__dict__ is not None])",
-           NULL,
-           python_vars,
-           kv_list)) {
-        py_printexc();
-        return false;
-    }
-
-    // 5. dump & write
-    if(!py_json_dumps(dap_obj, 0)) {
-        // printf("dap_obj: %s\n", py_tpname(py_typeof(dap_obj)));
-        py_printexc();
-        return false;
-    }
-
-    c11_sbuf__write_cstr(buffer, py_tostr(py_retval()));
-
-    // 6. clear
-    py_pop();  // dap_obj
-    py_pop();  // base_var_ref
-    py_pop();  // kv_list
-    return true;
-}
-
-#undef python_vars
-
-#endif // PK_ENABLE_OS
-
 // src/modules/json.c
 #include <math.h>
 
@@ -15889,12 +15512,6 @@ bool py_json_loads(const char* source) {
     return py_exec(source, "<json>", EVAL_MODE, mod);
 }
 
-bool py_pusheval(const char* expr, py_GlobalRef module) {
-    bool ok = py_exec(expr, "<string>", EVAL_MODE, module);
-    if(!ok) return false;
-    py_push(py_retval());
-    return true;
-}
 
 // src/modules/pkpy.c
 #include <time.h>
@@ -16458,6 +16075,622 @@ void pk__add_module_pkpy() {
 }
 
 #undef DEF_TVALUE_METHODS
+// src/modules/builtins.c
+#include <math.h>
+
+
+static bool builtins_exit(int argc, py_Ref argv) {
+    int code = 0;
+    if(argc > 1) return TypeError("exit() takes at most 1 argument");
+    if(argc == 1) {
+        PY_CHECK_ARG_TYPE(0, tp_int);
+        code = py_toint(argv);
+    }
+    exit(code);
+    return false;
+}
+
+static bool builtins_input(int argc, py_Ref argv) {
+    if(argc > 1) return TypeError("input() takes at most 1 argument");
+    const char* prompt = "";
+    if(argc == 1) {
+        if(!py_checkstr(argv)) return false;
+        prompt = py_tostr(argv);
+    }
+    py_callbacks()->print(prompt);
+
+    c11_sbuf buf;
+    c11_sbuf__ctor(&buf);
+    while(true) {
+        int c = py_callbacks()->getchr();
+        if(c == '\n' || c == '\r') break;
+        if(c == EOF) break;
+        c11_sbuf__write_char(&buf, c);
+    }
+    c11_sbuf__py_submit(&buf, py_retval());
+    return true;
+}
+
+static bool builtins_repr(int argc, py_Ref argv) {
+    PY_CHECK_ARGC(1);
+    return py_repr(argv);
+}
+
+static bool builtins_len(int argc, py_Ref argv) {
+    PY_CHECK_ARGC(1);
+    return py_len(argv);
+}
+
+static bool builtins_hex(int argc, py_Ref argv) {
+    PY_CHECK_ARGC(1);
+    PY_CHECK_ARG_TYPE(0, tp_int);
+
+    py_i64 val = py_toint(argv);
+
+    if(val == 0) {
+        py_newstr(py_retval(), "0x0");
+        return true;
+    }
+
+    c11_sbuf ss;
+    c11_sbuf__ctor(&ss);
+
+    if(val < 0) {
+        c11_sbuf__write_char(&ss, '-');
+        val = -val;
+    }
+    c11_sbuf__write_cstr(&ss, "0x");
+    bool non_zero = true;
+    for(int i = 56; i >= 0; i -= 8) {
+        unsigned char cpnt = (val >> i) & 0xff;
+        c11_sbuf__write_hex(&ss, cpnt, non_zero);
+        if(cpnt != 0) non_zero = false;
+    }
+
+    c11_sbuf__py_submit(&ss, py_retval());
+    return true;
+}
+
+static bool builtins_iter(int argc, py_Ref argv) {
+    PY_CHECK_ARGC(1);
+    return py_iter(argv);
+}
+
+static bool builtins_next(int argc, py_Ref argv) {
+    if(argc == 0 || argc > 2) return TypeError("next() takes 1 or 2 arguments");
+    int res = py_next(argv);
+    if(res == -1) return false;
+    if(res) return true;
+    if(argc == 1) {
+        // StopIteration stored in py_retval()
+        return py_raise(py_retval());
+    } else {
+        py_assign(py_retval(), py_arg(1));
+        return true;
+    }
+}
+
+static bool builtins_hash(int argc, py_Ref argv) {
+    PY_CHECK_ARGC(1);
+    py_i64 val;
+    if(!py_hash(argv, &val)) return false;
+    py_newint(py_retval(), val);
+    return true;
+}
+
+static bool builtins_abs(int argc, py_Ref argv) {
+    PY_CHECK_ARGC(1);
+    return pk_callmagic(__abs__, 1, argv);
+}
+
+static bool builtins_divmod(int argc, py_Ref argv) {
+    PY_CHECK_ARGC(2);
+    return pk_callmagic(__divmod__, 2, argv);
+}
+
+static bool builtins_round(int argc, py_Ref argv) {
+    py_i64 ndigits;
+
+    if(argc == 1) {
+        ndigits = -1;
+    } else if(argc == 2) {
+        PY_CHECK_ARG_TYPE(1, tp_int);
+        ndigits = py_toint(py_arg(1));
+        if(ndigits < 0) return ValueError("ndigits should be non-negative");
+    } else {
+        return TypeError("round() takes 1 or 2 arguments");
+    }
+
+    if(argv->type == tp_int) {
+        py_assign(py_retval(), py_arg(0));
+        return true;
+    } else if(argv->type == tp_float) {
+        py_f64 x = py_tofloat(py_arg(0));
+        py_f64 offset = x >= 0 ? 0.5 : -0.5;
+        if(ndigits == -1) {
+            py_newint(py_retval(), (py_i64)(x + offset));
+            return true;
+        }
+        py_f64 factor = pow(10, ndigits);
+        py_newfloat(py_retval(), (py_i64)(x * factor + offset) / factor);
+        return true;
+    }
+
+    return pk_callmagic(__round__, argc, argv);
+}
+
+static bool builtins_print(int argc, py_Ref argv) {
+    // print(*args, sep=' ', end='\n', flush=False)
+    py_TValue* args = py_tuple_data(argv);
+    int length = py_tuple_len(argv);
+    PY_CHECK_ARG_TYPE(1, tp_str);
+    PY_CHECK_ARG_TYPE(2, tp_str);
+    PY_CHECK_ARG_TYPE(3, tp_bool);
+    c11_sv sep = py_tosv(py_arg(1));
+    c11_sv end = py_tosv(py_arg(2));
+    bool flush = py_tobool(py_arg(3));
+    c11_sbuf buf;
+    c11_sbuf__ctor(&buf);
+    for(int i = 0; i < length; i++) {
+        if(i > 0) c11_sbuf__write_sv(&buf, sep);
+        if(!py_str(&args[i])) {
+            c11_sbuf__dtor(&buf);
+            return false;
+        }
+        c11_sbuf__write_sv(&buf, py_tosv(py_retval()));
+    }
+    c11_sbuf__write_sv(&buf, end);
+    c11_string* res = c11_sbuf__submit(&buf);
+    py_callbacks()->print(res->data);
+    if(flush) py_callbacks()->flush();
+    c11_string__delete(res);
+    py_newnone(py_retval());
+    return true;
+}
+
+static bool builtins_isinstance(int argc, py_Ref argv) {
+    PY_CHECK_ARGC(2);
+    if(py_istuple(py_arg(1))) {
+        int length = py_tuple_len(py_arg(1));
+        for(int i = 0; i < length; i++) {
+            py_Ref item = py_tuple_getitem(py_arg(1), i);
+            if(!py_checktype(item, tp_type)) return false;
+            if(py_isinstance(py_arg(0), py_totype(item))) {
+                py_newbool(py_retval(), true);
+                return true;
+            }
+        }
+        py_newbool(py_retval(), false);
+        return true;
+    }
+
+    if(!py_checktype(py_arg(1), tp_type)) return false;
+    py_newbool(py_retval(), py_isinstance(py_arg(0), py_totype(py_arg(1))));
+    return true;
+}
+
+static bool builtins_issubclass(int argc, py_Ref argv) {
+    PY_CHECK_ARGC(2);
+    if(!py_checktype(py_arg(0), tp_type)) return false;
+    if(!py_checktype(py_arg(1), tp_type)) return false;
+    py_newbool(py_retval(), py_issubclass(py_totype(py_arg(0)), py_totype(py_arg(1))));
+    return true;
+}
+
+static bool builtins_callable(int argc, py_Ref argv) {
+    PY_CHECK_ARGC(1);
+    bool res = py_callable(py_arg(0));
+    py_newbool(py_retval(), res);
+    return true;
+}
+
+static bool builtins_getattr(int argc, py_Ref argv) {
+    PY_CHECK_ARG_TYPE(1, tp_str);
+    py_Name name = py_namev(py_tosv(py_arg(1)));
+    if(argc == 2) {
+        return py_getattr(py_arg(0), name);
+    } else if(argc == 3) {
+        bool ok = py_getattr(py_arg(0), name);
+        if(!ok && py_matchexc(tp_AttributeError)) {
+            py_clearexc(NULL);
+            py_assign(py_retval(), py_arg(2));
+            return true;  // default value
+        }
+        return ok;
+    } else {
+        return TypeError("getattr() expected 2 or 3 arguments");
+    }
+    return true;
+}
+
+static bool builtins_setattr(int argc, py_Ref argv) {
+    PY_CHECK_ARGC(3);
+    PY_CHECK_ARG_TYPE(1, tp_str);
+    py_Name name = py_namev(py_tosv(py_arg(1)));
+    py_newnone(py_retval());
+    return py_setattr(py_arg(0), name, py_arg(2));
+}
+
+static bool builtins_hasattr(int argc, py_Ref argv) {
+    PY_CHECK_ARGC(2);
+    PY_CHECK_ARG_TYPE(1, tp_str);
+    py_Name name = py_namev(py_tosv(py_arg(1)));
+    bool ok = py_getattr(py_arg(0), name);
+    if(ok) {
+        py_newbool(py_retval(), true);
+        return true;
+    }
+    if(py_matchexc(tp_AttributeError)) {
+        py_clearexc(NULL);
+        py_newbool(py_retval(), false);
+        return true;
+    }
+    return false;
+}
+
+static bool builtins_delattr(int argc, py_Ref argv) {
+    PY_CHECK_ARGC(2);
+    PY_CHECK_ARG_TYPE(1, tp_str);
+    py_Name name = py_namev(py_tosv(py_arg(1)));
+    py_newnone(py_retval());
+    return py_delattr(py_arg(0), name);
+}
+
+static bool builtins_chr(int argc, py_Ref argv) {
+    PY_CHECK_ARGC(1);
+    PY_CHECK_ARG_TYPE(0, tp_int);
+    uint32_t val = py_toint(py_arg(0));
+    // convert to utf-8
+    char utf8[4];
+    int len = c11__u32_to_u8(val, utf8);
+    if(len == -1) return ValueError("invalid unicode code point: %d", val);
+    py_newstrv(py_retval(), (c11_sv){utf8, len});
+    return true;
+}
+
+static bool builtins_ord(int argc, py_Ref argv) {
+    PY_CHECK_ARGC(1);
+    PY_CHECK_ARG_TYPE(0, tp_str);
+    c11_sv sv = py_tosv(py_arg(0));
+    if(c11_sv__u8_length(sv) != 1) {
+        return TypeError("ord() expected a character, but string of length %d found",
+                         c11_sv__u8_length(sv));
+    }
+    int u8bytes = c11__u8_header(sv.data[0], true);
+    if(u8bytes == 0) return ValueError("invalid utf-8 char: %c", sv.data[0]);
+    int value = c11__u8_value(u8bytes, sv.data);
+    py_newint(py_retval(), value);
+    return true;
+}
+
+static bool builtins_id(int argc, py_Ref argv) {
+    PY_CHECK_ARGC(1);
+    if(argv->is_ptr) {
+        py_newint(py_retval(), (intptr_t)argv->_obj);
+    } else {
+        py_newnone(py_retval());
+    }
+    return true;
+}
+
+static bool builtins_globals(int argc, py_Ref argv) {
+    PY_CHECK_ARGC(0);
+    py_newglobals(py_retval());
+    return true;
+}
+
+static bool builtins_locals(int argc, py_Ref argv) {
+    PY_CHECK_ARGC(0);
+    py_newlocals(py_retval());
+    return true;
+}
+
+static void pk_push_special_locals() {
+    py_Frame* frame = pk_current_vm->top_frame;
+    if(!frame) {
+        py_pushnil();
+        return;
+    }
+    if(frame->is_locals_special) {
+        py_push(frame->locals);
+    } else {
+        py_StackRef out = py_pushtmp();
+        out->type = tp_locals;
+        out->is_ptr = false;
+        out->extra = 0;
+        // this is a weak reference
+        // which will expire when the frame is destroyed
+        out->_ptr = frame;
+    }
+}
+
+static bool _builtins_execdyn(const char* title, int argc, py_Ref argv, enum py_CompileMode mode) {
+    switch(argc) {
+        case 1: {
+            py_newglobals(py_pushtmp());
+            pk_push_special_locals();
+            break;
+        }
+        case 2: {
+            // globals
+            if(py_isnone(py_arg(1))) {
+                py_newglobals(py_pushtmp());
+            } else {
+                py_push(py_arg(1));
+            }
+            // locals
+            py_pushnil();
+            break;
+        }
+        case 3: {
+            // globals
+            if(py_isnone(py_arg(1))) {
+                py_newglobals(py_pushtmp());
+            } else {
+                py_push(py_arg(1));
+            }
+            // locals
+            if(py_isnone(py_arg(2))) {
+                py_pushnil();
+            } else {
+                py_push(py_arg(2));
+            }
+            break;
+        }
+        default: return TypeError("%s() takes at most 3 arguments", title);
+    }
+
+    if(py_isstr(argv)) {
+        bool ok = py_compile(py_tostr(argv), "<string>", mode, true);
+        if(!ok) return false;
+        py_push(py_retval());
+    } else if(py_istype(argv, tp_code)) {
+        py_push(argv);
+    } else {
+        return TypeError("%s() expected 'str' or 'code', got '%t'", title, argv->type);
+    }
+
+    py_Frame* frame = pk_current_vm->top_frame;
+    // [globals, locals, code]
+    CodeObject* code = py_touserdata(py_peek(-1));
+    if(code->src->is_dynamic) {
+        bool ok = pk_execdyn(code, frame ? frame->module : NULL, py_peek(-3), py_peek(-2));
+        py_shrink(3);
+        return ok;
+    } else {
+        if(argc != 1) {
+            return ValueError(
+                "code object is not dynamic, `globals` and `locals` must not be specified");
+        }
+        bool ok = pk_exec(code, frame ? frame->module : NULL);
+        py_shrink(3);
+        return ok;
+    }
+}
+
+static bool builtins_exec(int argc, py_Ref argv) {
+    bool ok = _builtins_execdyn("exec", argc, argv, EXEC_MODE);
+    py_newnone(py_retval());
+    return ok;
+}
+
+static bool builtins_eval(int argc, py_Ref argv) {
+    return _builtins_execdyn("eval", argc, argv, EVAL_MODE);
+}
+
+static bool builtins_compile(int argc, py_Ref argv) {
+    PY_CHECK_ARGC(3);
+    for(int i = 0; i < 3; i++) {
+        if(!py_checktype(py_arg(i), tp_str)) return false;
+    }
+    const char* source = py_tostr(py_arg(0));
+    const char* filename = py_tostr(py_arg(1));
+    const char* mode = py_tostr(py_arg(2));
+
+    enum py_CompileMode compile_mode;
+    if(strcmp(mode, "exec") == 0) {
+        compile_mode = EXEC_MODE;
+    } else if(strcmp(mode, "eval") == 0) {
+        compile_mode = EVAL_MODE;
+    } else if(strcmp(mode, "single") == 0) {
+        compile_mode = SINGLE_MODE;
+    } else {
+        return ValueError("compile() mode must be 'exec', 'eval', or 'single'");
+    }
+    return py_compile(source, filename, compile_mode, true);
+}
+
+static bool builtins__import__(int argc, py_Ref argv) {
+    PY_CHECK_ARGC(1);
+    PY_CHECK_ARG_TYPE(0, tp_str);
+    int res = py_import(py_tostr(argv));
+    if(res == -1) return false;
+    if(res) return true;
+    return ImportError("module '%s' not found", py_tostr(argv));
+}
+
+static bool NoneType__repr__(int argc, py_Ref argv) {
+    py_newstr(py_retval(), "None");
+    return true;
+}
+
+static bool ellipsis__repr__(int argc, py_Ref argv) {
+    py_newstr(py_retval(), "...");
+    return true;
+}
+
+static bool NotImplementedType__repr__(int argc, py_Ref argv) {
+    py_newstr(py_retval(), "NotImplemented");
+    return true;
+}
+
+py_GlobalRef pk_builtins__register() {
+    py_GlobalRef builtins = py_newmodule("builtins");
+    py_bindfunc(builtins, "exit", builtins_exit);
+    py_bindfunc(builtins, "input", builtins_input);
+    py_bindfunc(builtins, "repr", builtins_repr);
+    py_bindfunc(builtins, "len", builtins_len);
+    py_bindfunc(builtins, "hex", builtins_hex);
+    py_bindfunc(builtins, "iter", builtins_iter);
+    py_bindfunc(builtins, "next", builtins_next);
+    py_bindfunc(builtins, "hash", builtins_hash);
+    py_bindfunc(builtins, "abs", builtins_abs);
+    py_bindfunc(builtins, "divmod", builtins_divmod);
+    py_bindfunc(builtins, "round", builtins_round);
+
+    py_bind(builtins, "print(*args, sep=' ', end='\\n', flush=False)", builtins_print);
+
+    py_bindfunc(builtins, "isinstance", builtins_isinstance);
+    py_bindfunc(builtins, "issubclass", builtins_issubclass);
+    py_bindfunc(builtins, "callable", builtins_callable);
+
+    py_bindfunc(builtins, "getattr", builtins_getattr);
+    py_bindfunc(builtins, "setattr", builtins_setattr);
+    py_bindfunc(builtins, "hasattr", builtins_hasattr);
+    py_bindfunc(builtins, "delattr", builtins_delattr);
+
+    py_bindfunc(builtins, "chr", builtins_chr);
+    py_bindfunc(builtins, "ord", builtins_ord);
+    py_bindfunc(builtins, "id", builtins_id);
+
+    py_bindfunc(builtins, "globals", builtins_globals);
+    py_bindfunc(builtins, "locals", builtins_locals);
+    py_bindfunc(builtins, "exec", builtins_exec);
+    py_bindfunc(builtins, "eval", builtins_eval);
+    py_bindfunc(builtins, "compile", builtins_compile);
+
+    py_bindfunc(builtins, "__import__", builtins__import__);
+
+    // some patches
+    py_bindmagic(tp_NoneType, __repr__, NoneType__repr__);
+    py_setdict(py_tpobject(tp_NoneType), __hash__, py_None());
+    py_bindmagic(tp_ellipsis, __repr__, ellipsis__repr__);
+    py_setdict(py_tpobject(tp_ellipsis), __hash__, py_None());
+    py_bindmagic(tp_NotImplementedType, __repr__, NotImplementedType__repr__);
+    py_setdict(py_tpobject(tp_NotImplementedType), __hash__, py_None());
+    return builtins;
+}
+
+void function__gc_mark(void* ud, c11_vector* p_stack) {
+    Function* func = ud;
+    if(func->globals) pk__mark_value(func->globals);
+    if(func->closure) {
+        NameDict* dict = func->closure;
+        for(int i = 0; i < dict->capacity; i++) {
+            NameDict_KV* kv = &dict->items[i];
+            if(kv->key == NULL) continue;
+            pk__mark_value(&kv->value);
+        }
+    }
+    FuncDecl__gc_mark(func->decl, p_stack);
+}
+
+static bool function__doc__(int argc, py_Ref argv) {
+    PY_CHECK_ARGC(1);
+    Function* func = py_touserdata(py_arg(0));
+    if(func->decl->docstring) {
+        py_newstr(py_retval(), func->decl->docstring);
+    } else {
+        py_newnone(py_retval());
+    }
+    return true;
+}
+
+static bool function__name__(int argc, py_Ref argv) {
+    PY_CHECK_ARGC(1);
+    Function* func = py_touserdata(py_arg(0));
+    py_newstr(py_retval(), func->decl->code.name->data);
+    return true;
+}
+
+static bool function__repr__(int argc, py_Ref argv) {
+    // <function f at 0x10365b9c0>
+    PY_CHECK_ARGC(1);
+    Function* func = py_touserdata(py_arg(0));
+    c11_sbuf buf;
+    c11_sbuf__ctor(&buf);
+    c11_sbuf__write_cstr(&buf, "<function ");
+    c11_sbuf__write_cstr(&buf, func->decl->code.name->data);
+    c11_sbuf__write_cstr(&buf, " at ");
+    c11_sbuf__write_ptr(&buf, func);
+    c11_sbuf__write_char(&buf, '>');
+    c11_sbuf__py_submit(&buf, py_retval());
+    return true;
+}
+
+py_Type pk_function__register() {
+    py_Type type =
+        pk_newtype("function", tp_object, NULL, (void (*)(void*))Function__dtor, false, true);
+    py_bindproperty(type, "__doc__", function__doc__, NULL);
+    py_bindproperty(type, "__name__", function__name__, NULL);
+    py_bindmagic(type, __repr__, function__repr__);
+    return type;
+}
+
+static bool nativefunc__repr__(int argc, py_Ref argv) {
+    PY_CHECK_ARGC(1);
+    py_newstr(py_retval(), "<nativefunc object>");
+    return true;
+}
+
+py_Type pk_nativefunc__register() {
+    py_Type type = pk_newtype("nativefunc", tp_object, NULL, NULL, false, true);
+    py_bindmagic(type, __repr__, nativefunc__repr__);
+    return type;
+}
+
+static bool super__new__(int argc, py_Ref argv) {
+    py_Type class_arg = 0;
+    py_Frame* frame = pk_current_vm->top_frame;
+    py_Ref self_arg = NULL;
+    if(argc == 1) {
+        // super()
+        if(!frame->is_locals_special) {
+            py_TValue* callable = frame->p0;
+            if(callable->type == tp_boundmethod) callable = py_getslot(frame->p0, 1);
+            if(callable->type == tp_function) {
+                Function* func = py_touserdata(callable);
+                if(func->clazz != NULL) {
+                    class_arg = ((py_TypeInfo*)PyObject__userdata(func->clazz))->index;
+                    if(frame->co->nlocals > 0) { self_arg = &frame->locals[0]; }
+                }
+            }
+        }
+        if(class_arg == 0 || self_arg == NULL) return RuntimeError("super(): no arguments");
+        if(self_arg->type == tp_type) {
+            // f(cls, ...)
+            class_arg = pk_typeinfo(class_arg)->base;
+            if(class_arg == 0) return RuntimeError("super(): base class is invalid");
+            py_assign(py_retval(), py_tpobject(class_arg));
+            return true;
+        }
+    } else if(argc == 3) {
+        // super(type[T], obj)
+        PY_CHECK_ARG_TYPE(1, tp_type);
+        class_arg = py_totype(py_arg(1));
+        self_arg = py_arg(2);
+        if(!py_isinstance(self_arg, class_arg)) {
+            return TypeError("super(type, obj): obj must be an instance of type");
+        }
+    } else {
+        return TypeError("super() takes 0 or 2 arguments");
+    }
+
+    class_arg = pk_typeinfo(class_arg)->base;
+    if(class_arg == 0) return RuntimeError("super(): base class is invalid");
+
+    py_Type* p_class_arg = py_newobject(py_retval(), tp_super, 1, sizeof(py_Type));
+    *p_class_arg = class_arg;
+    py_setslot(py_retval(), 0, self_arg);
+    return true;
+}
+
+py_Type pk_super__register() {
+    py_Type type = pk_newtype("super", tp_object, NULL, NULL, false, true);
+    py_bindmagic(type, __new__, super__new__);
+    return type;
+}
+
 // src/modules/math.c
 #include <math.h>
 
@@ -16591,6 +16824,7 @@ static bool math_radians(int argc, py_Ref argv) {
 }
 
 TWO_ARG_FUNC(fmod, fmod)
+TWO_ARG_FUNC(copysign, copysign)
 
 static bool math_modf(int argc, py_Ref argv) {
     PY_CHECK_ARGC(1);
@@ -16658,6 +16892,7 @@ void pk__add_module_math() {
 
     py_bindfunc(mod, "fmod", math_fmod);
     py_bindfunc(mod, "modf", math_modf);
+    py_bindfunc(mod, "copysign", math_copysign);
     py_bindfunc(mod, "factorial", math_factorial);
 }
 
@@ -16684,6 +16919,8 @@ typedef enum {
     PKL_VEC2I, PKL_VEC3I,
     PKL_TYPE,
     PKL_ARRAY2D,
+    PKL_IMPORT_PATH,
+    PKL_GETATTR,
     PKL_TVALUE,
     PKL_CALL,
     PKL_OBJECT,
@@ -16752,6 +16989,16 @@ static void pkl__emit_int(PickleObject* buf, py_i64 val) {
         pkl__emit_op(buf, PKL_INT64);
         PickleObject__write_bytes(buf, &val, 8);
     }
+}
+
+static void pkl__emit_cstr(PickleObject* buf, const char* s) {
+    PickleObject__write_bytes(buf, s, strlen(s) + 1);
+}
+
+const static char* pkl__read_cstr(const unsigned char** p) {
+    const char* s = (const char*)*p;
+    (*p) += strlen(s) + 1;
+    return s;
 }
 
 #define UNALIGNED_READ(p_val, p_buf)                                                               \
@@ -16850,6 +17097,16 @@ static void pkl__store_memo(PickleObject* buf, PyObject* memo_key) {
     pkl__emit_int(buf, index);
 }
 
+static bool _check_function(Function* f) {
+    if(!f->module) return ValueError("cannot pickle function (!f->module)");
+    if(f->closure) return ValueError("cannot pickle function with closure");
+    if(f->decl->nested) return ValueError("cannot pickle nested function");
+    c11_string* name = f->decl->code.name;
+    if(name->size == 0) return ValueError("cannot pickle function with empty name");
+    if(name->data[0] == '<') return ValueError("cannot pickle anonymous function");
+    return true;
+}
+
 static bool pkl__write_object(PickleObject* buf, py_TValue* obj) {
     switch(obj->type) {
         case tp_nil: {
@@ -16886,61 +17143,44 @@ static bool pkl__write_object(PickleObject* buf, py_TValue* obj) {
             return true;
         }
         case tp_str: {
-            if(pkl__try_memo(buf, obj->_obj))
-                return true;
-            else {
-                pkl__emit_op(buf, PKL_STRING);
-                c11_sv sv = py_tosv(obj);
-                pkl__emit_int(buf, sv.size);
-                PickleObject__write_bytes(buf, sv.data, sv.size);
-            }
-            pkl__store_memo(buf, obj->_obj);
+            if(obj->is_ptr && pkl__try_memo(buf, obj->_obj)) return true;
+            pkl__emit_op(buf, PKL_STRING);
+            c11_sv sv = py_tosv(obj);
+            pkl__emit_int(buf, sv.size);
+            PickleObject__write_bytes(buf, sv.data, sv.size);
+            if(obj->is_ptr) pkl__store_memo(buf, obj->_obj);
             return true;
         }
         case tp_bytes: {
-            if(pkl__try_memo(buf, obj->_obj))
-                return true;
-            else {
-                pkl__emit_op(buf, PKL_BYTES);
-                int size;
-                unsigned char* data = py_tobytes(obj, &size);
-                pkl__emit_int(buf, size);
-                PickleObject__write_bytes(buf, data, size);
-            }
+            if(pkl__try_memo(buf, obj->_obj)) return true;
+            pkl__emit_op(buf, PKL_BYTES);
+            int size;
+            unsigned char* data = py_tobytes(obj, &size);
+            pkl__emit_int(buf, size);
+            PickleObject__write_bytes(buf, data, size);
             pkl__store_memo(buf, obj->_obj);
             return true;
         }
         case tp_list: {
-            if(pkl__try_memo(buf, obj->_obj))
-                return true;
-            else {
-                bool ok =
-                    pkl__write_array(buf, PKL_BUILD_LIST, py_list_data(obj), py_list_len(obj));
-                if(!ok) return false;
-            }
+            if(pkl__try_memo(buf, obj->_obj)) return true;
+            bool ok = pkl__write_array(buf, PKL_BUILD_LIST, py_list_data(obj), py_list_len(obj));
+            if(!ok) return false;
             pkl__store_memo(buf, obj->_obj);
             return true;
         }
         case tp_tuple: {
-            if(pkl__try_memo(buf, obj->_obj))
-                return true;
-            else {
-                bool ok =
-                    pkl__write_array(buf, PKL_BUILD_TUPLE, py_tuple_data(obj), py_tuple_len(obj));
-                if(!ok) return false;
-            }
+            if(pkl__try_memo(buf, obj->_obj)) return true;
+            bool ok = pkl__write_array(buf, PKL_BUILD_TUPLE, py_tuple_data(obj), py_tuple_len(obj));
+            if(!ok) return false;
             pkl__store_memo(buf, obj->_obj);
             return true;
         }
         case tp_dict: {
-            if(pkl__try_memo(buf, obj->_obj))
-                return true;
-            else {
-                bool ok = py_dict_apply(obj, pkl__write_dict_kv, (void*)buf);
-                if(!ok) return false;
-                pkl__emit_op(buf, PKL_BUILD_DICT);
-                pkl__emit_int(buf, py_dict_len(obj));
-            }
+            if(pkl__try_memo(buf, obj->_obj)) return true;
+            bool ok = py_dict_apply(obj, pkl__write_dict_kv, (void*)buf);
+            if(!ok) return false;
+            pkl__emit_op(buf, PKL_BUILD_DICT);
+            pkl__emit_int(buf, py_dict_len(obj));
             pkl__store_memo(buf, obj->_obj);
             return true;
         }
@@ -16978,22 +17218,71 @@ static bool pkl__write_object(PickleObject* buf, py_TValue* obj) {
             pkl__emit_int(buf, type);
             return true;
         }
-        case tp_array2d: {
-            if(pkl__try_memo(buf, obj->_obj))
-                return true;
-            else {
-                c11_array2d* arr = py_touserdata(obj);
-                for(int i = 0; i < arr->header.numel; i++) {
-                    if(arr->data[i].is_ptr)
-                        return TypeError(
-                            "'array2d' object is not picklable because it contains heap-allocated objects");
-                    buf->used_types[arr->data[i].type] = true;
-                }
-                pkl__emit_op(buf, PKL_ARRAY2D);
-                pkl__emit_int(buf, arr->header.n_cols);
-                pkl__emit_int(buf, arr->header.n_rows);
-                PickleObject__write_bytes(buf, arr->data, arr->header.numel * sizeof(py_TValue));
+        case tp_module: {
+            if(pkl__try_memo(buf, obj->_obj)) return true;
+            py_ModuleInfo* mi = py_touserdata(obj);
+            pkl__emit_op(buf, PKL_IMPORT_PATH);
+            pkl__emit_cstr(buf, mi->path->data);
+            pkl__store_memo(buf, obj->_obj);
+            return true;
+        }
+        case tp_function: {
+            if(pkl__try_memo(buf, obj->_obj)) return true;
+            Function* f = py_touserdata(obj);
+            if(!_check_function(f)) return false;
+            c11_string* name = f->decl->code.name;
+            if(f->clazz) {
+                // NOTE: copied from logic of `case tp_type:`
+                pkl__emit_op(buf, PKL_TYPE);
+                py_TypeInfo* ti = PyObject__userdata(f->clazz);
+                py_Type type = ti->index;
+                buf->used_types[type] = true;
+                pkl__emit_int(buf, type);
+            } else {
+                if(!pkl__write_object(buf, f->module)) return false;
             }
+            pkl__emit_op(buf, PKL_GETATTR);
+            pkl__emit_cstr(buf, name->data);
+            pkl__store_memo(buf, obj->_obj);
+            return true;
+        }
+        case tp_boundmethod: {
+            py_Ref self = py_getslot(obj, 0);
+            if(!py_istype(self, tp_type)) {
+                return ValueError("tp_boundmethod: !py_istype(self, tp_type)");
+            }
+            py_Ref func = py_getslot(obj, 1);
+            if(!py_istype(func, tp_function)) {
+                return ValueError("tp_boundmethod: !py_istype(func, tp_function)");
+            }
+
+            Function* f = py_touserdata(func);
+            if(!_check_function(f)) return false;
+
+            c11_string* name = f->decl->code.name;
+            // NOTE: copied from logic of `case tp_type:`
+            pkl__emit_op(buf, PKL_TYPE);
+            py_Type type = py_totype(self);
+            buf->used_types[type] = true;
+            pkl__emit_int(buf, type);
+
+            pkl__emit_op(buf, PKL_GETATTR);
+            pkl__emit_cstr(buf, name->data);
+            return true;
+        }
+        case tp_array2d: {
+            if(pkl__try_memo(buf, obj->_obj)) return true;
+            c11_array2d* arr = py_touserdata(obj);
+            for(int i = 0; i < arr->header.numel; i++) {
+                if(arr->data[i].is_ptr)
+                    return TypeError(
+                        "'array2d' object is not picklable because it contains heap-allocated objects");
+                buf->used_types[arr->data[i].type] = true;
+            }
+            pkl__emit_op(buf, PKL_ARRAY2D);
+            pkl__emit_int(buf, arr->header.n_cols);
+            pkl__emit_int(buf, arr->header.n_rows);
+            PickleObject__write_bytes(buf, arr->data, arr->header.numel * sizeof(py_TValue));
             pkl__store_memo(buf, obj->_obj);
             return true;
         }
@@ -17323,6 +17612,22 @@ bool py_pickle_loads_body(const unsigned char* p, int memo_length, c11_smallmap_
                 p += total_size;
                 break;
             }
+            case PKL_IMPORT_PATH: {
+                const char* path = pkl__read_cstr(&p);
+                int res = py_import(path);
+                if(res == -1) return false;
+                if(res == 0) return ImportError("No module named '%s'", path);
+                py_push(py_retval());
+                break;
+            }
+            case PKL_GETATTR: {
+                const char* name = pkl__read_cstr(&p);
+                py_Ref obj = py_peek(-1);
+                if(!py_getattr(obj, py_name(name))) return false;
+                py_pop();
+                py_push(py_retval());
+                break;
+            }
             case PKL_TVALUE: {
                 py_TValue* tmp = py_pushtmp();
                 memcpy(tmp, p, sizeof(py_TValue));
@@ -17398,13 +17703,17 @@ static bool PickleObject__py_submit(PickleObject* self, py_OutRef out) {
 // src/modules/traceback.c
 static bool traceback_format_exc(int argc, py_Ref argv) {
     PY_CHECK_ARGC(0);
-    char* s = py_formatexc();
-    if(!s) {
-        py_newnone(py_retval());
-    } else {
-        py_newstr(py_retval(), s);
-        PK_FREE(s);
+    VM* vm = pk_current_vm;
+    if(vm->top_frame) {
+        FrameExcInfo* info = Frame__top_exc_info(vm->top_frame);
+        if(info && !py_isnil(&info->exc)) {
+            char* res = formatexc_internal(&info->exc);
+            py_newstr(py_retval(), res);
+            PK_FREE(res);
+            return true;
+        }
     }
+    py_newnone(py_retval());
     return true;
 }
 
@@ -18529,7 +18838,7 @@ static bool color32_alpha_blend_STATIC(int argc, py_Ref argv) {
     res.r = (unsigned char)(src.r * alpha + dst.r * (1 - alpha));
     res.g = (unsigned char)(src.g * alpha + dst.g * (1 - alpha));
     res.b = (unsigned char)(src.b * alpha + dst.b * (1 - alpha));
-    res.a = (unsigned char)(src.a * alpha + dst.a * (1 - alpha));
+    res.a = (unsigned char)(src.a + dst.a * (1 - alpha));
     py_newcolor32(py_retval(), res);
     return true;
 }
@@ -21922,24 +22231,22 @@ void pk__add_module_unicodedata() {
 #define NANOS_PER_SEC 1000000000
 
 #ifndef __circle__
-    int64_t time_ns() {
-        struct timespec tms;
-    #ifdef CLOCK_REALTIME
-        clock_gettime(CLOCK_REALTIME, &tms);
-    #else
-        /* The C11 way */
-        timespec_get(&tms, TIME_UTC);
-    #endif
-        /* seconds, multiplied with 1 billion */
-        int64_t nanos = tms.tv_sec * (int64_t)NANOS_PER_SEC;
-        /* Add full nanoseconds */
-        nanos += tms.tv_nsec;
-        return nanos;
-    }
+int64_t time_ns() {
+    struct timespec tms;
+#ifdef CLOCK_REALTIME
+    clock_gettime(CLOCK_REALTIME, &tms);
 #else
-    int64_t time_ns() {
-        return 0;
-    }
+    /* The C11 way */
+    timespec_get(&tms, TIME_UTC);
+#endif
+    /* seconds, multiplied with 1 billion */
+    int64_t nanos = tms.tv_sec * (int64_t)NANOS_PER_SEC;
+    /* Add full nanoseconds */
+    nanos += tms.tv_nsec;
+    return nanos;
+}
+#else
+int64_t time_ns() { return 0; }
 #endif
 
 static bool time_time(int argc, py_Ref argv) {
@@ -21956,15 +22263,21 @@ static bool time_time_ns(int argc, py_Ref argv) {
     return true;
 }
 
+static bool time_perf_counter(int argc, py_Ref argv) {
+    PY_CHECK_ARGC(0);
+    py_newfloat(py_retval(), (double)clock() / CLOCKS_PER_SEC);
+    return true;
+}
+
 static bool time_sleep(int argc, py_Ref argv) {
     PY_CHECK_ARGC(1);
     py_f64 secs;
     if(!py_castfloat(argv, &secs)) return false;
 
-    int64_t start = time_ns();
-    const int64_t end = start + secs * 1000000000;
+    clock_t start = clock();
+    const clock_t end = start + (clock_t)(secs * CLOCKS_PER_SEC);
     while(true) {
-        int64_t now = time_ns();
+        clock_t now = clock();
         if(now >= end) break;
     }
     py_newnone(py_retval());
@@ -22018,6 +22331,7 @@ void pk__add_module_time() {
 
     py_bindfunc(mod, "time", time_time);
     py_bindfunc(mod, "time_ns", time_time_ns);
+    py_bindfunc(mod, "perf_counter", time_perf_counter);
     py_bindfunc(mod, "sleep", time_sleep);
     py_bindfunc(mod, "localtime", time_localtime);
 }
@@ -22384,7 +22698,6 @@ static bool disassemble(CodeObject* co) {
 
             c11_sbuf__write_int(&ss, byte.arg);
             switch(byte.op) {
-                // TODO: see `dis.py` there is a memory issue
                 case OP_LOAD_CONST: {
                     py_Ref value = c11__at(py_TValue, &co->consts, byte.arg);
                     if(py_repr(value)) {
@@ -23199,10 +23512,6 @@ void pk__add_module_gc() {
     py_bindfunc(mod, "isenabled", gc_isenabled);
 }
 
-int py_gc_collect() {
-    ManagedHeap* heap = &pk_current_vm->heap;
-    return ManagedHeap__collect(heap);
-}
 // src/compiler/lexer.c
 #include <ctype.h>
 
@@ -23471,13 +23780,20 @@ static Error* _eat_string(Lexer* self, c11_sbuf* buff, char quote, enum StringTy
         }
         if(!is_raw && c == '\\') {
             switch(eatchar_include_newline(self)) {
+                // For the list of available escape sequences see
+                // https://docs.python.org/3/reference/lexical_analysis.html#escape-sequences
                 case '"': c11_sbuf__write_char(buff, '"'); break;
                 case '\'': c11_sbuf__write_char(buff, '\''); break;
                 case '\\': c11_sbuf__write_char(buff, '\\'); break;
                 case 'n': c11_sbuf__write_char(buff, '\n'); break;
                 case 'r': c11_sbuf__write_char(buff, '\r'); break;
                 case 't': c11_sbuf__write_char(buff, '\t'); break;
+                case 'a': c11_sbuf__write_char(buff, '\a'); break;
                 case 'b': c11_sbuf__write_char(buff, '\b'); break;
+                case 'f': c11_sbuf__write_char(buff, '\f'); break;
+                case 'v': c11_sbuf__write_char(buff, '\v'); break;
+                // Special case for the often used \0 while we don't have full support for octal literals.
+                case '0': c11_sbuf__write_char(buff, '\0'); break;
                 case 'x': {
                     char hex[3] = {eatchar(self), eatchar(self), '\0'};
                     int code;
@@ -25053,12 +25369,12 @@ static int Ctx__prepare_loop_divert(Ctx* self, int line, bool is_break) {
                 Ctx__emit_(self, OP_POP_TOP, BC_NOARG, line);
                 break;
             }
-            case CodeBlockType_EXCEPT: {
-                Ctx__emit_(self, OP_END_EXC_HANDLING, 1, line);
+            case CodeBlockType_TRY: {
+                Ctx__emit_(self, OP_END_TRY, BC_NOARG, line);
                 break;
             }
-            case CodeBlockType_FINALLY: {
-                Ctx__emit_(self, OP_END_FINALLY, 1, line);
+            case CodeBlockType_EXCEPT: {
+                Ctx__emit_(self, OP_END_TRY, BC_NOARG, line);
                 break;
             }
             default: break;
@@ -25840,9 +26156,11 @@ static Error* exprCompileTimeCall(Compiler* self, py_ItemRef func, int line) {
     } while(match(TK_COMMA));
     consume(TK_RPAREN);
 
+    py_StackRef p0 = py_peek(0);
     bool ok = py_vectorcall(argc, kwargc);
     if(!ok) {
         char* msg = py_formatexc();
+        py_clearexc(p0);
         err = SyntaxError(self, "compile-time call error:\n%s", msg);
         PK_FREE(msg);
         return err;
@@ -25921,7 +26239,7 @@ static Error* exprSlice0(Compiler* self) {
             check(EXPR(self));
             slice->step = Ctx__s_popx(ctx());
         }  // else ::
-    }      // else :
+    }  // else :
     return NULL;
 }
 
@@ -26548,8 +26866,9 @@ static Error* compile_try_except(Compiler* self) {
     int patches_length = 0;
 
     Ctx__enter_block(ctx(), CodeBlockType_TRY);
-    Ctx__emit_(ctx(), OP_TRY_ENTER, BC_NOARG, prev()->line);
+    Ctx__emit_(ctx(), OP_BEGIN_TRY, BC_NOARG, prev()->line);
     check(compile_block_body(self));
+    Ctx__emit_(ctx(), OP_END_TRY, BC_NOARG, BC_KEEPLINE);
 
     // https://docs.python.org/3/reference/compound_stmts.html#finally-clause
     /* If finally is present, it specifies a ‘cleanup’ handler. The try clause is executed,
@@ -26565,23 +26884,10 @@ static Error* compile_try_except(Compiler* self) {
     // A return, break, continue in try/except block will make the finally block not executed
 
     bool has_finally = curr()->type == TK_FINALLY;
-    if(!has_finally) {
-        patches[patches_length++] = Ctx__emit_(ctx(), OP_JUMP_FORWARD, BC_NOARG, BC_KEEPLINE);
-    }
-    Ctx__exit_block(ctx());
+    if(has_finally) return SyntaxError(self, "finally clause is not supported yet");
 
-    if(has_finally) {
-        consume(TK_FINALLY);
-        Ctx__emit_(ctx(), OP_BEGIN_FINALLY, BC_NOARG, prev()->line);
-        // finally only, no except block
-        Ctx__enter_block(ctx(), CodeBlockType_FINALLY);
-        check(compile_block_body(self));
-        Ctx__exit_block(ctx());
-        Ctx__emit_(ctx(), OP_END_FINALLY, BC_NOARG, BC_KEEPLINE);
-        // re-raise if needed
-        Ctx__emit_(ctx(), OP_RE_RAISE, BC_NOARG, BC_KEEPLINE);
-        return NULL;
-    }
+    patches[patches_length++] = Ctx__emit_(ctx(), OP_JUMP_FORWARD, BC_NOARG, BC_KEEPLINE);
+    Ctx__exit_block(ctx());
 
     do {
         if(patches_length == 8) {
@@ -26605,7 +26911,7 @@ static Error* compile_try_except(Compiler* self) {
         }
         int patch = Ctx__emit_(ctx(), OP_POP_JUMP_IF_FALSE, BC_NOARG, BC_KEEPLINE);
         // on match
-        Ctx__emit_(ctx(), OP_BEGIN_EXC_HANDLING, BC_NOARG, BC_KEEPLINE);
+        Ctx__emit_(ctx(), OP_HANDLE_EXCEPTION, BC_NOARG, BC_KEEPLINE);
         if(as_name) {
             Ctx__emit_(ctx(), OP_PUSH_EXCEPTION, BC_NOARG, BC_KEEPLINE);
             Ctx__emit_store_name(ctx(), name_scope(self), as_name, BC_KEEPLINE);
@@ -26613,27 +26919,20 @@ static Error* compile_try_except(Compiler* self) {
         Ctx__enter_block(ctx(), CodeBlockType_EXCEPT);
         check(compile_block_body(self));
         Ctx__exit_block(ctx());
-        Ctx__emit_(ctx(), OP_END_EXC_HANDLING, BC_NOARG, BC_KEEPLINE);
+        Ctx__emit_(ctx(), OP_END_TRY, BC_NOARG, BC_KEEPLINE);
         patches[patches_length++] = Ctx__emit_(ctx(), OP_JUMP_FORWARD, BC_NOARG, BC_KEEPLINE);
         Ctx__patch_jump(ctx(), patch);
     } while(curr()->type == TK_EXCEPT);
 
     // no match, re-raise
-    // ...
+    Ctx__emit_(ctx(), OP_RE_RAISE, BC_NOARG, BC_KEEPLINE);
 
     // match one & handled, jump to the end
-    for(int i = 0; i < patches_length; i++)
+    for(int i = 0; i < patches_length; i++) {
         Ctx__patch_jump(ctx(), patches[i]);
-
-    if(match(TK_FINALLY)) {
-        Ctx__emit_(ctx(), OP_BEGIN_FINALLY, BC_NOARG, prev()->line);
-        Ctx__enter_block(ctx(), CodeBlockType_FINALLY);
-        check(compile_block_body(self));
-        Ctx__exit_block(ctx());
-        Ctx__emit_(ctx(), OP_END_FINALLY, BC_NOARG, BC_KEEPLINE);
     }
-    // re-raise if needed
-    Ctx__emit_(ctx(), OP_RE_RAISE, BC_NOARG, BC_KEEPLINE);
+
+    if(match(TK_FINALLY)) return SyntaxError(self, "finally clause is not supported yet");
     return NULL;
 }
 
@@ -26736,9 +27035,19 @@ static Error* compile_stmt(Compiler* self) {
             consume_end_stmt();
             break;
         case TK_RAISE: {
-            check(EXPR(self));
-            Ctx__s_emit_top(ctx());
-            Ctx__emit_(ctx(), OP_RAISE, BC_NOARG, kw_line);
+            if(is_expression(self, false)) {
+                check(EXPR(self));
+                Ctx__s_emit_top(ctx());
+                Ctx__emit_(ctx(), OP_RAISE, BC_NOARG, kw_line);
+            } else {
+                int iblock = ctx()->curr_iblock;
+                CodeBlock* blocks = (CodeBlock*)ctx()->co->blocks.data;
+                if(blocks[iblock].type != CodeBlockType_EXCEPT) {
+                    return SyntaxError(self,
+                                       "raise without exception is only allowed in except block");
+                }
+                Ctx__emit_(ctx(), OP_RE_RAISE, BC_NOARG, kw_line);
+            }
             consume_end_stmt();
         } break;
         case TK_DEL: {
