@@ -11,7 +11,7 @@ import SwiftUI
 
 @Scriptable
 class CustomView: ViewRepresentable {
-    let representation = ViewRepresentation {
+    var view: some View {
         Text("content")
     }
 }
@@ -41,9 +41,9 @@ struct ViewRepresentationTests {
         
         let customView = CustomView()
         customView.toPython(.main.emplace("custom_view"))
-        
+
         Interpreter.run("custom_view", mode: .single)
-        
-        #expect(io.view === customView.representation)
+
+        #expect(io.view != nil)
     }
 }

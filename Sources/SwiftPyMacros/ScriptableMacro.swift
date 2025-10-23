@@ -217,6 +217,9 @@ func variableDeclarationVisitor(
         
         let identifier = pattern.identifier.text
         
+        // Just ignore view of ViewRepresentable.
+        if identifier == "view" { return }
+        
         if let docstring = member.description.docstring {
             metadata.variableDocs.append("\(identifier.snakeCased): \(docstring)")
         }

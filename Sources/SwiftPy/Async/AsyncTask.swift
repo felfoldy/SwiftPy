@@ -7,6 +7,7 @@
 
 import pocketpy
 import Foundation
+import SwiftUI
 
 typealias TaskResult = PythonConvertible & Sendable
 
@@ -39,9 +40,9 @@ public class AsyncTask: ViewRepresentable {
     internal let task: Task<Void, Never>
     
     internal static var tasks = [UUID: AsyncTask]()
-    
-    public var representation = ViewRepresentation {}
-    
+
+    public var viewRepresentation: ViewRepresentation?
+
     private init(task: @escaping () async -> Void) {
         let id = UUID()
         
@@ -60,6 +61,10 @@ public class AsyncTask: ViewRepresentable {
     public func cancel() {
         task.cancel()
     }
+}
+
+extension AsyncTask {
+    public var view: some View { viewRepresentation?.view }
 }
 
 extension AsyncTask {
@@ -111,6 +116,6 @@ extension AsyncTask {
     
     public convenience init<T: PythonConvertible>(presenting: any ViewRepresentable, _ task: @escaping () async throws -> T) where T: Sendable {
         self.init(task)
-        representation = presenting.representation
+        viewRepresentation = presenting.representation
     }
 }
