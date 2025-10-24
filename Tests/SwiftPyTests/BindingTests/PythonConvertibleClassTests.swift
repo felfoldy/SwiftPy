@@ -10,7 +10,8 @@ import Testing
 import pocketpy
 import CoreFoundation
 
-final class TestClass: HasSubscript {
+@MainActor
+final class TestClass {
     /// Just a number.
     var number: Int? = nil
     
@@ -32,10 +33,6 @@ final class TestClass: HasSubscript {
     
     func getNumber() -> Int {
         number ?? -1
-    }
-    
-    subscript(key: String) -> String {
-        key
     }
 
     static func staticFunc(value: Int) -> TestClass {
@@ -82,9 +79,6 @@ extension TestClass: PythonBindable {
         }
         type.staticFunction("async_create") { argc, argv in
             PyBind.function(argc, argv, asyncCreate)
-        }
-        type.magic("__getitem__") { argc, argv in
-            __getitem__(argc, argv, __getitem__)
         }
         type.object?.setAttribute("_interface",
             #"""
@@ -188,12 +182,6 @@ struct PythonConvertibleClassTests {
     @Test func staticFunc() throws {
         let obj: TestClass = try #require(Interpreter.evaluate("TestClass.static_func(10)"))
         #expect(obj.number == 10)
-    }
-    
-    @Test func bindSubscript() throws {
-        TestClass(number: 2)
-            .toPython(main.emplace("test8"))
-        #expect(Interpreter.evaluate("test8['str']") == "str")
     }
     
     @Test func asyncStaticFunc() async throws {

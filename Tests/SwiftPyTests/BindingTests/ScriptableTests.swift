@@ -39,6 +39,10 @@ class TestClassWithProperties: PythonBindable {
     static func log(message: String) throws {
         throw PythonError.NotImplementedError(message)
     }
+    
+    subscript(text: String) -> String {
+        text
+    }
 }
 
 @MainActor

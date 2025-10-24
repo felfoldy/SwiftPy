@@ -89,7 +89,7 @@ public class AsyncTask: ViewRepresentable {
                     if py_next(iter) == 0 {
                         let stack = PyAPI.returnValue.toStack
 
-                        let result = try stack.reference?.attribute("value")
+                        let result = try? stack.reference?.attribute("value")
                         task[.result] = result
                         task.isDone = true
 

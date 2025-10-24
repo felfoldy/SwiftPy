@@ -18,12 +18,11 @@ public extension HasSlots {
 
 public extension PythonBindable where Self: HasSlots {
     /// Returns the stored python object for the given slot.
-    ///
-    /// - Note: Uses register 0.
     @inlinable
     subscript(slot: Slot) -> PyAPI.Reference? {
         get {
-            toRegister(0)?[slot: slot.rawValue]
+            let temp = self.toStack
+            return temp.reference?[slot: slot.rawValue]
         }
         set {
             let temp = self.toStack
@@ -33,27 +32,10 @@ public extension PythonBindable where Self: HasSlots {
     
     @inlinable
     subscript<T: PythonConvertible>(slot: Slot) -> T? {
-        get {
-            T(self[slot])
-        }
+        get { T(self[slot]) }
         set {
-            self[slot] = newValue?.toRegister(1)
+            let tempValue = newValue?.toStack
+            self[slot] = tempValue?.reference
         }
-    }
-    
-    @inlinable
-    static func _bind_slot<T: PythonConvertible>(_ slot: Slot, _ argv: PyAPI.Reference?, makeBinding: (Self) -> T?) -> Bool {
-        if let result = argv?[slot: slot.rawValue] {
-            PyAPI.returnValue.assign(result)
-            return true
-        }
-
-        guard let binding = Self(argv) else {
-            return .throwTypeError(argv, 0)
-        }
-
-        makeBinding(binding)?.toPython(PyAPI.returnValue)
-        argv?[slot: slot.rawValue] = PyAPI.returnValue
-        return true
     }
 }

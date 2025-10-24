@@ -8,7 +8,7 @@
 @MainActor
 public struct StopIteration: Error {
     public let value: PyAPI.Reference?
-    
+
     public init(value: PyAPI.Reference?) {
         self.value = value
     }
