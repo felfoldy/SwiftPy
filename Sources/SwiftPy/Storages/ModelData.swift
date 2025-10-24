@@ -127,12 +127,13 @@ class ModelContainer: PythonBindable {
         context.insert(modelData)
     }
     
-    func fetch(_ type: object) throws -> object {
-        let typeObject = type
+    func fetch(_ type: object) throws -> object? {
         let typeName = py_totype(type).name
         let modelsRef = try context.fetch(.models(name: typeName)).toStack
-        let makeModels = try typeObject.attribute("_makemodels")
-        return try PyAPI.call(makeModels, modelsRef.reference)
+        guard let makeModels = try type.attribute("_makemodels") else {
+            throw PythonError.ValueError("Type does not support fetching models")
+        }
+        return try makeModels.call([modelsRef.reference])
     }
 
     func delete(model: object) throws {
@@ -143,26 +144,11 @@ class ModelContainer: PythonBindable {
         context.delete(modelData)
         
         // Recreate the underlying model data for the object so it can be inserted again.
-        let makedata = try model.attribute("_makedata")?.toStack
-        try PyAPI.call(makedata?.reference)
-    }
-    
-    func inspect(_ type: object) throws {
-        let typeObject = type
-        let typeName = py_totype(type).name
-        let modelsRef = try context.fetch(.models(name: typeName)).toStack
-        let makeTable = try typeObject.attribute("_inspect")
-        try PyAPI.call(makeTable, modelsRef.reference)
+        try model.attribute("_makedata")?.call()
     }
     
     static func inMemory(inMemory: Bool) {
         inMemoryOnly = inMemory
-    }
-    
-    static func updated() {
-        for container in containers where container.context.hasChanges {
-            
-        }
     }
 }
 

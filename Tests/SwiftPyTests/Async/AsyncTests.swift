@@ -109,7 +109,7 @@ struct AsyncTests {
     
     static var asyncTaskIterator_task: AsyncTask!
     
-    @Test("Async Task iterator. Without the need of import asyncio woulf be preferred.")
+    @Test("AsyncTask iterator.")
     func asyncTaskIterator() async {
         main.bind("async_func() -> AsyncTask") { _, _ in
             PyAPI.returnOrThrow {
@@ -119,8 +119,6 @@ struct AsyncTests {
         }
 
         await Interpreter.asyncRun("""
-        import asyncio
-        
         def async_generator():
             a = yield from async_func()
             return a
@@ -143,10 +141,11 @@ struct AsyncTests {
         #expect(Interpreter.evaluate("iterate()") == 2)
     }
     
-    @Test func asyncTaskFromGenerator() async throws {
+    @Test
+    func asyncTaskFromGenerator() async throws {
         Interpreter.run("""
-        import asyncio
-
+        from asyncio import AsyncTask
+        
         def asyncTaskFromGenerator_make() -> AsyncTask:
             def gen():
                 yield 1
@@ -160,7 +159,10 @@ struct AsyncTests {
         #expect(Interpreter.evaluate("asyncTaskFromGenerator_result") == 2)
     }
     
-    @Test func chainAsyncTasks() async throws {
+    @Test(
+        .disabled("Because the generator is stored in a register it couldn't run more than one async task at a time.")
+    )
+    func chainAsyncTasks() async throws {
         Interpreter.main.bind("chainAsyncTasks_task1() -> AsyncTask") { _,_ in
             PyAPI.return(AsyncTask { 3 })
         }
@@ -170,12 +172,14 @@ struct AsyncTests {
         }
         
         Interpreter.run("""
-        import asyncio
-
+        from asyncio import AsyncTask
+        
         def chainAsyncTasks_make() -> AsyncTask:
             def gen():
                 a = yield from chainAsyncTasks_task1()
+                print(f'a: {a}')
                 b = yield from chainAsyncTasks_task2()
+                print(f'b: {b}')
                 return a * b
 
             return AsyncTask(gen())

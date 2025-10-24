@@ -241,7 +241,7 @@ extension Dictionary: PythonConvertible where Key: PythonConvertible {
         var dict = [Key: Value]()
         
         do {
-            let items = try PyAPI.call(reference, "items")?.toStack
+            let items = try reference.attribute("items")?.call().toStack
             
             try items?.iterate { item in
                 let keyRef = py_tuple_getitem(item.reference, 0)

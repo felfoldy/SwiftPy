@@ -81,7 +81,6 @@ def _make_property(field: str, all_fields: list[str]):
     def fset(self, value):
         self._fields[field] = value
         self._data.json = json.dumps(self._fields)
-        ModelContainer.updated()
 
     return property(fget, fset)
 

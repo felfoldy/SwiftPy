@@ -137,8 +137,8 @@ public extension PythonBindable {
     @inlinable
     static func __view__(_ argv: PyAPI.Reference?) -> Bool {
         PyAPI.returnOrThrow {
-            if Self.self is ViewRepresentable.Type {
-                let obj = try cast(argv) as? ViewRepresentable
+            if Self.self is (any ViewRepresentable.Type) {
+                let obj = try cast(argv) as? (any ViewRepresentable)
                 return obj?.representation
             }
             return nil

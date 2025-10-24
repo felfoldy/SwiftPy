@@ -211,10 +211,7 @@ public extension Interpreter {
         let completions = module?["completions"]
         let textStack = text.toStack
         
-        let result = try? PyAPI.call(
-            completions,
-            textStack.reference
-        )
+        let result = try? completions?.call([textStack.reference])
         return [String](result) ?? []
     }
 
@@ -253,10 +250,7 @@ public extension Interpreter {
             let interpreter = Interpreter.shared.module("interpreter")
             let bind_interfaces = interpreter?["bind_interfaces"]
             
-            _ = try? PyAPI.call(
-                bind_interfaces,
-                module
-            )
+            _ = try? bind_interfaces?.call([module])
         }
     }
 }

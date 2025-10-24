@@ -43,4 +43,19 @@ struct PyAPITests {
         
         #expect(main["x"]?["param"] == nil)
     }
+    
+    @Test func referenceCall() throws {
+        Interpreter.run("""
+        def add(a, b):
+            return a + b
+        """)
+        
+        let addFunction = Interpreter.main["add"]
+        let a = 10.toStack
+        let b = 20.toStack
+        let sum = try addFunction?.call([a.reference, b.reference])
+            .toStack
+        
+        #expect(sum?.reference == 30)
+    }
 }

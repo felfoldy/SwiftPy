@@ -79,24 +79,43 @@ public class AsyncTask: ViewRepresentable {
             py_iter(generator)
         }
         
+        // TODO: Store it somewhere else.
         let iter = PyAPI.returnValue.toRegister(5)
         
         let id = UUID()
         self.task = Task {
-            while let task = AsyncTask.tasks[id], task.isDone == false {
-                if py_next(iter) == 0 {
-                    let stack = PyAPI.returnValue.toStack
-                    let result = try? stack.reference?.attribute("value")
-                    task[.result] = result
-                    task.isDone = true
-                    await context?.complete(result: result)
-                } else {
-                    try? await Task.sleep(nanoseconds: 1)
+            do {
+                while let task = AsyncTask.tasks[id], task.isDone == false {
+                    if py_next(iter) == 0 {
+                        let stack = PyAPI.returnValue.toStack
+
+                        let result = try stack.reference?.attribute("value")
+                        task[.result] = result
+                        task.isDone = true
+
+                        await context?.complete(result: result)
+                    } else {
+                        try await Task.sleep(nanoseconds: 1)
+                    }
                 }
+            } catch {
+                context?.completion()
             }
+            
+            AsyncTask.tasks[id] = nil
         }
         
         AsyncTask.tasks[id] = self
+    }
+    
+    func __iter__() -> AsyncTask {
+        self
+    }
+    
+    func __next__() throws {
+        if isDone {
+            throw StopIteration(value: self[.result])
+        }
     }
 
     deinit {
