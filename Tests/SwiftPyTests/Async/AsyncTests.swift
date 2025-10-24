@@ -66,15 +66,15 @@ struct AsyncTests {
     @Test func asyncRunWithResult() async {
         profiler.event("AsyncTest.asyncRunWithResult")
 
-        main.bind("async_func() -> AsyncTask") { _, _ in
+        main.bind("asyncRunWithResult() -> AsyncTask") { _, _ in
             PyAPI.return(AsyncTask { 42 })
         }
-        
+
         await Interpreter.asyncRun("""
-        result = await async_func()
+        asyncRunWithResult_result = await asyncRunWithResult()
         """)
-        
-        #expect(main["result"] == 42)
+
+        #expect(main["asyncRunWithResult_result"] == 42)
     }
     
     @Test func chainingAsyncRun() async {
@@ -107,31 +107,82 @@ struct AsyncTests {
         #expect(AsyncTask(.main["result"]) != nil)
     }
     
-    @Test(
-        .disabled("overrides output")
-    )
+    static var asyncTaskIterator_task: AsyncTask!
+    
+    @Test("Async Task iterator. Without the need of import asyncio woulf be preferred.")
     func asyncTaskIterator() async {
-        let out = TestOutputStream()
-        
-        Interpreter.output = out
-        
-        Interpreter.run("import asyncio")
-        
         main.bind("async_func() -> AsyncTask") { _, _ in
-            PyAPI.return(AsyncTask { 42 })
+            PyAPI.returnOrThrow {
+                AsyncTests.asyncTaskIterator_task = AsyncTask { 1 }
+                return AsyncTests.asyncTaskIterator_task
+            }
         }
-        
+
         await Interpreter.asyncRun("""
+        import asyncio
+        
         def async_generator():
-            res = yield from async_func()
-            return res
+            a = yield from async_func()
+            return a
         
         gen = async_generator()
+        
+        def iterate():
+            try:
+                next(gen)
+                return None
+            except StopIteration as e:
+                return e.value
         """, mode: .single)
         
-        while out.lastStdErr == nil {
-            await Interpreter.asyncRun("next(gen)", mode: .single)
-            try? await Task.sleep(nanoseconds: 1)
+        #expect(Interpreter.evaluate("iterate()") == Int?.none)
+        
+        AsyncTests.asyncTaskIterator_task.isDone = true
+        AsyncTests.asyncTaskIterator_task[.result] = 2
+
+        #expect(Interpreter.evaluate("iterate()") == 2)
+    }
+    
+    @Test func asyncTaskFromGenerator() async throws {
+        Interpreter.run("""
+        import asyncio
+
+        def asyncTaskFromGenerator_make() -> AsyncTask:
+            def gen():
+                yield 1
+                return 2
+
+            return AsyncTask(gen())
+        """)
+        
+        await Interpreter.asyncRun("asyncTaskFromGenerator_result = await asyncTaskFromGenerator_make()")
+        
+        #expect(Interpreter.evaluate("asyncTaskFromGenerator_result") == 2)
+    }
+    
+    @Test func chainAsyncTasks() async throws {
+        Interpreter.main.bind("chainAsyncTasks_task1() -> AsyncTask") { _,_ in
+            PyAPI.return(AsyncTask { 3 })
         }
+        
+        Interpreter.main.bind("chainAsyncTasks_task2() -> AsyncTask") { _,_ in
+            PyAPI.return(AsyncTask { 4 })
+        }
+        
+        Interpreter.run("""
+        import asyncio
+
+        def chainAsyncTasks_make() -> AsyncTask:
+            def gen():
+                a = yield from chainAsyncTasks_task1()
+                b = yield from chainAsyncTasks_task2()
+                return a * b
+
+            return AsyncTask(gen())
+        """)
+        
+        await Interpreter.asyncRun("chainAsyncTasks_result = await chainAsyncTasks_make()")
+        
+        #expect(Interpreter.evaluate("chainAsyncTasks_result") == 12)
     }
 }

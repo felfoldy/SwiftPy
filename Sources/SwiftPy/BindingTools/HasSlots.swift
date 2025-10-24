@@ -26,7 +26,8 @@ public extension PythonBindable where Self: HasSlots {
             toRegister(0)?[slot: slot.rawValue]
         }
         set {
-            toRegister(0)?[slot: slot.rawValue] = newValue
+            let temp = self.toStack
+            temp.reference?[slot: slot.rawValue] = newValue
         }
     }
     

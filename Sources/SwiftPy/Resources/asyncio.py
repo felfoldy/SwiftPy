@@ -1,13 +1,14 @@
-class AsyncIterator:
-    def __init__(self, task: AsyncTask):
-        self.task = task
+def _Task__iter__(self):
+    return self
+    
+def _Task__next__(self):
+    if self.is_done:
+        raise StopIteration(self.result)
 
-    def __next__(self):
-        if self.task.is_done:
-            raise StopIteration(self.task.result)
+AsyncTask.__iter__ = _Task__iter__
+AsyncTask.__next__ = _Task__next__
 
-
-def __AsyncTask_iter(self):
-    return AsyncIterator(self)
-
-AsyncTask.__iter__ = __AsyncTask_iter
+def task_from(generator) -> AsyncTask:
+    task = AsyncTask()
+    task.generator = generator
+    return task

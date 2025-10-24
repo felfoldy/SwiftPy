@@ -123,6 +123,7 @@ public extension PyType {
     static let dict = PyType(tp_dict.rawValue)
     static let function = PyType(tp_function.rawValue)
     static let bytes = PyType(tp_bytes.rawValue)
+    static let generator = PyType(tp_generator.rawValue)
     
     // Errors:
     static let SyntaxError = PyType(tp_SyntaxError.rawValue)
@@ -401,7 +402,11 @@ public extension PyAPI.Reference {
             return result
         }
         nonmutating set {
-            py_setslot(self, i, newValue)
+            if let newValue {
+                py_setslot(self, i, newValue)
+            } else {
+                py_setslot(self, i, py_None().)
+            }
         }
     }
     

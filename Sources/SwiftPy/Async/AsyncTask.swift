@@ -45,9 +45,7 @@ public class AsyncTask: ViewRepresentable {
     internal let task: Task<Void, Never>
     internal static var tasks = [UUID: AsyncTask]()
 
-    var result: object? {
-        self[.result]
-    }
+    var result: object? { self[.result] }
 
     private init(task: @escaping () async -> Void) {
         let id = UUID()
@@ -71,6 +69,33 @@ public class AsyncTask: ViewRepresentable {
             AsyncTask.tasks[id] = nil
         }
 
+        AsyncTask.tasks[id] = self
+    }
+
+    init(generator: object) throws {
+        let context = AsyncContext.current
+        
+        try Interpreter.printErrors {
+            py_iter(generator)
+        }
+        
+        let iter = PyAPI.returnValue.toRegister(5)
+        
+        let id = UUID()
+        self.task = Task {
+            while let task = AsyncTask.tasks[id], task.isDone == false {
+                if py_next(iter) == 0 {
+                    let stack = PyAPI.returnValue.toStack
+                    let result = try? stack.reference?.attribute("value")
+                    task[.result] = result
+                    task.isDone = true
+                    await context?.complete(result: result)
+                } else {
+                    try? await Task.sleep(nanoseconds: 1)
+                }
+            }
+        }
+        
         AsyncTask.tasks[id] = self
     }
 
@@ -100,13 +125,7 @@ extension AsyncTask {
         self.init {
             do {
                 try await task()
-                
-                guard let context else { return }
-
-                if let continuation = context.continuationCode {
-                    await Interpreter.shared.asyncExecute(continuation, filename: context.filename, mode: context.mode)
-                }
-                context.completion()
+                await context?.complete(result: Int?.none)
             } catch {
                 log.critical(error.localizedDescription)
                 context?.completion()
@@ -121,18 +140,7 @@ extension AsyncTask {
             do {
                 let result = try await task()
 
-                guard let context else { return nil }
-                
-                if let resultName = context.resultName {
-                    result.toPython(
-                        .main.emplace(resultName)
-                    )
-                }
-
-                if let continuation = context.continuationCode {
-                    await Interpreter.shared.asyncExecute(continuation, filename: context.filename, mode: context.mode)
-                }
-                context.completion()
+                await context?.complete(result: result)
 
                 return result
             } catch {

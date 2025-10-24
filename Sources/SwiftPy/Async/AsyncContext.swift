@@ -82,4 +82,19 @@ struct AsyncContext {
         return lines[i..<lines.count]
             .joined(separator: "\n")
     }
+    
+    func complete<Result: PythonConvertible>(result: Result?) async {
+        if let resultName {
+            result.toPython(.main.emplace(resultName))
+        }
+
+        if let continuationCode {
+            await Interpreter.shared.asyncExecute(
+                continuationCode,
+                filename: filename, mode: mode
+            )
+        }
+
+        completion()
+    }
 }
