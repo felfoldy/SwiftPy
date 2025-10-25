@@ -74,21 +74,26 @@ public class AsyncTask: ViewRepresentable {
         AsyncTask.tasks[id] = self
     }
 
-    init(generator: object) throws {
+    init(arguments: PyArguments) throws {
+        try arguments.expectedArgCount(2)
+
+        let generator = arguments[1]
+
         let context = AsyncContext.current
-        
         try Interpreter.printErrors {
             py_iter(generator)
         }
-        
-        // TODO: Store it somewhere else.
-        let iter = PyAPI.returnValue.toRegister(5)
-        
+        arguments[Slot.iterator] = PyAPI.returnValue
+
         let id = UUID()
         self.task = Task {
             do {
                 while let task = AsyncTask.tasks[id], task.isDone == false {
-                    let hasNext = try Interpreter.printItemError(py_next(iter))
+                    guard let iterator = task[.iterator] else {
+                        throw PythonError.AssertionError("Iterator is missing")
+                    }
+
+                    let hasNext = try Interpreter.printItemError(py_next(iterator))
 
                     let stack = PyAPI.returnValue.toStack
 
@@ -140,6 +145,7 @@ public class AsyncTask: ViewRepresentable {
 extension AsyncTask: HasSlots {
     public enum Slot: Int32, CaseIterable {
         case result
+        case iterator
     }
 }
 

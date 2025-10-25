@@ -161,9 +161,6 @@ public extension PyAPI.Reference {
 
         /// `builtins` module.
         let builtins = Interpreter.shared.module("builtins")!
-
-        /// `intents` module.
-        let intents = Interpreter.shared.module("intents")!
     }
 
     @MainActor static let modules = Modules()
@@ -409,6 +406,10 @@ public enum PythonError: LocalizedError {
     case ImportError(String)
     case AssertionError(String)
     case KeyError(String)
+    
+    static func argCountError(_ got: Int32, expected: Int) -> PythonError {
+        .TypeError("expected \(expected) arguments, got \(got)")
+    }
 
     public var description: String? {
         switch self {

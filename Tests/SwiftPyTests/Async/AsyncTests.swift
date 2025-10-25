@@ -15,7 +15,7 @@ func profile(_ name: StaticString) -> SignpostProfiler {
     return profiler
 }
 
-@Suite("Async tests")
+@Suite("Async tests", .serialized)
 @MainActor
 struct AsyncTests {
     let main = Interpreter.main
@@ -144,14 +144,12 @@ struct AsyncTests {
     @Test
     func asyncTaskFromGenerator() async throws {
         Interpreter.run("""
-        from asyncio import AsyncTask
+        import asyncio
         
-        def asyncTaskFromGenerator_make() -> AsyncTask:
-            def gen():
-                yield 1
-                return 2
-
-            return AsyncTask(gen())
+        @asyncio.coroutine
+        def asyncTaskFromGenerator_make():
+            yield 1
+            return 2
         """)
         
         await Interpreter.asyncRun("asyncTaskFromGenerator_result = await asyncTaskFromGenerator_make()")
@@ -159,9 +157,7 @@ struct AsyncTests {
         #expect(Interpreter.evaluate("asyncTaskFromGenerator_result") == 2)
     }
     
-    @Test(
-        .disabled("Because the generator is stored in a register it couldn't run more than one async task at a time.")
-    )
+    @Test
     func chainAsyncTasks() async throws {
         Interpreter.main.bind("chainAsyncTasks_task1() -> AsyncTask") { _,_ in
             PyAPI.return(AsyncTask { 3 })
@@ -172,17 +168,15 @@ struct AsyncTests {
         }
         
         Interpreter.run("""
-        from asyncio import AsyncTask
-        
-        def chainAsyncTasks_make() -> AsyncTask:
-            def gen():
-                a = yield from chainAsyncTasks_task1()
-                print(f'a: {a}')
-                b = yield from chainAsyncTasks_task2()
-                print(f'b: {b}')
-                return a * b
-
-            return AsyncTask(gen())
+        import asyncio
+            
+        @asyncio.coroutine
+        def chainAsyncTasks_make():
+            a = yield from chainAsyncTasks_task1()
+            print(f'a: {a}')
+            b = yield from chainAsyncTasks_task2()
+            print(f'b: {b}')
+            return a * b
         """)
         
         await Interpreter.asyncRun("chainAsyncTasks_result = await chainAsyncTasks_make()")

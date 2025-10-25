@@ -7,11 +7,10 @@
 
 @MainActor
 public enum PyBind {
-    @usableFromInline
     @inline(__always)
-    static func checkArgCount(_ got: Int32, expected: Int) throws {
+    public static func checkArgCount(_ got: Int32, expected: Int) throws(PythonError) {
         if expected != got {
-            throw PythonError.TypeError("expected \(expected) arguments, got \(got)")
+            throw .argCountError(got, expected: expected)
         }
     }
     

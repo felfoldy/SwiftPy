@@ -127,6 +127,22 @@ public extension PythonBindable {
     }
     
     @inlinable
+    static func __init__(
+        _ argc: Int32, _ argv: PyAPI.Reference?,
+        _ initializer: @MainActor (PyArguments) throws -> Self
+    ) -> Bool {
+        do {
+            try initializer(PyArguments(argc: argc, argv: argv))
+                .storeInPython(argv)
+        } catch {
+            // TODO: incorrect when the error thrown by the init itself.
+            return false
+        }
+
+        return PyAPI.return(.none)
+    }
+    
+    @inlinable
     static func __repr__(_ argv: PyAPI.Reference?) -> Bool {
         PyAPI.returnOrThrow {
             let obj = try cast(argv)
