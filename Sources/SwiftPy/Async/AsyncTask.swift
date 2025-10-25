@@ -45,6 +45,8 @@ public class AsyncTask: ViewRepresentable {
     internal let task: Task<Void, Never>
     internal static var tasks = [UUID: AsyncTask]()
 
+    internal weak var underlying: AsyncTask?
+
     var result: object? { self[.result] }
 
     private init(task: @escaping () async -> Void) {
@@ -86,16 +88,23 @@ public class AsyncTask: ViewRepresentable {
         self.task = Task {
             do {
                 while let task = AsyncTask.tasks[id], task.isDone == false {
-                    if py_next(iter) == 0 {
-                        let stack = PyAPI.returnValue.toStack
+                    let hasNext = try Interpreter.printItemError(py_next(iter))
 
+                    let stack = PyAPI.returnValue.toStack
+
+                    if hasNext {
+                        if let task = AsyncTask(stack.reference) {
+                            Interpreter.output.view(task.representation)
+                            _ = await task.task.value
+                        } else {
+                            try await Task.sleep(nanoseconds: 1)
+                        }
+                    } else {
                         let result = try? stack.reference?.attribute("value")
                         task[.result] = result
                         task.isDone = true
 
                         await context?.complete(result: result)
-                    } else {
-                        try await Task.sleep(nanoseconds: 1)
                     }
                 }
             } catch {
@@ -112,10 +121,11 @@ public class AsyncTask: ViewRepresentable {
         self
     }
     
-    func __next__() throws {
+    func __next__() throws -> AsyncTask {
         if isDone {
             throw StopIteration(value: self[.result])
         }
+        return self
     }
 
     deinit {
