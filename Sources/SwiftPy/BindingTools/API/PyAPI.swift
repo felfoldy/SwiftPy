@@ -29,7 +29,11 @@ public extension PyAPI {
 
     @inlinable
     static func `return`(_ value: PythonConvertible?) -> Bool {
-        py_retval().set(value)
+        if let value {
+            value.toPython(returnValue)
+        } else {
+            py_newnone(returnValue)
+        }
         return true
     }
 
@@ -229,15 +233,7 @@ public extension PyAPI.Reference {
         return PyAPI.returnValue
     }
 
-    @inlinable func set(_ value: PythonConvertible?) {
-        if let value {
-            value.toPython(self)
-        } else {
-            py_newnone(self)
-        }
-    }
-
-    // Copies the given value into the reference memory.
+    /// Copies the given value into the reference memory.
     @inlinable func assign(_ newValue: PyAPI.Reference?) {
         guard let pointer = UnsafeRawPointer(newValue) else { return }
         UnsafeMutableRawPointer(self).copyMemory(from: pointer, byteCount: PyAPI.elementSize)

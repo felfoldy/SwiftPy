@@ -10,18 +10,6 @@ import SwiftPy
 
 @MainActor
 struct PyAPITests {
-    /// `.set` is the assignment operator however a custom operator would be better maybe.
-    @Test func set() {
-        Interpreter.execute("x = 10")
-        #expect(Interpreter.main["x"] == 10)
-
-        Interpreter.main["x"]?.set(Int?.none)
-        #expect(Interpreter.main["x"]?.isNone == true)
-        
-        Interpreter.main["x"]?.set("10")
-        #expect(Interpreter.main["x"] == "10")
-    }
-    
     @Test func setAttribute() {
         let main = Interpreter.main
 
