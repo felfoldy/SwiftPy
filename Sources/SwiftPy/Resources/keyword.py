@@ -8,7 +8,7 @@ kwlist = [
     'as',
     'assert',
     # 'async',
-    # 'await',
+    'await',
     'break',
     'class',
     'continue',

@@ -88,6 +88,10 @@ public final class Interpreter {
             AsyncTask.self,
         ])
 
+        Interpreter.bindModule("packages", [
+            Path.self,
+        ])
+
         if #available(macOS 15, iOS 18, visionOS 2, *) {
             Interpreter.bindModule("views", [
                 PythonView.self,
@@ -134,8 +138,9 @@ public final class Interpreter {
                 }
             }
         }
-        
-        return nil
+
+        // Read from documents/site-packages/...
+        return try? String(contentsOfFile: "\(Path.sitePackages())/\(name)", encoding: .utf8)
     }
     
     @inlinable
