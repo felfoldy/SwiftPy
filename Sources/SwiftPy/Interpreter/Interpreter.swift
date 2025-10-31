@@ -85,7 +85,7 @@ public final class Interpreter {
         ])
         
         Interpreter.bindModule("asyncio", [
-            AsyncTask.self,
+            AsyncTask.self, AsyncSleep.self,
         ])
 
         Interpreter.bindModule("packages", [
@@ -93,11 +93,6 @@ public final class Interpreter {
         ])
 
         if #available(macOS 15, iOS 18, visionOS 2, *) {
-            Interpreter.bindModule("views", [
-                PythonView.self,
-                PythonWindow.self,
-            ])
-            
             hookStoragesModule()
         }
     }

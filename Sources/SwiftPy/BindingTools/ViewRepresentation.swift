@@ -38,6 +38,36 @@ public extension ViewRepresentable {
     }
 }
 
+/// Convinient Content view what accesses the Scriptable class itself.
+///
+/// Example:
+/// ```swift
+/// @Observable
+/// @Scriptable
+/// final class CustomView: ViewRepresentable {
+///     struct Content: RepresentationContent {
+///         @State var model: CustomView
+///
+///         var body: some View {
+///             ...
+///         }
+///     }
+/// }
+/// ```
+///
+/// When class value changes the view will be updated.
+public protocol RepresentationContent<Model>: View {
+    associatedtype Model
+    var model: Model { get set }
+    init(model: Model)
+}
+
+public extension ViewRepresentable where Content: RepresentationContent, Content.Model == Self {
+    var view: Content {
+        Content(model: self)
+    }
+}
+
 /// A type ereased wrapper for a SwiftUI view to store in python.
 ///
 /// See also:
