@@ -76,6 +76,8 @@ extension ScriptableMacro: ExtensionMacro {
 }
 
 struct ClassMetadata {
+    var convertsToSnakeCase: Bool = true
+    
     var visibility: String = ""
     var className: String
     var name: String
@@ -117,6 +119,7 @@ extension AttributeSyntax {
         var name = className
         var base = ".object"
         var module = "Interpreter.main"
+        var convertsToSnakeCase = true
         
         for argument in arguments {
             if let clsName = argument.expression.as(StringLiteralExprSyntax.self)?.segments.description {
@@ -130,9 +133,13 @@ extension AttributeSyntax {
             if argument.label?.text == "module" {
                 module = argument.expression.description
             }
+            
+            if argument.label?.text == "convertsToSnakeCase" {
+                convertsToSnakeCase = argument.expression.description != "false"
+            }
         }
         
-        return ClassMetadata(className: className, name: name, base: base, module: module, classDoc: docstring)
+        return ClassMetadata(convertsToSnakeCase: convertsToSnakeCase, className: className, name: name, base: base, module: module, classDoc: docstring)
     }
 }
 
@@ -221,7 +228,7 @@ func variableDeclarationVisitor(
         if identifier == "view" { return }
         
         if let docstring = member.description.docstring {
-            metadata.variableDocs.append("\(identifier.snakeCased): \(docstring)")
+            metadata.variableDocs.append("\(metadata.identifier(identifier)): \(docstring)")
         }
         
         let setter: String = {
@@ -237,13 +244,13 @@ func variableDeclarationVisitor(
         }()
         
         if let annotation = binding.typeAnnotation?.type.description {
-            metadata.variableSyntax.append("\(identifier.snakeCased): \(annotation.pyType)")
+            metadata.variableSyntax.append("\(metadata.identifier(identifier)): \(annotation.pyType)")
         }
         
         metadata.bindings.append(
         """
         type.property(
-            "\(identifier.snakeCased)",
+            "\(metadata.identifier(identifier))",
             getter: { _bind_getter(\\.\(identifier), $1) },
             setter: \(setter)
         )
@@ -291,7 +298,7 @@ func functionDeclarationVisitor(
             return "None"
         }()
         
-        let pySignature = "\(identifier.snakeCased)(\(paramsString)) -> \(returnType)"
+        let pySignature = "\(metadata.identifier(identifier))(\(paramsString)) -> \(returnType)"
         
         if isStatic {
             metadata.functionSyntax.append("@staticmethod")
@@ -310,7 +317,7 @@ func functionDeclarationVisitor(
         if isStatic {
             metadata.bindings.append(
             """
-            type.staticFunction("\(identifier.snakeCased)") { argc, argv in
+            type.staticFunction("\(metadata.identifier(identifier))") { argc, argv in
                 PyBind.function(argc, argv, \(identifier))
             }
             """
@@ -400,9 +407,11 @@ extension FunctionDeclSyntax: Mappable {}
 
 // MARK: - Extensions
 
-extension String {
-    var snakeCased: String {
-        var text = self
+extension ClassMetadata {
+    func identifier(_ attribute: String) -> String {
+        guard convertsToSnakeCase else { return attribute }
+        // converts to snakeCase
+        var text = attribute
         var result = [String(text.removeFirst().lowercased())]
         for character in text {
             if character.isUppercase {
@@ -412,7 +421,9 @@ extension String {
         }
         return result.joined()
     }
+}
 
+extension String {
     var trim: String {
         trimmingCharacters(in: .whitespacesAndNewlines)
     }

@@ -136,6 +136,34 @@ class ScriptableMacroTests: XCTestCase {
         macros: testMacros)
     }
     
+    func testConvertsToSnakeCaseFalse() {
+        // Without overriden type name.
+        assertMacroExpansion("""
+        @Scriptable(convertsToSnakeCase: false)
+        class TestClass {
+            let someVariable: Int
+        }
+        """, expandedSource: """
+        class TestClass {
+            let someVariable: Int
+        
+            var _pythonCache = PythonBindingCache()
+        }
+        
+        extension TestClass: PythonBindable {
+            @MainActor static let pyType: PyType = .make("TestClass", base: .object, module: Interpreter.main) { type in
+                \(property("someVariable", python: "someVariable", setter: false))
+                \(newAndRepr)
+                \(interfaceBegin)
+                    class TestClass:
+                        someVariable: int
+                \(interfaceEnd)
+            }
+        }
+        """,
+        macros: testMacros)
+    }
+    
     func testInit() {
         assertMacroExpansion("""
         @Scriptable
