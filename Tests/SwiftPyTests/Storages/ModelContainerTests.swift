@@ -11,7 +11,7 @@ import Foundation
 import SwiftData
 
 @MainActor
-@Suite(.tags(.experimental))
+@Suite
 struct ModelContainerTests {
     init() {
         Interpreter.run("""

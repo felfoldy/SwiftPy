@@ -37,7 +37,7 @@ extension PyArgumentTests_SUT: HasSlots {
 @MainActor
 struct PyArgumentsTests {
     @Test func argumentsInit() {
-        _ = PyArgumentTests_SUT.pyType
+        Interpreter.main.setAttribute("PyArgumentTests_SUT", PyArgumentTests_SUT.pyType.object)
         
         Interpreter.run("argumentsInit_result = PyArgumentTests_SUT(12, 'slot')")
         

@@ -82,7 +82,6 @@ struct ClassMetadata {
     var className: String
     var name: String
     var base: String
-    var module: String
     var classDoc: String?
     
     var bindings: [String] = []
@@ -94,7 +93,7 @@ struct ClassMetadata {
     var variableDocs: [String] = []
 
     var typeMakeArgs: String {
-        "\"\(name)\", base: \(base), module: \(module)"
+        "\"\(name)\", base: \(base)"
     }
 
     var interfaceHeader: String {
@@ -113,12 +112,11 @@ extension AttributeSyntax {
         let docstring = description.docstring
         
         guard let arguments = arguments?.as(LabeledExprListSyntax.self) else {
-            return ClassMetadata(className: className, name: className, base: ".object", module: "Interpreter.main", classDoc: docstring)
+            return ClassMetadata(className: className, name: className, base: ".object", classDoc: docstring)
         }
         
         var name = className
         var base = ".object"
-        var module = "Interpreter.main"
         var convertsToSnakeCase = true
         
         for argument in arguments {
@@ -130,16 +128,12 @@ extension AttributeSyntax {
                 base = argument.expression.description
             }
             
-            if argument.label?.text == "module" {
-                module = argument.expression.description
-            }
-            
             if argument.label?.text == "convertsToSnakeCase" {
                 convertsToSnakeCase = argument.expression.description != "false"
             }
         }
         
-        return ClassMetadata(convertsToSnakeCase: convertsToSnakeCase, className: className, name: name, base: base, module: module, classDoc: docstring)
+        return ClassMetadata(convertsToSnakeCase: convertsToSnakeCase, className: className, name: name, base: base, classDoc: docstring)
     }
 }
 
@@ -230,7 +224,19 @@ func variableDeclarationVisitor(
         if let docstring = member.description.docstring {
             metadata.variableDocs.append("\(metadata.identifier(identifier)): \(docstring)")
         }
-        
+
+        if let annotation = binding.typeAnnotation?.type.description {
+            metadata.variableSyntax.append("\(metadata.identifier(identifier)): \(annotation.pyType)")
+        }
+
+        // Bind static property.
+        if member.modifiers.first?.name.text == "static" {
+            metadata.bindings.append(
+                "\(identifier).toPython(type.object?.emplace(\"\(metadata.identifier(identifier))\"))"
+            )
+            continue
+        }
+
         let setter: String = {
             if specifier != "var" { return "nil" }
             
@@ -242,10 +248,6 @@ func variableDeclarationVisitor(
             
             return "{ _bind_setter(\\.\(identifier), $1) }"
         }()
-        
-        if let annotation = binding.typeAnnotation?.type.description {
-            metadata.variableSyntax.append("\(metadata.identifier(identifier)): \(annotation.pyType)")
-        }
         
         metadata.bindings.append(
         """

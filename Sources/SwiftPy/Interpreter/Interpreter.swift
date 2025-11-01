@@ -65,6 +65,29 @@ public final class Interpreter {
         // Remove exit, maybe do a custom action instead later?
         py_deldict(builtins, py_name("exit"))
         
+        // Set os module
+        let os = py_getmodule("os")
+
+        os?.bind("chdir(path: str)") { _, path in
+            PyAPI.returnOrThrow {
+                if let path = String(path) {
+                    FileManager.default.changeCurrentDirectoryPath(path)
+                    return
+                }
+                throw PythonError.AssertionError("Path must be a string.")
+            }
+        }
+
+        os?.bind("getcwd() -> str") { _, _ in
+            PyAPI.return(
+                FileManager.default.currentDirectoryPath
+            )
+        }
+
+        // Change default working directory to the applications Documents directory.
+        FileManager.default.changeCurrentDirectoryPath(Path.home())
+        
+        // Set sys module.
         let sys = py_getmodule("sys")
 
         #if os(visionOS)

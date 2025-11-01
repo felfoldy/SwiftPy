@@ -23,6 +23,7 @@ class ScriptableMacroTests: XCTestCase {
             let listProperty: [String] = []
             var intProperty: Int? = 10
             var dictionary: [String: Float] { [:] }
+            static let text: String = "Hello"
         }
         """,
         expandedSource:
@@ -31,21 +32,24 @@ class ScriptableMacroTests: XCTestCase {
             let listProperty: [String] = []
             var intProperty: Int? = 10
             var dictionary: [String: Float] { [:] }
+            static let text: String = "Hello"
 
             var _pythonCache = PythonBindingCache()
         }
 
         extension TestClass: PythonBindable {
-            @MainActor static let pyType: PyType = .make("TestClass", base: .object, module: Interpreter.main) { type in
+            @MainActor static let pyType: PyType = .make("TestClass", base: .object) { type in
                 \(property("listProperty", python: "list_property", setter: false))
                 \(property("intProperty", python: "int_property"))
                 \(property("dictionary", python: "dictionary", setter: false))
+                text.toPython(type.object?.emplace("text"))
                 \(newAndRepr)
                 \(interfaceBegin)
                     class TestClass:
                         list_property: list[str]
                         int_property: int | None
                         dictionary: dict[str, float]
+                        text: str
                 \(interfaceEnd)
             }
         }
@@ -71,7 +75,7 @@ class ScriptableMacroTests: XCTestCase {
         }
         
         extension TestClass: PythonBindable {
-            @MainActor public static let pyType: PyType = .make("TestClass", base: .object, module: Interpreter.main) { type in
+            @MainActor public static let pyType: PyType = .make("TestClass", base: .object) { type in
                 \(function("testMethod", "test_method(self, arg: int | None = None, arg2: str = '1') -> None"))
                 \(function("testFunction", "test_function(self, value: str, val2: int) -> int"))
                 \(function("testAsync", "test_async(self) -> int"))
@@ -91,7 +95,7 @@ class ScriptableMacroTests: XCTestCase {
     func testScriptableAttributes() {
         // Without overriden type name.
         assertMacroExpansion("""
-        @Scriptable("TestClass2", base: .object, module: .module)
+        @Scriptable("TestClass2", base: .object)
         class TestClass {}
         """, expandedSource: """
         class TestClass {
@@ -100,7 +104,7 @@ class ScriptableMacroTests: XCTestCase {
         }
         
         extension TestClass: PythonBindable {
-            @MainActor static let pyType: PyType = .make("TestClass2", base: .object, module: .module) { type in
+            @MainActor static let pyType: PyType = .make("TestClass2", base: .object) { type in
         
                 \(newAndRepr)
                 \(interfaceBegin)
@@ -114,7 +118,7 @@ class ScriptableMacroTests: XCTestCase {
         
         // Without overriden type name.
         assertMacroExpansion("""
-        @Scriptable(base: .object, module: .module)
+        @Scriptable(base: .object)
         class TestClass {}
         """, expandedSource: """
         class TestClass {
@@ -123,7 +127,7 @@ class ScriptableMacroTests: XCTestCase {
         }
         
         extension TestClass: PythonBindable {
-            @MainActor static let pyType: PyType = .make("TestClass", base: .object, module: .module) { type in
+            @MainActor static let pyType: PyType = .make("TestClass", base: .object) { type in
         
                 \(newAndRepr)
                 \(interfaceBegin)
@@ -151,7 +155,7 @@ class ScriptableMacroTests: XCTestCase {
         }
         
         extension TestClass: PythonBindable {
-            @MainActor static let pyType: PyType = .make("TestClass", base: .object, module: Interpreter.main) { type in
+            @MainActor static let pyType: PyType = .make("TestClass", base: .object) { type in
                 \(property("someVariable", python: "someVariable", setter: false))
                 \(newAndRepr)
                 \(interfaceBegin)
@@ -182,7 +186,7 @@ class ScriptableMacroTests: XCTestCase {
         }
         
         extension TestClass: PythonBindable {
-            @MainActor static let pyType: PyType = .make("TestClass", base: .object, module: Interpreter.main) { type in
+            @MainActor static let pyType: PyType = .make("TestClass", base: .object) { type in
                 type.magic("__init__") { argc, argv in
                     __init__(argc, argv, TestClass.init) ||
                     __init__(argc, argv, TestClass.init(number:)) ||
@@ -214,7 +218,7 @@ class ScriptableMacroTests: XCTestCase {
         }
         
         extension TestClass {
-            @MainActor static let pyType: PyType = .make("TestClass", base: .object, module: Interpreter.main) { type in
+            @MainActor static let pyType: PyType = .make("TestClass", base: .object) { type in
         
                 \(newAndRepr)
                 \(interfaceBegin)
@@ -243,7 +247,7 @@ class ScriptableMacroTests: XCTestCase {
         }
         
         extension TestClass: PythonBindable {
-            @MainActor static let pyType: PyType = .make("TestClass", base: .object, module: Interpreter.main) { type in
+            @MainActor static let pyType: PyType = .make("TestClass", base: .object) { type in
                 type.staticFunction("test_function") { argc, argv in
                     PyBind.function(argc, argv, testFunction)
                 }
@@ -282,7 +286,7 @@ class ScriptableMacroTests: XCTestCase {
         }
         
         extension TestClass: PythonBindable {
-            @MainActor static let pyType: PyType = .make("TestClass", base: .object, module: Interpreter.main) { type in
+            @MainActor static let pyType: PyType = .make("TestClass", base: .object) { type in
         
                 \(newAndRepr)
                 \(interfaceBegin)
@@ -317,7 +321,7 @@ class ScriptableMacroTests: XCTestCase {
             }
             
             extension TestClass: PythonBindable {
-                @MainActor static let pyType: PyType = .make("TestClass", base: .object, module: Interpreter.main) { type in
+                @MainActor static let pyType: PyType = .make("TestClass", base: .object) { type in
                     \(property("number", python: "number"))
                     type.function("do_something(self) -> int") {
                         _bind_function($1, doSomething)

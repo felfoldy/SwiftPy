@@ -20,6 +20,8 @@ class TestClassWithProperties: PythonBindable {
     /// str content
     var content: String = "content"
     
+    static let staticProperty: String = "static"
+    
     init() {}
     
     func changeContent(value: String) { content = value }
@@ -96,6 +98,7 @@ struct ScriptableTests {
     }
     
     @Test func staticFuncTests() async {
+        Interpreter.main.setAttribute("TestClass2", TestClassWithProperties.pyType.object)
         Interpreter.run("TestClass2.log('asd')")
         
         Interpreter.run("tc5 = TestClass2.create()")
@@ -123,6 +126,8 @@ struct ScriptableTests {
     }
     
     @Test func returningArgumentedFunction() async {
+        Interpreter.main.setAttribute("TestClass2", TestClassWithProperties.pyType.object)
+
         await Interpreter.asyncRun("""
         tc8 = TestClass2.create()
         number = await tc8.fetch('4')

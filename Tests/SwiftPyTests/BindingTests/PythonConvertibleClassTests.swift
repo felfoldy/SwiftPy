@@ -15,6 +15,8 @@ final class TestClass {
     /// Just a number.
     var number: Int? = nil
     
+    static let text = "Hello"
+    
     init() {}
     
     init(number: Int) {
@@ -80,6 +82,9 @@ extension TestClass: PythonBindable {
         type.staticFunction("async_create") { argc, argv in
             PyBind.function(argc, argv, asyncCreate)
         }
+
+        text.toPython(type.object?.emplace("text"))
+        
         type.object?.setAttribute("_interface",
             #"""
             class TestClass(builtins.object):
@@ -133,6 +138,10 @@ struct PythonConvertibleClassTests {
         Interpreter.run("del test4")
         Interpreter.run("gc.collect()")
         #expect(obj._pythonCache.reference == nil)
+    }
+    
+    @Test func classAttribute() {
+        #expect(Interpreter.evaluate("TestClass.text") == "Hello")
     }
     
     @Test func createFromPython() throws {
