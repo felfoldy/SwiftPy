@@ -191,4 +191,8 @@ extension AsyncTask {
         self.init(task)
         viewRepresentation = presenting.representation
     }
+    
+    public func untilCompletes() async {
+        await task.value
+    }
 }

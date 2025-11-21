@@ -11,14 +11,6 @@ import pocketpy
 
 @MainActor
 struct InterpreterTests {
-    @Test func createModule() {
-        let newModule = Interpreter.module("newmodule")
-        "content".toPython(newModule?.emplace("something"))
-        
-        Interpreter.run("import newmodule")
-        #expect(Interpreter.evaluate("newmodule.something") == "content")
-    }
-    
     @Test func loadBundleModule() {
         Interpreter.execute("from rlcompleter import Completer")
         #expect(Interpreter.main["Completer"] != nil)

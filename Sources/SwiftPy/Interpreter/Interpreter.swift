@@ -62,58 +62,12 @@ public final class Interpreter {
         log.info("pocketpy [\(PK_VERSION)] initialized")
         
         let builtins = py_getmodule("builtins")
-        // Remove exit, maybe do a custom action instead later?
         py_deldict(builtins, py_name("exit"))
         
-        // Set os module
-        let os = py_getmodule("os")
-
-        os?.bind("chdir(path: str)") { _, path in
-            PyAPI.returnOrThrow {
-                if let path = String(path) {
-                    FileManager.default.changeCurrentDirectoryPath(path)
-                    return
-                }
-                throw PythonError.AssertionError("Path must be a string.")
-            }
-        }
-
-        os?.bind("getcwd() -> str") { _, _ in
-            PyAPI.return(
-                FileManager.default.currentDirectoryPath
-            )
-        }
-
         // Change default working directory to the applications Documents directory.
         FileManager.default.changeCurrentDirectoryPath(Path.home())
         
-        // Set sys module.
-        let sys = py_getmodule("sys")
-
-        #if os(visionOS)
-        let osName = "visionos"
-        #elseif os(iOS)
-        let osName = UIDevice.current.userInterfaceIdiom == .pad ? "ipados" : "ios"
-        #elseif os(macOS)
-        let osName = "macos"
-        #else
-        let osName = "unknown"
-        #endif
-        
-        let osNameRef = osName.toStack
-        py_setattr(sys, py_name("os"), osNameRef.reference)
-
-        Interpreter.bindModule("interpreter", [
-            ViewRepresentation.self,
-        ])
-        
-        Interpreter.bindModule("asyncio", [
-            AsyncTask.self, AsyncSleep.self,
-        ])
-
-        Interpreter.bindModule("packages", [
-            Path.self,
-        ])
+        Interpreter.bindModules()
 
         if #available(macOS 15, iOS 18, visionOS 2, *) {
             hookStoragesModule()
@@ -169,8 +123,16 @@ public final class Interpreter {
         py_printexc()
         py_clearexc(p0)
         if let lastFailure {
-            throw InterpreterError.runtimeError(lastFailure)
+            throw PythonError.RuntimeError(lastFailure)
         }
+    }
+    
+    @inlinable
+    static func ignoreErrors(_ call: () -> Bool) -> Bool {
+        let p0 = py_peek(0)
+        if call() { return true }
+        py_clearexc(p0)
+        return false
     }
     
     @inlinable
@@ -182,7 +144,7 @@ public final class Interpreter {
         py_printexc()
         py_clearexc(p0)
         if let lastFailure {
-            throw InterpreterError.runtimeError(lastFailure)
+            throw PythonError.RuntimeError(lastFailure)
         }
         return false
     }
@@ -254,7 +216,7 @@ public extension Interpreter {
     /// Interpreter.bindModule("my_module", [MySwiftClass.self])
     /// ```
     /// This exposes `MySwiftClass` to Python and runs `my_module.py` if found in the app bundle.
-    static func bindModule(_ name: String, _ types: [PythonBindable.Type]) {
+    static func bindModule(_ name: String, _ types: [PythonBindable.Type], block: @escaping (PyAPI.Reference?) -> Void = { _ in }) {
         moduleBuilders[name] = { module in
             // Set types.
             for type in types {
@@ -269,6 +231,8 @@ public extension Interpreter {
                 }
             }
 
+            block(module)
+            
             // Add module.__doc__.
             let interpreter = Interpreter.shared.module("interpreter")
             let bind_interfaces = interpreter?["bind_interfaces"]

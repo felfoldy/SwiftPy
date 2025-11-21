@@ -71,14 +71,8 @@ public extension PyType {
     }
     
     @inlinable
-    func function(_ signature: String, block: PyAPI.CFunction) {
-        py_bind(py_tpobject(self), signature, block)
-    }
-    
-    @available(*, deprecated, renamed: "staticFunction")
-    @inlinable
-    func classFunction(_ name: String, _ block: PyAPI.CFunction) {
-        py_bindstaticmethod(self, name, block)
+    func function(_ signature: String, _ docstring: String? = nil, block: PyAPI.CFunction) {
+        py_tpobject(self).bind(signature, docstring: docstring, function: block)
     }
     
     @inlinable

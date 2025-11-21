@@ -90,6 +90,8 @@ public extension PythonConvertible {
 // MARK: Binding helpers.
 
 public extension PythonBindable {
+    typealias object = PyAPI.Reference
+
     @inlinable
     static func __new__(_ argv: PyAPI.Reference?) -> Bool {
         let type = py_totype(argv)
@@ -115,11 +117,16 @@ public extension PythonBindable {
         _ argc: Int32, _ argv: PyAPI.Reference?,
         _ initializer: @MainActor (repeat each Arg) throws -> Self
     ) -> Bool {
+        var result: (repeat each Arg)
         do {
-            let result = try PyBind.checkArgs(argc: argc, argv: argv, from: 1) as (repeat each Arg)
-            try initializer(repeat (each result)).storeInPython(argv)
+            result = try PyBind.checkArgs(argc: argc, argv: argv, from: 1) as (repeat each Arg)
+            do {
+                try initializer(repeat (each result)).storeInPython(argv)
+            } catch {
+                // TODO: Should throw the error.
+                return false
+            }
         } catch {
-            // TODO: incorrect when the error thrown by the init itself.
             return false
         }
         

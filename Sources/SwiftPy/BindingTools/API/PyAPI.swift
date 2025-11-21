@@ -94,35 +94,6 @@ public extension PyAPI {
         }
         return PyAPI.returnValue
     }
-    
-    @inlinable
-    @discardableResult
-    @available(*, deprecated, message: "Use function.call() instead.")
-    static func call(_ object: PyAPI.Reference, _ name: String) throws -> PyAPI.Reference? {
-        let functionStack = try object.attribute(name)?.toStack
-        if !py_callable(functionStack?.reference) {
-            throw InterpreterError
-                .notCallable(py_typeof(object).name)
-        }
-        try Interpreter.printErrors {
-            py_call(functionStack?.reference, 0, nil)
-        }
-        return returnValue
-    }
-    
-    /// Calls a function with a given argument.
-    /// - Parameters:
-    ///   - function: Function to call
-    ///   - argument: Argument to pass.
-    /// - Returns: Return value from the function.
-    @inlinable @discardableResult
-    @available(*, deprecated, message: "Use function.call([argument]) instead.")
-    static func call(_ function: PyAPI.Reference?, _ argument: PyAPI.Reference?) throws -> PyAPI.Reference {
-        try Interpreter.printErrors {
-            py_call(function, 1, argument)
-        }
-        return PyAPI.returnValue
-    }
 
     static let pointerSize = Int32(MemoryLayout<UnsafeRawPointer>.size)
 }
@@ -138,10 +109,10 @@ public extension Interpreter {
             return PyAPI.returnValue
         }
 
-        return py_newmodule(name)
+        return nil
     }
 
-    /// Returns the module with the given name. If it can't find it, tries to import it. If can't import it it will created.
+    /// Returns the module with the given name. If it can't find it, tries to import it.
     /// - Parameter name: Module name for example: `__main__`
     /// - Returns: Module reference.
     @inlinable static func module(_ name: String) -> PyAPI.Reference? {
@@ -263,6 +234,14 @@ public extension PyAPI.Reference {
     }
     
     @inlinable
+    func attributeOrNil(_ name: String) -> PyAPI.Reference? {
+        let hasError = Interpreter.ignoreErrors {
+            py_getattr(self, py_name(name))
+        }
+        return !hasError ? nil : PyAPI.returnValue
+    }
+    
+    @inlinable
     func castAttribute<Result: PythonConvertible>(_ name: String) throws -> Result {
         let ref = try attribute(name)?.toStack
         return try Result.cast(ref?.reference)
@@ -356,8 +335,27 @@ public extension PyAPI.Reference {
     }
     
     @inlinable
-    func bind(_ signature: String, function: PyAPI.CFunction) {
-        py_bind(self, signature, function)
+    func bind(_ signature: String, docstring: String? = nil, function: PyAPI.CFunction) {
+        let temp = py_pushtmp()
+        
+        let doc = docstring?.withCString(strdup)
+        let name = py_newfunction(temp, signature, function, doc, -1)
+
+        let sigRet = signature.toStack
+        py_setdict(temp, py_name("_signature"), sigRet.reference)
+        
+        var interface = "def \(signature):"
+        
+        if let docstring {
+            interface += "\n    \"\"\"\(docstring)\"\"\""
+        } else {
+            interface += " ..."
+        }
+        let interfaceRet = interface.toStack
+        py_setdict(temp, py_name("_interface"), interfaceRet.reference)
+        
+        py_setdict(self, name, temp)
+        py_pop()
     }
 
     @inlinable func isType<T: PythonConvertible>(_ type: T.Type) -> Bool {
