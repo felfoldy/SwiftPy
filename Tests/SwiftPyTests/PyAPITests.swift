@@ -46,4 +46,18 @@ struct PyAPITests {
         
         #expect(sum?.reference == 30)
     }
+    
+    @Test func referenceCallThrows() throws {
+        Interpreter.run("""
+        def referenceCallThrows():
+            raise ValueError('incorrect')
+        """)
+        
+        let addFunction = Interpreter.main["referenceCallThrows"]
+        
+        do {
+            try addFunction?.call()
+            throw PythonError.AssertionError("Should not reach here")
+        } catch {}
+    }
 }

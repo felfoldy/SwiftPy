@@ -180,26 +180,27 @@ public extension PyAPI.Reference {
         guard py_callable(self) else {
             throw PythonError.AssertionError("Object is not callable")
         }
+        
+        try Interpreter.printErrors {
+            py_push(self)
 
-        py_push(self)
-
-        if let obj {
-            py_pushtmp().assign(obj)
-        } else {
-            py_pushnil()
-        }
-
-        var argc: UInt16 = 0
-        for arg in args {
-            if let arg {
-                py_pushtmp().assign(arg)
+            if let obj {
+                py_pushtmp().assign(obj)
             } else {
-                py_pushnone()
+                py_pushnil()
             }
-            argc += 1
-        }
 
-        try Interpreter.printErrors { py_vectorcall(argc, 0) }
+            var argc: UInt16 = 0
+            for arg in args {
+                if let arg {
+                    py_pushtmp().assign(arg)
+                } else {
+                    py_pushnone()
+                }
+                argc += 1
+            }
+            return py_vectorcall(argc, 0)
+        }
 
         return PyAPI.returnValue
     }

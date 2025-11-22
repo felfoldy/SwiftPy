@@ -22,7 +22,5 @@ def bind_interfaces(module):
     for name, value in module.__dict__.items():
         if hasattr(value, '_interface'):
             interfaces.append(value._interface)
-            
-    classes = "\n\n\n".join(interfaces)
     
-    module.__doc__ = f"Classes in module {module.__name__}:\n\n{classes}"
+    module.__doc__ = "\n\n\n".join(interfaces)
