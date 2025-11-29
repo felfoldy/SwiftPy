@@ -111,8 +111,12 @@ public final class Interpreter {
             }
         }
 
+        // Read from [current]/site-packages/...
+        if let sitePackage = try? String(contentsOfFile: "\(Path.sitePackages())/\(name)", encoding: .utf8) {
+            return sitePackage
+        }
         // Read from documents/site-packages/...
-        return try? String(contentsOfFile: "\(Path.sitePackages())/\(name)", encoding: .utf8)
+        return try? String(contentsOfFile: "\(Path.cwd())/\(name)", encoding: .utf8)
     }
     
     @inlinable

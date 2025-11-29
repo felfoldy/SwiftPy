@@ -43,7 +43,7 @@ extension Interpreter {
         let os = py_getmodule("os")
 
         os?.bind(
-            "chdir(path: str) -> None",
+            "chdir(path: str | Path) -> None",
             docstring: "Change the current working directory to the specified path."
         ) { _, path in
             PyAPI.returnOrThrow {
@@ -51,6 +51,12 @@ extension Interpreter {
                     FileManager.default.changeCurrentDirectoryPath(path)
                     return
                 }
+
+                if let path = Path(path) {
+                    FileManager.default.changeCurrentDirectoryPath(path.url.path)
+                    return
+                }
+
                 throw PythonError.AssertionError("Path must be a string.")
             }
         }

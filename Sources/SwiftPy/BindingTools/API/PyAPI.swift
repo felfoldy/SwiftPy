@@ -28,11 +28,15 @@ public extension PyAPI {
     static let elementSize = 24
 
     @inlinable
-    static func `return`(_ value: PythonConvertible?) -> Bool {
-        if let value {
-            value.toPython(returnValue)
-        } else {
+    static func `return`(_ value: Any?) -> Bool {
+        guard let value else {
             py_newnone(returnValue)
+            return true
+        }
+        if let pythonValue = value as? PythonConvertible {
+            pythonValue.toPython(returnValue)
+        } else {
+            SwiftObject(value).toPython(returnValue)
         }
         return true
     }

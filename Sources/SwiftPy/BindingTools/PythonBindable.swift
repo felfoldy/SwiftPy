@@ -7,6 +7,7 @@
 
 import pocketpy
 
+@MainActor
 public protocol PythonBindable: AnyObject, PythonConvertible {
     var _pythonCache: PythonBindingCache { get set }
 }
@@ -169,16 +170,29 @@ public extension PythonBindable {
     }
     
     @inlinable
-    static func _bind_getter<Value: PythonConvertible>(_ keypath: KeyPath<Self, Value>, _ argv: PyAPI.Reference?) -> Bool {
+    static func _bind_getter<Value>(_ keypath: KeyPath<Self, Value>, _ argv: PyAPI.Reference?) -> Bool {
         PyAPI.return(Self(argv)?[keyPath: keypath])
     }
-    
+
     @inlinable
     static func _bind_setter<Value: PythonConvertible>(_ keypath: ReferenceWritableKeyPath<Self, Value>, _ argv: PyAPI.Reference?) -> Bool {
         PyAPI.returnOrThrow {
             let base = try cast(argv)
-            base[keyPath: keypath] = try PyBind.castArgs(argv: argv, from: 1)
-            return ()
+            base[keyPath: keypath] = try Value.cast(argv, 1)
+            return
+        }
+    }
+    
+    @inlinable
+    static func _bind_setter<Value>(_ keypath: ReferenceWritableKeyPath<Self, Value>, _ argv: PyAPI.Reference?) -> Bool {
+        PyAPI.returnOrThrow {
+            let anyValue = try SwiftObject.cast(argv, 1).value
+            guard let value = anyValue as? Value else {
+                throw PythonError.TypeError("Expected SwiftObject[\(Value.self)] at position \(1)")
+            }
+            let base = try cast(argv)
+            base[keyPath: keypath] = value
+            return
         }
     }
     

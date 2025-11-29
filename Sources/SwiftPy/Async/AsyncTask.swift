@@ -179,7 +179,7 @@ extension AsyncTask {
 
                 return result
             } catch {
-                log.critical(error.localizedDescription)
+                Interpreter.output.stderr(error.localizedDescription)
                 context?.completion()
 
                 return nil
