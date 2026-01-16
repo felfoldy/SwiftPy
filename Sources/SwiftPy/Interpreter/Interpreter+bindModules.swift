@@ -18,7 +18,10 @@ extension Interpreter {
         
         Interpreter.bindModule("interpreter", [
             ViewRepresentation.self,
-        ])
+        ]) { module in
+            let builtins = py_getmodule("builtins")
+            builtins?["dir"]?.assign(module?["dir"])
+        }
 
         Interpreter.bindModule("asyncio", [
             AsyncTask.self,

@@ -11,12 +11,16 @@ import Foundation
 public final class Path {
     public var url: URL
 
-    public init(path: String) throws {
-        let home = URL(string: Path.cwd())
-        guard let url = home?.appendingPathComponent(path) else {
+    internal init(url: URL?) throws {
+        guard let url else {
             throw PythonError.ValueError("Path not found")
         }
         self.url = url
+    }
+    
+    public convenience init(path: String) throws {
+        let home = URL(string: Path.cwd())
+        try self.init(url: home?.appendingPathComponent(path))
     }
 
     /// Create a new directory at this given path.
@@ -46,5 +50,12 @@ public final class Path {
     /// Returns a Boolean value that indicates whether a file or directory exists at a specified path.
     public static func exists(path: String) -> Bool {
         FileManager.default.fileExists(atPath: path)
+    }
+
+    func __truediv__(_ other: String) throws -> Path {
+        guard #available(iOS 16.0, macOS 13.0, *) else {
+            throw PythonError.NotImplementedError("__truediv__")
+        }
+        return try Path(url: url.appending(path: other))
     }
 }

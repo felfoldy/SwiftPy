@@ -7,11 +7,13 @@
 
 import Foundation
 
-open class WrappedObject<Value>: CustomStringConvertible {
+@MainActor
+open class WrappedObject<Value>: @MainActor CustomStringConvertible, Sendable {
     /// Attribute binder.
+    @MainActor
     @propertyWrapper
     public struct Attribute<ProxyValue> {
-        @available(*, unavailable, message: "@ValueProxy can only be applied to classes")
+        @available(*, unavailable, message: "@Attribute can only be applied to classes")
         public var wrappedValue: ProxyValue {
             get { fatalError() }
             set { fatalError() }
@@ -47,7 +49,7 @@ open class WrappedObject<Value>: CustomStringConvertible {
         self.value = value
     }
     
-    public var description: String {
+    @objc open var description: String {
         String(describing: value)
     }
 }
