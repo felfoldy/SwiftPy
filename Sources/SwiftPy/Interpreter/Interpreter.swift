@@ -204,44 +204,8 @@ public extension Interpreter {
         return [String](result) ?? []
     }
 
-    /// Registers a new Python module by binding Swift types and loading optional source code.
-    ///
-    /// - Parameters:
-    ///   - name: The name of the module to register.
-    ///   - types: An array of types conforming to ``PythonBindable`` to expose to Python.
-    ///
-    /// This function enables dynamic module creation by:
-    /// 1. Registering Swift types as Python classes.
-    /// 2. Optionally loading and executing a `.py` file with the same name from ``bundles``.
-    /// 3. Setting module-level metadata such as documentation.
-    ///
-    /// ### Example:
-    /// ```swift
-    /// Interpreter.bindModule("my_module", [MySwiftClass.self])
-    /// ```
-    /// This exposes `MySwiftClass` to Python and runs `my_module.py` if found in the app bundle.
+    @available(*, deprecated, renamed: "PyBind.module")
     static func bindModule(_ name: String, _ types: [PythonBindable.Type], block: @escaping (PyAPI.Reference?) -> Void = { _ in }) {
-        moduleBuilders[name] = { module in
-            // Set types.
-            for type in types {
-                let pyType = type.pyType
-                module?.setAttribute(pyType.name, pyType.object)
-            }
-
-            // Load source.
-            if let content = Interpreter.importFromBundle(name: name + ".py") {
-                try? Interpreter.printErrors {
-                    py_exec(content, name, EXEC_MODE, module)
-                }
-            }
-
-            block(module)
-            
-            // Add module.__doc__.
-            let interpreter = Interpreter.shared.module("interpreter")
-            let bind_interfaces = interpreter?["bind_interfaces"]
-            
-            _ = try? bind_interfaces?.call([module])
-        }
+        PyBind.module(name, types, block: block)
     }
 }

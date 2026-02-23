@@ -5,8 +5,51 @@
 //  Created by Tibor Felföldy on 2025-05-07.
 //
 
+import pocketpy
+
 @MainActor
 public enum PyBind {
+    /// Registers a new Python module by binding Swift types and loading optional source code.
+    ///
+    /// - Parameters:
+    ///   - name: The name of the module to register.
+    ///   - types: An array of types conforming to ``PythonBindable`` to expose to Python.
+    ///
+    /// This function enables dynamic module creation by:
+    /// 1. Registering Swift types as Python classes.
+    /// 2. Optionally loading and executing a `.py` file with the same name from ``bundles``.
+    /// 3. Setting module-level metadata such as documentation.
+    ///
+    /// ### Example:
+    /// ```swift
+    /// PyBind.module("my_module", [MySwiftClass.self])
+    /// ```
+    /// This exposes `MySwiftClass` to Python and runs `my_module.py` if found in the app bundle.
+    public static func module(_ name: String, _ types: [PythonBindable.Type], block: @escaping (PyAPI.Reference?) -> Void = { _ in }) {
+        Interpreter.moduleBuilders[name] = { module in
+            // Set types.
+            for type in types {
+                let pyType = type.pyType
+                module?.setAttribute(pyType.name, pyType.object)
+            }
+
+            // Load source.
+            if let content = Interpreter.importFromBundle(name: name + ".py") {
+                try? Interpreter.printErrors {
+                    py_exec(content, name, EXEC_MODE, module)
+                }
+            }
+
+            block(module)
+            
+            // Add module.__doc__.
+            let interpreter = Interpreter.shared.module("interpreter")
+            let bind_interfaces = interpreter?["bind_interfaces"]
+            
+            _ = try? bind_interfaces?.call([module])
+        }
+    }
+    
     @inline(__always)
     public static func checkArgCount(_ got: Int32, expected: Int) throws(PythonError) {
         if expected != got {

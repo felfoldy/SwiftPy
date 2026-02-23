@@ -13,7 +13,7 @@ import pocketpy
 @available(macOS 15, iOS 18, *)
 @MainActor
 func hookStoragesModule() {
-    Interpreter.bindModule("storages", [
+    PyBind.module("storages", [
         ModelContainer.self,
         ModelData.self,
         LookupKeyValue.self,

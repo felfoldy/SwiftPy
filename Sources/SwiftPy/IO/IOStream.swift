@@ -7,11 +7,11 @@
 
 @MainActor
 public protocol IOStream {
-    mutating func input(_ str: String)
-    mutating func stdout(_ str: String)
-    mutating func stderr(_ str: String)
-    mutating func view(_ view: ViewRepresentation)
-    mutating func executionTime(_ time: UInt64)
+    func input(_ str: String)
+    func stdout(_ str: String)
+    func stderr(_ str: String)
+    func view(_ view: ViewRepresentation)
+    func executionTime(_ time: UInt64)
 }
 
 public extension IOStream {

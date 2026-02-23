@@ -16,14 +16,25 @@ extension Interpreter {
         bindOS()
         bindSys()
         
-        Interpreter.bindModule("interpreter", [
+        PyBind.module("interpreter", [
             ViewRepresentation.self,
         ]) { module in
             let builtins = py_getmodule("builtins")
             builtins?["dir"]?.assign(module?["dir"])
+            
+            module?.bind(
+                "host(name: str) -> None"
+            ) { _, argv in
+                PyAPI.returnOrThrow {
+                    let name = try String.cast(argv)
+                    let remote = RemoteIOStream(name: name)
+                    Interpreter.output = MultiIOStream(streams: [Interpreter.output, remote])
+                    return .none
+                }
+            }
         }
 
-        Interpreter.bindModule("asyncio", [
+        PyBind.module("asyncio", [
             AsyncTask.self,
         ]) { module in
             module?.bind(
@@ -37,8 +48,12 @@ extension Interpreter {
             }
         }
 
-        Interpreter.bindModule("pathlib", [
+        PyBind.module("pathlib", [
             Path.self,
+        ])
+
+        PyBind.module("p2p", [
+            Peer.self,
         ])
     }
     
