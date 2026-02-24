@@ -29,8 +29,8 @@ public class Peer: NSObject {
     public init(name: String) {
         id = MCPeerID(displayName: name)
         session = MCSession(peer: id)
-        advertiser = MCNearbyServiceAdvertiser(peer: id, discoveryInfo: nil, serviceType: "PocketPython")
-        browser = MCNearbyServiceBrowser(peer: id, serviceType: "PocketPython")
+        advertiser = MCNearbyServiceAdvertiser(peer: id, discoveryInfo: nil, serviceType: "pocketpy")
+        browser = MCNearbyServiceBrowser(peer: id, serviceType: "pocketpy")
 
         super.init()
 
