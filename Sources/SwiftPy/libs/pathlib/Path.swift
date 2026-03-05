@@ -19,8 +19,8 @@ public final class Path {
     }
     
     public convenience init(path: String) throws {
-        let home = URL(string: Path.cwd())
-        try self.init(url: home?.appendingPathComponent(path))
+        let url = URL(filePath: path, relativeTo: .currentDirectory())
+        try self.init(url: url)
     }
 
     /// Create a new directory at this given path.
@@ -30,12 +30,12 @@ public final class Path {
 
     /// Documents directory.
     public static func home() -> String {
-        FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0].path
+        URL.documentsDirectory.path
     }
     
     /// The path to the program’s current directory.
-    public static func cwd() -> String {
-        FileManager.default.currentDirectoryPath
+    public static func cwd() throws -> Path {
+        try Path(url: .currentDirectory())
     }
     
     /// Documents/site-packges directory.
@@ -53,9 +53,12 @@ public final class Path {
     }
 
     func __truediv__(_ other: String) throws -> Path {
-        guard #available(iOS 16.0, macOS 13.0, *) else {
-            throw PythonError.NotImplementedError("__truediv__")
-        }
-        return try Path(url: url.appending(path: other))
+        try Path(url: url.appending(path: other))
+    }
+}
+
+extension Path: CustomStringConvertible {
+    public var description: String {
+        url.path
     }
 }

@@ -5,7 +5,7 @@ import CompilerPluginSupport
 
 let package = Package(
     name: "SwiftPy",
-    platforms: [.macOS(.v11), .iOS(.v14), .visionOS(.v1)],
+    platforms: [.macOS(.v13), .iOS(.v16), .visionOS(.v1)],
     products: [
         .library(
             name: "SwiftPy",
