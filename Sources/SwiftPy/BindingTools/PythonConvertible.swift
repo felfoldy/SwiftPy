@@ -131,7 +131,7 @@ extension Float: PythonConvertible {
     }
 
     @inlinable public static func fromPython(_ reference: PyAPI.Reference) -> Float {
-        Float(py_tofloat(reference))
+        Float(Double.fromPython(reference))
     }
 }
 

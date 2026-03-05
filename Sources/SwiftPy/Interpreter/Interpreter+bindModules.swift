@@ -23,7 +23,8 @@ extension Interpreter {
             builtins?["dir"]?.assign(module?["dir"])
             
             module?.bind(
-                "host(name: str) -> None"
+                "host(name: str) -> None",
+                docstring: "Hosts the remote Python interpreter on this device."
             ) { _, argv in
                 PyAPI.returnOrThrow {
                     let name = try String.cast(argv)

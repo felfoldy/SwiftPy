@@ -26,7 +26,7 @@ class TestClass4 {
 @MainActor
 struct BindInterfacesTests {
     init() {
-        Interpreter.bindModule("test", [
+        PyBind.module("test", [
             TestClass3.self,
             TestClass4.self
         ])

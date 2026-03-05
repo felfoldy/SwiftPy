@@ -21,6 +21,12 @@ struct ConversionTests {
         #expect(Interpreter.evaluate("test_bytes.decode()") == "Hello")
     }
     
+    @Test func floatCastFromInt() throws {
+        Interpreter.run("floatCastFromInt = 3")
+        let number = try Float.cast(.main["floatCastFromInt"])
+        #expect(number == 3.0)
+    }
+    
     @Test func dataFromPython() throws {
         let data: Data = try #require(Interpreter.evaluate("b'test'"))
         
