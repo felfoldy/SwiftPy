@@ -101,6 +101,11 @@ public class AsyncTask: ViewRepresentable {
                         if let task = AsyncTask(stack.reference) {
                             Interpreter.output.view(task.representation)
                             _ = await task.task.value
+
+                            // Fix a loop if any child task fails.
+                            if AsyncContext.current == nil {
+                                task.isDone = true
+                            }
                         } else {
                             try await Task.sleep(nanoseconds: 1)
                         }
