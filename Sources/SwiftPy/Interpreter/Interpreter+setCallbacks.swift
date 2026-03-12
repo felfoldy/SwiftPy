@@ -51,9 +51,9 @@ extension Interpreter {
         }
         
         py_callbacks().pointee.displayhook = { obj in
-            guard let obj else { return false }
+            if py_istype(obj, .None) { return true }
             
-            if let view = obj.view {
+            if let view = obj?.view {
                 Interpreter.output.view(view)
                 return true
             }
