@@ -8,10 +8,10 @@
 
 // clang-format off
 
-#define PK_VERSION				"2.1.3"
+#define PK_VERSION				"2.1.6"
 #define PK_VERSION_MAJOR            2
 #define PK_VERSION_MINOR            1
-#define PK_VERSION_PATCH            3
+#define PK_VERSION_PATCH            6
 
 /*************** feature settings ***************/
 #ifndef PK_ENABLE_OS                // can be overridden by cmake
@@ -40,7 +40,7 @@
 
 // GC min threshold
 #ifndef PK_GC_MIN_THRESHOLD         // can be overridden by cmake
-    #define PK_GC_MIN_THRESHOLD     32768
+    #define PK_GC_MIN_THRESHOLD     20000
 #endif
 
 // This is the maximum size of the value stack in py_TValue units
@@ -231,6 +231,7 @@ typedef union c11_color32 {
         unsigned char a;
     };
     unsigned char data[4];
+    uint32_t u32;
 } c11_color32;
 
 
@@ -280,6 +281,7 @@ typedef struct c11_sv {
 
 #define PY_RAISE
 #define PY_RETURN
+#define PY_MAYBENULL
 
 /// A generic reference to a python object.
 typedef py_TValue* py_Ref;
@@ -310,7 +312,7 @@ typedef struct py_Callbacks {
     /// Used by `__import__` to load a source module.
     char* (*importfile)(const char*);
     /// Called before `importfile` to lazy-import a C module.
-    py_GlobalRef (*lazyimport)(const char*);
+    PY_MAYBENULL py_GlobalRef (*lazyimport)(const char*);
     /// Used by `print` to output a string.
     void (*print)(const char*);
     /// Flush the output buffer of `print`.
@@ -318,10 +320,16 @@ typedef struct py_Callbacks {
     /// Used by `input` to get a character.
     int (*getchr)();
     /// Used by `gc.collect()` to mark extra objects for garbage collection.
-    void (*gc_mark)(void (*f)(py_Ref val, void* ctx), void* ctx);
-    
-    void (*displayhook)(py_Ref val);
+    PY_MAYBENULL void (*gc_mark)(void (*f)(py_Ref val, void* ctx), void* ctx);
+    /// Used by `PRINT_EXPR` bytecode.
+    PY_MAYBENULL bool (*displayhook)(py_Ref val) PY_RAISE;
 } py_Callbacks;
+
+/// A struct contains the application-level callbacks.
+typedef struct py_AppCallbacks {
+    void (*on_vm_ctor)(int index);
+    void (*on_vm_dtor)(int index);
+} py_AppCallbacks;
 
 /// Native function signature.
 /// @param argc number of arguments.
@@ -358,6 +366,8 @@ PK_API void* py_getvmctx();
 PK_API void py_setvmctx(void* ctx);
 /// Setup the callbacks for the current VM.
 PK_API py_Callbacks* py_callbacks();
+/// Setup the application callbacks
+PK_API py_AppCallbacks* py_appcallbacks();
 
 /// Set `sys.argv`. Used for storing command-line arguments.
 PK_API void py_sys_setargv(int argc, char** argv);
@@ -1023,6 +1033,8 @@ PK_API void py_profiler_reset();
 PK_API char* py_profiler_report();
 
 /************* Others *************/
+int64_t time_ns();
+int64_t time_monotonic_ns();
 
 /// An utility function to read a line from stdin for REPL.
 PK_API int py_replinput(char* buf, int max_size);
@@ -1096,6 +1108,16 @@ enum py_PredefinedType {
     tp_ImportError,
     tp_AssertionError,
     tp_KeyError,
+    /* stdc */
+    tp_stdc_Memory,
+    tp_stdc_Char, tp_stdc_UChar,
+    tp_stdc_Short, tp_stdc_UShort,
+    tp_stdc_Int, tp_stdc_UInt,
+    tp_stdc_Long, tp_stdc_ULong,
+    tp_stdc_LongLong, tp_stdc_ULongLong,
+    tp_stdc_Float, tp_stdc_Double,
+    tp_stdc_Pointer,
+    tp_stdc_Bool,
     /* vmath */
     tp_vec2,
     tp_vec3,

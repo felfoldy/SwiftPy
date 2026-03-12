@@ -51,11 +51,11 @@ extension Interpreter {
         }
         
         py_callbacks().pointee.displayhook = { obj in
-            guard let obj else { return }
+            guard let obj else { return false }
             
             if let view = obj.view {
                 Interpreter.output.view(view)
-                return
+                return true
             }
 
             do {
@@ -67,6 +67,7 @@ extension Interpreter {
                     Interpreter.output.stdout(str)
                 }
             } catch {}
+            return true
         }
     }
 }

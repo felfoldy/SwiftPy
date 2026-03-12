@@ -37,6 +37,7 @@ void pk__add_module_base64();
 void pk__add_module_importlib();
 void pk__add_module_unicodedata();
 
+void pk__add_module_stdc();
 void pk__add_module_vmath();
 void pk__add_module_array2d();
 void pk__add_module_colorcvt();
@@ -44,17 +45,24 @@ void pk__add_module_colorcvt();
 void pk__add_module_conio();
 void pk__add_module_lz4();
 void pk__add_module_pkpy();
-
-#ifdef PK_BUILD_MODULE_LIBHV
-void pk__add_module_libhv();
-#else
-#define pk__add_module_libhv()
-#endif
+void pk__add_module_picoterm();
 
 #ifdef PK_BUILD_MODULE_CUTE_PNG
 void pk__add_module_cute_png();
 #else
 #define pk__add_module_cute_png()
+#endif
+
+#ifdef PK_BUILD_MODULE_MSGPACK
+void pk__add_module_msgpack();
+#else
+#define pk__add_module_msgpack()
+#endif
+
+#ifdef PK_BUILD_MODULE_PERIPHERY
+void py__add_module_periphery();
+#else
+#define py__add_module_periphery()
 #endif
 
 // objects/base.h
@@ -117,7 +125,7 @@ void NameDict__clear(NameDict* self);
 
 typedef struct PyObject {
     py_Type type;  // we have a duplicated type here for convenience
-    // bool _;
+    uint8_t size_8b;
     bool gc_marked;
     int slots;  // number of slots in the object
     char flex[];
@@ -220,6 +228,7 @@ bool c11__stable_sort(void* ptr,
                       int (*f_lt)(const void* a, const void* b, void* extra),
                       void* extra);
 
+int c11__bit_length(unsigned long x);
 // common/memorypool.h
 
 
@@ -365,20 +374,76 @@ int c11_socket_get_last_error();
 #include <stdatomic.h>
 #include <stdbool.h>
 
-#if __EMSCRIPTEN__ || __APPLE__ || __linux__
+#if __EMSCRIPTEN__ || __APPLE__ || __linux__ || __MINGW32__
 #include <pthread.h>
 #define PK_USE_PTHREADS 1
 typedef pthread_t c11_thrd_t;
 typedef void* c11_thrd_retval_t;
+typedef pthread_mutex_t c11_mutex_t;
+typedef pthread_cond_t c11_cond_t;
 #else
 #include <threads.h>
 #define PK_USE_PTHREADS 0
 typedef thrd_t c11_thrd_t;
 typedef int c11_thrd_retval_t;
+typedef mtx_t c11_mutex_t;
+typedef cnd_t c11_cond_t;
 #endif
 
-bool c11_thrd_create(c11_thrd_t* thrd, c11_thrd_retval_t (*func)(void*), void* arg);
-void c11_thrd_yield();
+typedef c11_thrd_retval_t (*c11_thrd_func_t)(void*);
+
+bool c11_thrd__create(c11_thrd_t* thrd, c11_thrd_func_t func, void* arg);
+void c11_thrd__yield();
+void c11_thrd__join(c11_thrd_t thrd);
+c11_thrd_t c11_thrd__current();
+bool c11_thrd__equal(c11_thrd_t a, c11_thrd_t b);
+
+void c11_mutex__ctor(c11_mutex_t* mutex);
+void c11_mutex__dtor(c11_mutex_t* mutex);
+void c11_mutex__lock(c11_mutex_t* mutex);
+void c11_mutex__unlock(c11_mutex_t* mutex);
+
+void c11_cond__ctor(c11_cond_t* cond);
+void c11_cond__dtor(c11_cond_t* cond);
+void c11_cond__wait(c11_cond_t* cond, c11_mutex_t* mutex);
+void c11_cond__signal(c11_cond_t* cond);
+void c11_cond__broadcast(c11_cond_t* cond);
+
+typedef void (*c11_thrdpool_func_t)(void* arg);
+
+typedef struct c11_thrdpool_tasks {
+    atomic_int sync_val;
+    c11_thrdpool_func_t func;
+    void** args;
+    int length;
+    atomic_int current_index;
+    atomic_int completed_count;
+} c11_thrdpool_tasks;
+
+typedef struct c11_thrdpool_worker {
+    int index;
+    atomic_int* p_ready_workers_num;
+    c11_mutex_t* p_mutex;
+    c11_cond_t* p_cond;
+    c11_thrdpool_tasks* p_tasks;
+    c11_thrd_t thread;
+} c11_thrdpool_worker;
+
+typedef struct c11_thrdpool {
+    int length;
+    atomic_int ready_workers_num;
+
+    c11_thrdpool_worker* workers;
+
+    c11_mutex_t workers_mutex;
+    c11_cond_t workers_cond;
+    c11_thrdpool_tasks tasks;
+} c11_thrdpool;
+
+void c11_thrdpool__ctor(c11_thrdpool* pool, int length);
+void c11_thrdpool__dtor(c11_thrdpool* pool);
+void c11_thrdpool__map(c11_thrdpool* pool, c11_thrdpool_func_t func, void** args, int num_tasks);
+void c11_thrdpool__join(c11_thrdpool* pool);
 
 #endif
 // common/utils.h
@@ -566,6 +631,8 @@ py_Type pk_newtypewithmode(py_Name name,
 // interpreter/types.h
 
 
+#include <stdio.h>
+
 typedef struct {
     uint64_t hash;
     py_TValue key;
@@ -585,6 +652,12 @@ typedef c11_vector List;
 
 void c11_chunked_array2d__mark(void* ud, c11_vector* p_stack);
 void function__gc_mark(void* ud, c11_vector* p_stack);
+
+typedef struct {
+    FILE* file;         // cute_png will cast the whole userdata to FILE**
+    const char* path;
+    const char* mode;
+} io_FileIO;
 
 // objects/bintree.h
 
@@ -885,7 +958,7 @@ IntParsingResult c11__parse_uint(c11_sv text, int64_t* out, int base);
 
 #define kPoolArenaSize (120 * 1024)
 #define kMultiPoolCount 5
-#define kPoolMaxBlockSize (32 * kMultiPoolCount)
+// #define kPoolMaxBlockSize (32 * kMultiPoolCount)
 
 typedef struct PoolArena {
     int block_size;
@@ -902,7 +975,7 @@ typedef struct PoolArena {
 
 typedef struct Pool {
     c11_vector /* PoolArena* */ arenas;
-    c11_vector /* PoolArena* */ no_free_arenas;
+    int available_index;
     int block_size;
 } Pool;
 
@@ -911,30 +984,60 @@ typedef struct MultiPool {
 } MultiPool;
 
 void* MultiPool__alloc(MultiPool* self, int size);
-int MultiPool__sweep_dealloc(MultiPool* self);
+int MultiPool__sweep_dealloc(MultiPool* self, int* out_types);
 void MultiPool__ctor(MultiPool* self);
 void MultiPool__dtor(MultiPool* self);
+size_t MultiPool__total_allocated_bytes(MultiPool* self);
 c11_string* MultiPool__summary(MultiPool* self);
 // interpreter/heap.h
 
+
+#include <time.h>
 
 typedef struct ManagedHeap {
     MultiPool small_objects;
     c11_vector /* PyObject_p */ large_objects;
     c11_vector /* PyObject_p */ gc_roots;
+    size_t large_total_size;
 
     int freed_ma[3];
     int gc_threshold;  // threshold for gc_counter
     int gc_counter;    // objects created since last gc
     bool gc_enabled;
+    py_TValue debug_callback;
 } ManagedHeap;
+
+typedef struct {
+    int64_t start_ns;
+    int64_t mark_end_ns;
+    int64_t swpet_end_ns;
+
+    int types_length;
+    int* small_types;
+    int* large_types;
+
+    int small_freed;
+    int large_freed;
+
+    struct {
+        int before;
+        int after;
+        int upper;
+        int lower;
+        int avg_freed;
+        float free_ratio;
+    } auto_thres;
+} ManagedHeapSwpetInfo;
 
 void ManagedHeap__ctor(ManagedHeap* self);
 void ManagedHeap__dtor(ManagedHeap* self);
 
-void ManagedHeap__collect_if_needed(ManagedHeap* self);
+ManagedHeapSwpetInfo* ManagedHeapSwpetInfo__new();
+void ManagedHeapSwpetInfo__delete(ManagedHeapSwpetInfo* self);
+
+int ManagedHeap__collect_hint(ManagedHeap* self);
 int ManagedHeap__collect(ManagedHeap* self);
-int ManagedHeap__sweep(ManagedHeap* self);
+int ManagedHeap__sweep(ManagedHeap* self, ManagedHeapSwpetInfo* out_info);
 
 #define ManagedHeap__new(self, type, slots, udsize)                                                \
     ManagedHeap__gcnew((self), (type), (slots), (udsize))
@@ -2200,6 +2303,7 @@ typedef struct VM {
 
 void VM__ctor(VM* self);
 void VM__dtor(VM* self);
+int VM__index(VM* self);
 
 void VM__push_frame(VM* self, py_Frame* frame);
 void VM__pop_frame(VM* self);
@@ -2535,14 +2639,6 @@ static PoolArena* PoolArena__new(int block_size) {
     return self;
 }
 
-static void PoolArena__delete(PoolArena* self) {
-    for(int i = 0; i < self->block_count; i++) {
-        PyObject* obj = (PyObject*)(self->data + i * self->block_size);
-        if(obj->type != 0) PyObject__dtor(obj);
-    }
-    PK_FREE(self);
-}
-
 static void* PoolArena__alloc(PoolArena* self) {
     assert(self->unused_length > 0);
     int index = self->unused[self->unused_length - 1];
@@ -2550,8 +2646,8 @@ static void* PoolArena__alloc(PoolArena* self) {
     return self->data + index * self->block_size;
 }
 
-static int PoolArena__sweep_dealloc(PoolArena* self) {
-    int freed = 0;
+static int PoolArena__sweep_dealloc(PoolArena* self, int* out_types) {
+    int unused_length_before = self->unused_length;
     self->unused_length = 0;
     for(int i = 0; i < self->block_count; i++) {
         PyObject* obj = (PyObject*)(self->data + i * self->block_size);
@@ -2562,9 +2658,9 @@ static int PoolArena__sweep_dealloc(PoolArena* self) {
         } else {
             if(!obj->gc_marked) {
                 // not marked, need to free
+                if(out_types) out_types[obj->type]++;
                 PyObject__dtor(obj);
                 obj->type = 0;
-                freed++;
                 self->unused[self->unused_length] = i;
                 self->unused_length++;
             } else {
@@ -2573,85 +2669,92 @@ static int PoolArena__sweep_dealloc(PoolArena* self) {
             }
         }
     }
-    return freed;
+    return self->unused_length - unused_length_before;
 }
 
 static void Pool__ctor(Pool* self, int block_size) {
     c11_vector__ctor(&self->arenas, sizeof(PoolArena*));
-    c11_vector__ctor(&self->no_free_arenas, sizeof(PoolArena*));
+    self->available_index = 0;
     self->block_size = block_size;
 }
 
 static void Pool__dtor(Pool* self) {
-    c11__foreach(PoolArena*, &self->arenas, arena) PoolArena__delete(*arena);
-    c11__foreach(PoolArena*, &self->no_free_arenas, arena) PoolArena__delete(*arena);
+    for(int i = 0; i < self->arenas.length; i++) {
+        PoolArena* arena = c11__getitem(PoolArena*, &self->arenas, i);
+        for(int i = 0; i < arena->block_count; i++) {
+            PyObject* obj = (PyObject*)(arena->data + i * self->block_size);
+            if(obj->type != 0) PyObject__dtor(obj);
+        }
+        PK_FREE(arena);
+    }
     c11_vector__dtor(&self->arenas);
-    c11_vector__dtor(&self->no_free_arenas);
 }
 
 static void* Pool__alloc(Pool* self) {
     PoolArena* arena;
-    if(self->arenas.length == 0) {
+    if(self->available_index < self->arenas.length) {
+        arena = c11__getitem(PoolArena*, &self->arenas, self->available_index);
+    } else {
         arena = PoolArena__new(self->block_size);
         c11_vector__push(PoolArena*, &self->arenas, arena);
-    } else {
-        arena = c11_vector__back(PoolArena*, &self->arenas);
+        self->available_index = self->arenas.length - 1;
     }
     void* ptr = PoolArena__alloc(arena);
-    if(arena->unused_length == 0) {
-        c11_vector__pop(&self->arenas);
-        c11_vector__push(PoolArena*, &self->no_free_arenas, arena);
-    }
+    if(arena->unused_length == 0) self->available_index++;
     return ptr;
 }
 
-static int Pool__sweep_dealloc(Pool* self, c11_vector* arenas, c11_vector* no_free_arenas) {
-    c11_vector__clear(arenas);
-    c11_vector__clear(no_free_arenas);
+static int Pool__sweep_dealloc(Pool* self, int* out_types) {
+    PoolArena** p = self->arenas.data;
 
     int freed = 0;
     for(int i = 0; i < self->arenas.length; i++) {
-        PoolArena* item = c11__getitem(PoolArena*, &self->arenas, i);
-        assert(item->unused_length > 0);
-        freed += PoolArena__sweep_dealloc(item);
-        if(item->unused_length == item->block_count) {
-            // all free
-            if(arenas->length > 0) {
-                // at least one arena
-                PoolArena__delete(item);
-            } else {
-                // no arena
-                c11_vector__push(PoolArena*, arenas, item);
-            }
-        } else {
-            // some free
-            c11_vector__push(PoolArena*, arenas, item);
-        }
+        freed += PoolArena__sweep_dealloc(p[i], out_types);
     }
-    for(int i = 0; i < self->no_free_arenas.length; i++) {
-        PoolArena* item = c11__getitem(PoolArena*, &self->no_free_arenas, i);
-        freed += PoolArena__sweep_dealloc(item);
-        if(item->unused_length == 0) {
-            // still no free
-            c11_vector__push(PoolArena*, no_free_arenas, item);
-        } else {
-            if(item->unused_length == item->block_count) {
-                // all free
-                PoolArena__delete(item);
-            } else {
-                // some free
-                c11_vector__push(PoolArena*, arenas, item);
-            }
+
+    // move arenas with `unused_length == 0` to the front
+    int j = 0;
+    for(int i = 0; i < self->arenas.length; i++) {
+        if(p[i]->unused_length == 0) {
+            PoolArena* tmp = p[i];
+            p[i] = p[j];
+            p[j] = tmp;
+            j++;
         }
     }
 
-    c11_vector__swap(&self->arenas, arenas);
-    c11_vector__swap(&self->no_free_arenas, no_free_arenas);
+    // move arenas with `unused_length < block_count` to the front
+    int k = j;
+    for(int i = j; i < self->arenas.length; i++) {
+        if(p[i]->unused_length < p[i]->block_count) {
+            PoolArena* tmp = p[i];
+            p[i] = p[k];
+            p[k] = tmp;
+            k++;
+        }
+    }
+
+    // free excess free arenas
+    int free_quota = self->arenas.length / 2;
+    int min_length = c11__max(free_quota, j + 1);
+    while(self->arenas.length > min_length) {
+        PoolArena* back_arena = c11_vector__back(PoolArena*, &self->arenas);
+        if(back_arena->unused_length == back_arena->block_count) {
+            PK_FREE(back_arena);
+            c11_vector__pop(&self->arenas);
+        } else {
+            break;
+        }
+    }
+
+    // [[0, 0, 0, 0, 0, 1], 1, 1, 1, 2, 2]
+    //                  ^j=5         ^k
+    self->available_index = j;
     return freed;
 }
 
 void* MultiPool__alloc(MultiPool* self, int size) {
-    if(size == 0) return NULL;
+    assert(size > 0);
     int index = (size - 1) >> 5;
     if(index < kMultiPoolCount) {
         Pool* pool = &self->pools[index];
@@ -2660,18 +2763,12 @@ void* MultiPool__alloc(MultiPool* self, int size) {
     return NULL;
 }
 
-int MultiPool__sweep_dealloc(MultiPool* self) {
-    c11_vector arenas;
-    c11_vector no_free_arenas;
-    c11_vector__ctor(&arenas, sizeof(PoolArena*));
-    c11_vector__ctor(&no_free_arenas, sizeof(PoolArena*));
+int MultiPool__sweep_dealloc(MultiPool* self, int* out_types) {
     int freed = 0;
     for(int i = 0; i < kMultiPoolCount; i++) {
         Pool* item = &self->pools[i];
-        freed += Pool__sweep_dealloc(item, &arenas, &no_free_arenas);
+        freed += Pool__sweep_dealloc(item, out_types);
     }
-    c11_vector__dtor(&arenas);
-    c11_vector__dtor(&no_free_arenas);
     return freed;
 }
 
@@ -2687,42 +2784,76 @@ void MultiPool__dtor(MultiPool* self) {
     }
 }
 
+size_t MultiPool__total_allocated_bytes(MultiPool* self) {
+    size_t total = 0;
+    for(int i = 0; i < kMultiPoolCount; i++) {
+        Pool* item = &self->pools[i];
+        total += (size_t)item->arenas.length * kPoolArenaSize;
+    }
+    return total;
+}
+
 c11_string* MultiPool__summary(MultiPool* self) {
     c11_sbuf sbuf;
     c11_sbuf__ctor(&sbuf);
+    int arena_count = 0;
+    char buf[256];
     for(int i = 0; i < kMultiPoolCount; i++) {
         Pool* item = &self->pools[i];
-        int total_bytes = (item->arenas.length + item->no_free_arenas.length) * kPoolArenaSize;
+        arena_count += item->arenas.length;
+        int total_bytes = item->arenas.length * kPoolArenaSize;
         int used_bytes = 0;
         for(int j = 0; j < item->arenas.length; j++) {
             PoolArena* arena = c11__getitem(PoolArena*, &item->arenas, j);
             used_bytes += (arena->block_count - arena->unused_length) * arena->block_size;
         }
-        used_bytes += item->no_free_arenas.length * kPoolArenaSize;
         float used_pct = (float)used_bytes / total_bytes * 100;
-        char buf[256];
+        if(total_bytes == 0) used_pct = 0.0f;
         snprintf(buf,
                  sizeof(buf),
-                 "Pool<%d>: len(arenas)=%d, len(no_free_arenas)=%d, %d/%d (%.1f%% used)",
+                 "Pool %3d: len(arenas)=%d (%d full), size=%d/%d (%.1f%% used)\n",
                  item->block_size,
                  item->arenas.length,
-                 item->no_free_arenas.length,
+                 item->available_index,
                  used_bytes,
                  total_bytes,
                  used_pct);
         c11_sbuf__write_cstr(&sbuf, buf);
-        c11_sbuf__write_char(&sbuf, '\n');
     }
+    long long total_size = arena_count * kPoolArenaSize;
+    double total_size_mb = (long long)(total_size / 1024) / 1024.0;
+    snprintf(buf, sizeof(buf), "Total: %.2f MB\n", total_size_mb);
+    c11_sbuf__write_cstr(&sbuf, buf);
     return c11_sbuf__submit(&sbuf);
 }
 
 // src/interpreter/heap.c
 #include <assert.h>
 
+static uint8_t encode_size_8b(int size, int* out_size) {
+    int bit_length = c11__bit_length(size);
+    int min_val = 1 << (bit_length - 1);
+    int gap = min_val;
+    float ratio = (float)(size - min_val) / gap;
+    int ratio_3bit = (int)(ratio * 7.999f);
+    *out_size = min_val + (int)(gap * ((float)ratio_3bit / 7.999f));
+    return (uint8_t)((bit_length << 3) | ratio_3bit);
+}
+
+static int decode_size_8b(uint8_t byte) {
+    int bit_length = byte >> 3;
+    int ratio_3bit = byte & 0x07;
+    int min_val = 1 << (bit_length - 1);
+    int gap = min_val;
+    float ratio = (float)ratio_3bit / 7.999f;
+    return min_val + (int)(gap * ratio);
+}
+
 void ManagedHeap__ctor(ManagedHeap* self) {
     MultiPool__ctor(&self->small_objects);
     c11_vector__ctor(&self->large_objects, sizeof(PyObject*));
     c11_vector__ctor(&self->gc_roots, sizeof(PyObject*));
+    self->large_total_size = 0;
 
     for(int i = 0; i < c11__count_array(self->freed_ma); i++) {
         self->freed_ma[i] = PK_GC_MIN_THRESHOLD;
@@ -2730,6 +2861,7 @@ void ManagedHeap__ctor(ManagedHeap* self) {
     self->gc_threshold = PK_GC_MIN_THRESHOLD;
     self->gc_counter = 0;
     self->gc_enabled = true;
+    self->debug_callback = *py_None();
 }
 
 void ManagedHeap__dtor(ManagedHeap* self) {
@@ -2745,35 +2877,151 @@ void ManagedHeap__dtor(ManagedHeap* self) {
     c11_vector__dtor(&self->gc_roots);
 }
 
-void ManagedHeap__collect_if_needed(ManagedHeap* self) {
-    if(!self->gc_enabled) return;
-    if(self->gc_counter < self->gc_threshold) return;
-    int freed = ManagedHeap__collect(self);
+static void ManagedHeap__fire_debug_callback_start(ManagedHeap* self) {
+    py_push(&self->debug_callback);
+    py_pushnil();
+    py_newstr(py_pushtmp(), "start");
+    py_newstr(py_pushtmp(), "");
+    bool ok = py_vectorcall(2, 0);
+    if(!ok) {
+        char* msg = py_formatexc();
+        c11__abort("gc_debug_callback error!!\n%s", msg);
+    }
+}
+
+static void ManagedHeap__fire_debug_callback_stop(ManagedHeap* self,
+                                                  ManagedHeapSwpetInfo* out_info) {
+    assert(out_info != NULL);
+
+    c11_sbuf buf;
+    c11_sbuf__ctor(&buf);
+
+    const int64_t NANOS_PER_MS = 1000000000 / 1000;
+    const char* DIVIDER = "------------------------------------------------------------\n";
+
+    int64_t mark_ms = (out_info->mark_end_ns - out_info->start_ns) / NANOS_PER_MS;
+    int64_t swpet_ms = (out_info->swpet_end_ns - out_info->mark_end_ns) / NANOS_PER_MS;
+
+    c11_sbuf__write_cstr(&buf, DIVIDER);
+    pk_sprintf(&buf, "start:        %f\n", out_info->start_ns / 1e9);
+    pk_sprintf(&buf, "mark_ms:      %i\n", (py_i64)mark_ms);
+    pk_sprintf(&buf, "swpet_ms:     %i\n", (py_i64)swpet_ms);
+    pk_sprintf(&buf, "total_ms:     %i\n", (py_i64)(mark_ms + swpet_ms));
+    c11_sbuf__write_cstr(&buf, DIVIDER);
+    pk_sprintf(&buf, "types_length: %d\n", out_info->types_length);
+    pk_sprintf(&buf, "small_freed:  %d\n", out_info->small_freed);
+    pk_sprintf(&buf, "large_freed:  %d\n", out_info->large_freed);
+    c11_sbuf__write_cstr(&buf, DIVIDER);
+
+    if(out_info->small_freed != 0 || out_info->large_freed != 0) {
+        char line_buf[256];
+        for(int i = 0; i < out_info->types_length; i++) {
+            const char* type_name = py_tpname(i);
+            int s_freed = out_info->small_types[i];
+            int l_freed = out_info->large_types[i];
+            if(s_freed == 0 && l_freed == 0) continue;
+            snprintf(line_buf,
+                     sizeof(line_buf),
+                     "[%-24s] small: %6d  large: %6d\n",
+                     type_name,
+                     s_freed,
+                     l_freed);
+            c11_sbuf__write_cstr(&buf, line_buf);
+        }
+        c11_sbuf__write_cstr(&buf, DIVIDER);
+    }
+
+    pk_sprintf(&buf, "auto_thres.before:        %d\n", out_info->auto_thres.before);
+    pk_sprintf(&buf, "auto_thres.after:         %d\n", out_info->auto_thres.after);
+    pk_sprintf(&buf, "auto_thres.upper:         %d\n", out_info->auto_thres.upper);
+    pk_sprintf(&buf, "auto_thres.lower:         %d\n", out_info->auto_thres.lower);
+    pk_sprintf(&buf, "auto_thres.avg_freed:     %d\n", out_info->auto_thres.avg_freed);
+    pk_sprintf(&buf, "auto_thres.free_ratio:    %f\n", out_info->auto_thres.free_ratio);
+    c11_sbuf__write_cstr(&buf, DIVIDER);
+
+    py_push(&self->debug_callback);
+    py_pushnil();
+    py_newstr(py_pushtmp(), "stop");
+    py_StackRef arg = py_pushtmp();
+    c11_sbuf__py_submit(&buf, arg);
+    bool ok = py_vectorcall(2, 0);
+    if(!ok) {
+        char* msg = py_formatexc();
+        c11__abort("gc_debug_callback error!!\n%s", msg);
+    }
+}
+
+int ManagedHeap__collect_hint(ManagedHeap* self) {
+    if(self->gc_counter < self->gc_threshold) return 0;
+    self->gc_counter = 0;
+
+    ManagedHeapSwpetInfo* out_info = NULL;
+    if(!py_isnone(&self->debug_callback)) {
+        out_info = ManagedHeapSwpetInfo__new();
+        ManagedHeap__fire_debug_callback_start(self);
+    }
+
+    ManagedHeap__mark(self);
+    if(out_info) out_info->mark_end_ns = time_ns();
+    int freed = ManagedHeap__sweep(self, out_info);
+    if(out_info) out_info->swpet_end_ns = time_ns();
+
     // adjust `gc_threshold` based on `freed_ma`
     self->freed_ma[0] = self->freed_ma[1];
     self->freed_ma[1] = self->freed_ma[2];
     self->freed_ma[2] = freed;
     int avg_freed = (self->freed_ma[0] + self->freed_ma[1] + self->freed_ma[2]) / 3;
-    const int upper = PK_GC_MIN_THRESHOLD * 16;
+    const int upper = PK_GC_MIN_THRESHOLD * 8;
     const int lower = PK_GC_MIN_THRESHOLD / 2;
     float free_ratio = (float)avg_freed / self->gc_threshold;
     int new_threshold = self->gc_threshold * (1.5f / free_ratio);
-    // printf("gc_threshold=%d, avg_freed=%d, new_threshold=%d\n", self->gc_threshold, avg_freed,
-    // new_threshold);
+    if(out_info) {
+        out_info->auto_thres.before = self->gc_threshold;
+        out_info->auto_thres.after = new_threshold;
+        out_info->auto_thres.upper = upper;
+        out_info->auto_thres.lower = lower;
+        out_info->auto_thres.avg_freed = avg_freed;
+        out_info->auto_thres.free_ratio = free_ratio;
+    }
     self->gc_threshold = c11__min(c11__max(new_threshold, lower), upper);
+
+    if(!py_isnone(&self->debug_callback)) {
+        ManagedHeap__fire_debug_callback_stop(self, out_info);
+        ManagedHeapSwpetInfo__delete(out_info);
+    }
+    return freed;
 }
 
 int ManagedHeap__collect(ManagedHeap* self) {
     self->gc_counter = 0;
+
+    ManagedHeapSwpetInfo* out_info = NULL;
+    if(!py_isnone(&self->debug_callback)) {
+        out_info = ManagedHeapSwpetInfo__new();
+        ManagedHeap__fire_debug_callback_start(self);
+    }
+
     ManagedHeap__mark(self);
-    int freed = ManagedHeap__sweep(self);
-    // printf("GC: collected %d objects\n", freed);
+    if(out_info) out_info->mark_end_ns = time_ns();
+    int freed = ManagedHeap__sweep(self, out_info);
+    if(out_info) out_info->swpet_end_ns = time_ns();
+
+    if(out_info) {
+        out_info->auto_thres.before = self->gc_threshold;
+        out_info->auto_thres.after = self->gc_threshold;
+    }
+
+    if(!py_isnone(&self->debug_callback)) {
+        ManagedHeap__fire_debug_callback_stop(self, out_info);
+        ManagedHeapSwpetInfo__delete(out_info);
+    }
     return freed;
 }
 
-int ManagedHeap__sweep(ManagedHeap* self) {
+int ManagedHeap__sweep(ManagedHeap* self, ManagedHeapSwpetInfo* out_info) {
     // small_objects
-    int small_freed = MultiPool__sweep_dealloc(&self->small_objects);
+    int small_freed =
+        MultiPool__sweep_dealloc(&self->small_objects, out_info ? out_info->small_types : NULL);
     // large_objects
     int large_living_count = 0;
     for(int i = 0; i < self->large_objects.length; i++) {
@@ -2783,6 +3031,8 @@ int ManagedHeap__sweep(ManagedHeap* self) {
             c11__setitem(PyObject*, &self->large_objects, large_living_count, obj);
             large_living_count++;
         } else {
+            if(out_info) out_info->large_types[obj->type]++;
+            self->large_total_size -= decode_size_8b(obj->size_8b);
             PyObject__dtor(obj);
             PK_FREE(obj);
         }
@@ -2790,24 +3040,28 @@ int ManagedHeap__sweep(ManagedHeap* self) {
     // shrink `self->large_objects`
     int large_freed = self->large_objects.length - large_living_count;
     self->large_objects.length = large_living_count;
-    // printf("large_freed=%d\n", large_freed);
-    // printf("small_freed=%d\n", small_freed);
+    if(out_info) {
+        out_info->small_freed = small_freed;
+        out_info->large_freed = large_freed;
+    }
     return small_freed + large_freed;
 }
 
 PyObject* ManagedHeap__gcnew(ManagedHeap* self, py_Type type, int slots, int udsize) {
     assert(slots >= 0 || slots == -1);
-    PyObject* obj;
     // header + slots + udsize
     int size = sizeof(PyObject) + PK_OBJ_SLOTS_SIZE(slots) + udsize;
-    if(size <= kPoolMaxBlockSize) {
-        obj = MultiPool__alloc(&self->small_objects, size);
-        assert(obj != NULL);
-    } else {
+    PyObject* obj = MultiPool__alloc(&self->small_objects, size);
+    uint8_t size_8b = 0;
+    if(obj == NULL) {
         obj = PK_MALLOC(size);
+        int quantized_size;
+        size_8b = encode_size_8b(size, &quantized_size);
+        self->large_total_size += quantized_size;
         c11_vector__push(PyObject*, &self->large_objects, obj);
     }
     obj->type = type;
+    obj->size_8b = size_8b;
     obj->gc_marked = false;
     obj->slots = slots;
 
@@ -3052,6 +3306,7 @@ void VM__ctor(VM* self) {
 
     py_newnotimplemented(py_emplacedict(self->builtins, py_name("NotImplemented")));
 
+    pk__add_module_stdc();
     pk__add_module_vmath();
     pk__add_module_array2d();
     pk__add_module_colorcvt();
@@ -3077,9 +3332,11 @@ void VM__ctor(VM* self) {
 
     pk__add_module_conio();
     pk__add_module_lz4();       // optional
-    pk__add_module_libhv();     // optional
     pk__add_module_cute_png();  // optional
+    pk__add_module_msgpack();   // optional
+    py__add_module_periphery(); // optional
     pk__add_module_pkpy();
+    pk__add_module_picoterm();
 
     // add python builtins
     do {
@@ -3093,9 +3350,19 @@ void VM__ctor(VM* self) {
     } while(0);
 
     self->main = py_newmodule("__main__");
+
+    if(py_appcallbacks()->on_vm_ctor) {
+        int index = VM__index(self);
+        py_appcallbacks()->on_vm_ctor(index);
+    }
 }
 
 void VM__dtor(VM* self) {
+    if(py_appcallbacks()->on_vm_dtor) {
+        int index = VM__index(self);
+        py_appcallbacks()->on_vm_dtor(index);
+    }
+
     // reset traceinfo
     py_sys_settrace(NULL, true);
     LineProfiler__dtor(&self->line_profiler);
@@ -3384,6 +3651,7 @@ FrameResult VM__vectorcall(VM* self, uint16_t argc, uint16_t kwargc, bool opcall
         // [cls, NULL, args..., kwargs...]
         py_Ref new_f = py_tpfindmagic(py_totype(p0), __new__);
         assert(new_f && py_isnil(p0 + 1));
+        bool is_default_new = new_f->type == tp_nativefunc && new_f->_cfunc == pk__object_new;
 
         // prepare a copy of args and kwargs
         int span = self->stack.sp - argv;
@@ -3407,6 +3675,13 @@ FrameResult VM__vectorcall(VM* self, uint16_t argc, uint16_t kwargc, bool opcall
             // [__init__, self, args..., kwargs...]
             if(VM__vectorcall(self, argc, kwargc, false) == RES_ERROR) return RES_ERROR;
             *py_retval() = p0[1];  // restore the new instance
+        } else {
+            if(is_default_new) {
+                if(argc != 0 || kwargc != 0) {
+                    TypeError("%t() takes no arguments", py_totype(p0));
+                    return RES_ERROR;
+                }
+            }
         }
         // reset the stack
         self->stack.sp = p0;
@@ -3489,6 +3764,8 @@ void ManagedHeap__mark(ManagedHeap* self) {
     for(int i = 0; i < c11__count_array(vm->reg); i++) {
         pk__mark_value(&vm->reg[i]);
     }
+    // mark gc debug callback
+    pk__mark_value(&vm->heap.debug_callback);
     // mark user func
     if(vm->callbacks.gc_mark) vm->callbacks.gc_mark(pk__mark_value_func, p_stack);
     /*****************************/
@@ -3694,6 +3971,28 @@ void PyObject__dtor(PyObject* self) {
         NameDict__dtor(dict);
     }
 }
+
+ManagedHeapSwpetInfo* ManagedHeapSwpetInfo__new() {
+    ManagedHeapSwpetInfo* self = py_malloc(sizeof(ManagedHeapSwpetInfo));
+    memset(self, 0, sizeof(ManagedHeapSwpetInfo));
+    self->types_length = pk_current_vm->types.length;
+    self->small_types = py_malloc(sizeof(int) * self->types_length);
+    self->large_types = py_malloc(sizeof(int) * self->types_length);
+    for(int i = 0; i < self->types_length; i++) {
+        self->small_types[i] = 0;
+        self->large_types[i] = 0;
+    }
+    self->start_ns = time_ns();
+    return self;
+}
+
+void ManagedHeapSwpetInfo__delete(ManagedHeapSwpetInfo* self) {
+    py_free(self->small_types);
+    py_free(self->large_types);
+    memset(self, 0, sizeof(ManagedHeapSwpetInfo));
+    py_free(self);
+}
+
 // src/interpreter/typeinfo.c
 #include <assert.h>
 
@@ -4042,12 +4341,21 @@ __NEXT_STEP:
             *THIRD() = tmp;
             DISPATCH();
         }
-        case OP_PRINT_EXPR:
-            if(TOP()->type != tp_NoneType) {
-                self->callbacks.displayhook(TOP());
+        case OP_PRINT_EXPR: {
+            if(self->callbacks.displayhook) {
+                bool ok = self->callbacks.displayhook(TOP());
+                if(!ok) goto __ERROR;
+            } else {
+                if(TOP()->type != tp_NoneType) {
+                    bool ok = py_repr(TOP());
+                    if(!ok) goto __ERROR;
+                    self->callbacks.print(py_tostr(&self->last_retval));
+                    self->callbacks.print("\n");
+                }
             }
             POP();
             DISPATCH();
+        }
         /*****************************************/
         case OP_LOAD_CONST: {
             PUSH(c11__at(py_TValue, &frame->co->consts, byte.arg));
@@ -4610,7 +4918,7 @@ __NEXT_STEP:
         }
         /*****************************************/
         case OP_CALL: {
-            ManagedHeap__collect_if_needed(&self->heap);
+            if(self->heap.gc_enabled) ManagedHeap__collect_hint(&self->heap);
             vectorcall_opcall(byte.arg & 0xFF, byte.arg >> 8);
             DISPATCH();
         }
@@ -5326,7 +5634,6 @@ bool pk_format_object(VM* self, py_Ref val, c11_sv spec) {
     return true;
 }
 
-#undef CHECK_RETURN_FROM_EXCEPT_OR_FINALLY
 #undef DISPATCH
 #undef DISPATCH_JUMP
 #undef DISPATCH_JUMP_ABSOLUTE
@@ -5511,6 +5818,7 @@ SourceLocation Frame__source_location(py_Frame* self) {
 
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
+#undef WIN32_LEAN_AND_MEAN
 
 #else
 #include <dlfcn.h>
@@ -6270,7 +6578,7 @@ const char kPythonLibs_functools[] = "class cache:\n    def __init__(self, f):\n
 const char kPythonLibs_heapq[] = "# Heap queue algorithm (a.k.a. priority queue)\ndef heappush(heap, item):\n    \"\"\"Push item onto heap, maintaining the heap invariant.\"\"\"\n    heap.append(item)\n    _siftdown(heap, 0, len(heap)-1)\n\ndef heappop(heap):\n    \"\"\"Pop the smallest item off the heap, maintaining the heap invariant.\"\"\"\n    lastelt = heap.pop()    # raises appropriate IndexError if heap is empty\n    if heap:\n        returnitem = heap[0]\n        heap[0] = lastelt\n        _siftup(heap, 0)\n        return returnitem\n    return lastelt\n\ndef heapreplace(heap, item):\n    \"\"\"Pop and return the current smallest value, and add the new item.\n\n    This is more efficient than heappop() followed by heappush(), and can be\n    more appropriate when using a fixed-size heap.  Note that the value\n    returned may be larger than item!  That constrains reasonable uses of\n    this routine unless written as part of a conditional replacement:\n\n        if item > heap[0]:\n            item = heapreplace(heap, item)\n    \"\"\"\n    returnitem = heap[0]    # raises appropriate IndexError if heap is empty\n    heap[0] = item\n    _siftup(heap, 0)\n    return returnitem\n\ndef heappushpop(heap, item):\n    \"\"\"Fast version of a heappush followed by a heappop.\"\"\"\n    if heap and heap[0] < item:\n        item, heap[0] = heap[0], item\n        _siftup(heap, 0)\n    return item\n\ndef heapify(x):\n    \"\"\"Transform list into a heap, in-place, in O(len(x)) time.\"\"\"\n    n = len(x)\n    # Transform bottom-up.  The largest index there's any point to looking at\n    # is the largest with a child index in-range, so must have 2*i + 1 < n,\n    # or i < (n-1)/2.  If n is even = 2*j, this is (2*j-1)/2 = j-1/2 so\n    # j-1 is the largest, which is n//2 - 1.  If n is odd = 2*j+1, this is\n    # (2*j+1-1)/2 = j so j-1 is the largest, and that's again n//2-1.\n    for i in reversed(range(n//2)):\n        _siftup(x, i)\n\n# 'heap' is a heap at all indices >= startpos, except possibly for pos.  pos\n# is the index of a leaf with a possibly out-of-order value.  Restore the\n# heap invariant.\ndef _siftdown(heap, startpos, pos):\n    newitem = heap[pos]\n    # Follow the path to the root, moving parents down until finding a place\n    # newitem fits.\n    while pos > startpos:\n        parentpos = (pos - 1) >> 1\n        parent = heap[parentpos]\n        if newitem < parent:\n            heap[pos] = parent\n            pos = parentpos\n            continue\n        break\n    heap[pos] = newitem\n\ndef _siftup(heap, pos):\n    endpos = len(heap)\n    startpos = pos\n    newitem = heap[pos]\n    # Bubble up the smaller child until hitting a leaf.\n    childpos = 2*pos + 1    # leftmost child position\n    while childpos < endpos:\n        # Set childpos to index of smaller child.\n        rightpos = childpos + 1\n        if rightpos < endpos and not heap[childpos] < heap[rightpos]:\n            childpos = rightpos\n        # Move the smaller child up.\n        heap[pos] = heap[childpos]\n        pos = childpos\n        childpos = 2*pos + 1\n    # The leaf at pos is empty now.  Put newitem there, and bubble it up\n    # to its final resting place (by sifting its parents down).\n    heap[pos] = newitem\n    _siftdown(heap, startpos, pos)";
 const char kPythonLibs_linalg[] = "from vmath import *";
 const char kPythonLibs_operator[] = "# https://docs.python.org/3/library/operator.html#mapping-operators-to-functions\n\ndef le(a, b): return a <= b\ndef lt(a, b): return a < b\ndef ge(a, b): return a >= b\ndef gt(a, b): return a > b\ndef eq(a, b): return a == b\ndef ne(a, b): return a != b\n\ndef and_(a, b): return a & b\ndef or_(a, b): return a | b\ndef xor(a, b): return a ^ b\ndef invert(a): return ~a\ndef lshift(a, b): return a << b\ndef rshift(a, b): return a >> b\n\ndef is_(a, b): return a is b\ndef is_not(a, b): return a is not b\ndef not_(a): return not a\ndef truth(a): return bool(a)\ndef contains(a, b): return b in a\n\ndef add(a, b): return a + b\ndef sub(a, b): return a - b\ndef mul(a, b): return a * b\ndef truediv(a, b): return a / b\ndef floordiv(a, b): return a // b\ndef mod(a, b): return a % b\ndef pow(a, b): return a ** b\ndef neg(a): return -a\ndef matmul(a, b): return a @ b\n\ndef getitem(a, b): return a[b]\ndef setitem(a, b, c): a[b] = c\ndef delitem(a, b): del a[b]\n\ndef iadd(a, b): a += b; return a\ndef isub(a, b): a -= b; return a\ndef imul(a, b): a *= b; return a\ndef itruediv(a, b): a /= b; return a\ndef ifloordiv(a, b): a //= b; return a\ndef imod(a, b): a %= b; return a\n# def ipow(a, b): a **= b; return a\n# def imatmul(a, b): a @= b; return a\ndef iand(a, b): a &= b; return a\ndef ior(a, b): a |= b; return a\ndef ixor(a, b): a ^= b; return a\ndef ilshift(a, b): a <<= b; return a\ndef irshift(a, b): a >>= b; return a\n";
-const char kPythonLibs_typing[] = "class _Placeholder:\n    def __init__(self, *args, **kwargs):\n        pass\n    def __getitem__(self, *args):\n        return self\n    def __call__(self, *args, **kwargs):\n        return self\n    def __and__(self, other):\n        return self\n    def __or__(self, other):\n        return self\n    def __xor__(self, other):\n        return self\n\n\n_PLACEHOLDER = _Placeholder()\n\nSequence = _PLACEHOLDER\nList = _PLACEHOLDER\nDict = _PLACEHOLDER\nTuple = _PLACEHOLDER\nSet = _PLACEHOLDER\nAny = _PLACEHOLDER\nUnion = _PLACEHOLDER\nOptional = _PLACEHOLDER\nCallable = _PLACEHOLDER\nType = _PLACEHOLDER\nTypeAlias = _PLACEHOLDER\nNewType = _PLACEHOLDER\n\nLiteral = _PLACEHOLDER\nLiteralString = _PLACEHOLDER\n\nIterable = _PLACEHOLDER\nGenerator = _PLACEHOLDER\nIterator = _PLACEHOLDER\n\nHashable = _PLACEHOLDER\n\nTypeVar = _PLACEHOLDER\nSelf = _PLACEHOLDER\n\nProtocol = object\nGeneric = object\nNever = object\n\nTYPE_CHECKING = False\n\n# decorators\noverload = lambda x: x\nfinal = lambda x: x\n\n# exhaustiveness checking\nassert_never = lambda x: x\n\nTypedDict = dict\nNotRequired = _PLACEHOLDER\n";
+const char kPythonLibs_typing[] = "class _Placeholder:\n    def __init__(self, *args, **kwargs):\n        pass\n    def __getitem__(self, *args):\n        return self\n    def __call__(self, *args, **kwargs):\n        return self\n    def __and__(self, other):\n        return self\n    def __or__(self, other):\n        return self\n    def __xor__(self, other):\n        return self\n\n\n_PLACEHOLDER = _Placeholder()\n\nSequence = _PLACEHOLDER\nList = _PLACEHOLDER\nDict = _PLACEHOLDER\nTuple = _PLACEHOLDER\nSet = _PLACEHOLDER\nAny = _PLACEHOLDER\nUnion = _PLACEHOLDER\nOptional = _PLACEHOLDER\nCallable = _PLACEHOLDER\nType = _PLACEHOLDER\nTypeAlias = _PLACEHOLDER\nNewType = _PLACEHOLDER\n\nClassVar = _PLACEHOLDER\n\nLiteral = _PLACEHOLDER\nLiteralString = _PLACEHOLDER\n\nIterable = _PLACEHOLDER\nGenerator = _PLACEHOLDER\nIterator = _PLACEHOLDER\n\nHashable = _PLACEHOLDER\n\nTypeVar = _PLACEHOLDER\nSelf = _PLACEHOLDER\n\nProtocol = object\nGeneric = object\nNever = object\n\nTYPE_CHECKING = False\n\n# decorators\noverload = lambda x: x\nfinal = lambda x: x\n\n# exhaustiveness checking\nassert_never = lambda x: x\n\nTypedDict = dict\nNotRequired = _PLACEHOLDER\n";
 
 const char* load_kPythonLib(const char* name) {
     if (strchr(name, '.') != NULL) return NULL;
@@ -6843,509 +7151,511 @@ const char* c11__search_u32_ranges(int c, const c11_u32_range* p, int n_ranges) 
     return NULL;
 }
 
+// clang-format off
 const static c11_u32_range kLoRanges[] = {
-    {170,    170   },
-    {186,    186   },
-    {443,    443   },
-    {448,    451   },
-    {660,    660   },
-    {1488,   1514  },
-    {1519,   1522  },
-    {1568,   1599  },
-    {1601,   1610  },
-    {1646,   1647  },
-    {1649,   1747  },
-    {1749,   1749  },
-    {1774,   1775  },
-    {1786,   1788  },
-    {1791,   1791  },
-    {1808,   1808  },
-    {1810,   1839  },
-    {1869,   1957  },
-    {1969,   1969  },
-    {1994,   2026  },
-    {2048,   2069  },
-    {2112,   2136  },
-    {2144,   2154  },
-    {2160,   2183  },
-    {2185,   2190  },
-    {2208,   2248  },
-    {2308,   2361  },
-    {2365,   2365  },
-    {2384,   2384  },
-    {2392,   2401  },
-    {2418,   2432  },
-    {2437,   2444  },
-    {2447,   2448  },
-    {2451,   2472  },
-    {2474,   2480  },
-    {2482,   2482  },
-    {2486,   2489  },
-    {2493,   2493  },
-    {2510,   2510  },
-    {2524,   2525  },
-    {2527,   2529  },
-    {2544,   2545  },
-    {2556,   2556  },
-    {2565,   2570  },
-    {2575,   2576  },
-    {2579,   2600  },
-    {2602,   2608  },
-    {2610,   2611  },
-    {2613,   2614  },
-    {2616,   2617  },
-    {2649,   2652  },
-    {2654,   2654  },
-    {2674,   2676  },
-    {2693,   2701  },
-    {2703,   2705  },
-    {2707,   2728  },
-    {2730,   2736  },
-    {2738,   2739  },
-    {2741,   2745  },
-    {2749,   2749  },
-    {2768,   2768  },
-    {2784,   2785  },
-    {2809,   2809  },
-    {2821,   2828  },
-    {2831,   2832  },
-    {2835,   2856  },
-    {2858,   2864  },
-    {2866,   2867  },
-    {2869,   2873  },
-    {2877,   2877  },
-    {2908,   2909  },
-    {2911,   2913  },
-    {2929,   2929  },
-    {2947,   2947  },
-    {2949,   2954  },
-    {2958,   2960  },
-    {2962,   2965  },
-    {2969,   2970  },
-    {2972,   2972  },
-    {2974,   2975  },
-    {2979,   2980  },
-    {2984,   2986  },
-    {2990,   3001  },
-    {3024,   3024  },
-    {3077,   3084  },
-    {3086,   3088  },
-    {3090,   3112  },
-    {3114,   3129  },
-    {3133,   3133  },
-    {3160,   3162  },
-    {3165,   3165  },
-    {3168,   3169  },
-    {3200,   3200  },
-    {3205,   3212  },
-    {3214,   3216  },
-    {3218,   3240  },
-    {3242,   3251  },
-    {3253,   3257  },
-    {3261,   3261  },
-    {3293,   3294  },
-    {3296,   3297  },
-    {3313,   3314  },
-    {3332,   3340  },
-    {3342,   3344  },
-    {3346,   3386  },
-    {3389,   3389  },
-    {3406,   3406  },
-    {3412,   3414  },
-    {3423,   3425  },
-    {3450,   3455  },
-    {3461,   3478  },
-    {3482,   3505  },
-    {3507,   3515  },
-    {3517,   3517  },
-    {3520,   3526  },
-    {3585,   3632  },
-    {3634,   3635  },
-    {3648,   3653  },
-    {3713,   3714  },
-    {3716,   3716  },
-    {3718,   3722  },
-    {3724,   3747  },
-    {3749,   3749  },
-    {3751,   3760  },
-    {3762,   3763  },
-    {3773,   3773  },
-    {3776,   3780  },
-    {3804,   3807  },
-    {3840,   3840  },
-    {3904,   3911  },
-    {3913,   3948  },
-    {3976,   3980  },
-    {4096,   4138  },
-    {4159,   4159  },
-    {4176,   4181  },
-    {4186,   4189  },
-    {4193,   4193  },
-    {4197,   4198  },
-    {4206,   4208  },
-    {4213,   4225  },
-    {4238,   4238  },
-    {4352,   4680  },
-    {4682,   4685  },
-    {4688,   4694  },
-    {4696,   4696  },
-    {4698,   4701  },
-    {4704,   4744  },
-    {4746,   4749  },
-    {4752,   4784  },
-    {4786,   4789  },
-    {4792,   4798  },
-    {4800,   4800  },
-    {4802,   4805  },
-    {4808,   4822  },
-    {4824,   4880  },
-    {4882,   4885  },
-    {4888,   4954  },
-    {4992,   5007  },
-    {5121,   5740  },
-    {5743,   5759  },
-    {5761,   5786  },
-    {5792,   5866  },
-    {5873,   5880  },
-    {5888,   5905  },
-    {5919,   5937  },
-    {5952,   5969  },
-    {5984,   5996  },
-    {5998,   6000  },
-    {6016,   6067  },
-    {6108,   6108  },
-    {6176,   6210  },
-    {6212,   6264  },
-    {6272,   6276  },
-    {6279,   6312  },
-    {6314,   6314  },
-    {6320,   6389  },
-    {6400,   6430  },
-    {6480,   6509  },
-    {6512,   6516  },
-    {6528,   6571  },
-    {6576,   6601  },
-    {6656,   6678  },
-    {6688,   6740  },
-    {6917,   6963  },
-    {6981,   6988  },
-    {7043,   7072  },
-    {7086,   7087  },
-    {7098,   7141  },
-    {7168,   7203  },
-    {7245,   7247  },
-    {7258,   7287  },
-    {7401,   7404  },
-    {7406,   7411  },
-    {7413,   7414  },
-    {7418,   7418  },
-    {8501,   8504  },
-    {11568,  11623 },
-    {11648,  11670 },
-    {11680,  11686 },
-    {11688,  11694 },
-    {11696,  11702 },
-    {11704,  11710 },
-    {11712,  11718 },
-    {11720,  11726 },
-    {11728,  11734 },
-    {11736,  11742 },
-    {12294,  12294 },
-    {12348,  12348 },
-    {12353,  12438 },
-    {12447,  12447 },
-    {12449,  12538 },
-    {12543,  12543 },
-    {12549,  12591 },
-    {12593,  12686 },
-    {12704,  12735 },
-    {12784,  12799 },
-    {13312,  19903 },
-    {19968,  40980 },
-    {40982,  42124 },
-    {42192,  42231 },
-    {42240,  42507 },
-    {42512,  42527 },
-    {42538,  42539 },
-    {42606,  42606 },
-    {42656,  42725 },
-    {42895,  42895 },
-    {42999,  42999 },
-    {43003,  43009 },
-    {43011,  43013 },
-    {43015,  43018 },
-    {43020,  43042 },
-    {43072,  43123 },
-    {43138,  43187 },
-    {43250,  43255 },
-    {43259,  43259 },
-    {43261,  43262 },
-    {43274,  43301 },
-    {43312,  43334 },
-    {43360,  43388 },
-    {43396,  43442 },
-    {43488,  43492 },
-    {43495,  43503 },
-    {43514,  43518 },
-    {43520,  43560 },
-    {43584,  43586 },
-    {43588,  43595 },
-    {43616,  43631 },
-    {43633,  43638 },
-    {43642,  43642 },
-    {43646,  43695 },
-    {43697,  43697 },
-    {43701,  43702 },
-    {43705,  43709 },
-    {43712,  43712 },
-    {43714,  43714 },
-    {43739,  43740 },
-    {43744,  43754 },
-    {43762,  43762 },
-    {43777,  43782 },
-    {43785,  43790 },
-    {43793,  43798 },
-    {43808,  43814 },
-    {43816,  43822 },
-    {43968,  44002 },
-    {44032,  55203 },
-    {55216,  55238 },
-    {55243,  55291 },
-    {63744,  64109 },
-    {64112,  64217 },
-    {64285,  64285 },
-    {64287,  64296 },
-    {64298,  64310 },
-    {64312,  64316 },
-    {64318,  64318 },
-    {64320,  64321 },
-    {64323,  64324 },
-    {64326,  64433 },
-    {64467,  64829 },
-    {64848,  64911 },
-    {64914,  64967 },
-    {65008,  65019 },
-    {65136,  65140 },
-    {65142,  65276 },
-    {65382,  65391 },
-    {65393,  65437 },
-    {65440,  65470 },
-    {65474,  65479 },
-    {65482,  65487 },
-    {65490,  65495 },
-    {65498,  65500 },
-    {65536,  65547 },
-    {65549,  65574 },
-    {65576,  65594 },
-    {65596,  65597 },
-    {65599,  65613 },
-    {65616,  65629 },
-    {65664,  65786 },
-    {66176,  66204 },
-    {66208,  66256 },
-    {66304,  66335 },
-    {66349,  66368 },
-    {66370,  66377 },
-    {66384,  66421 },
-    {66432,  66461 },
-    {66464,  66499 },
-    {66504,  66511 },
-    {66640,  66717 },
-    {66816,  66855 },
-    {66864,  66915 },
-    {67072,  67382 },
-    {67392,  67413 },
-    {67424,  67431 },
-    {67584,  67589 },
-    {67592,  67592 },
-    {67594,  67637 },
-    {67639,  67640 },
-    {67644,  67644 },
-    {67647,  67669 },
-    {67680,  67702 },
-    {67712,  67742 },
-    {67808,  67826 },
-    {67828,  67829 },
-    {67840,  67861 },
-    {67872,  67897 },
-    {67968,  68023 },
-    {68030,  68031 },
-    {68096,  68096 },
-    {68112,  68115 },
-    {68117,  68119 },
-    {68121,  68149 },
-    {68192,  68220 },
-    {68224,  68252 },
-    {68288,  68295 },
-    {68297,  68324 },
-    {68352,  68405 },
-    {68416,  68437 },
-    {68448,  68466 },
-    {68480,  68497 },
-    {68608,  68680 },
-    {68864,  68899 },
-    {69248,  69289 },
-    {69296,  69297 },
-    {69376,  69404 },
-    {69415,  69415 },
-    {69424,  69445 },
-    {69488,  69505 },
-    {69552,  69572 },
-    {69600,  69622 },
-    {69635,  69687 },
-    {69745,  69746 },
-    {69749,  69749 },
-    {69763,  69807 },
-    {69840,  69864 },
-    {69891,  69926 },
-    {69956,  69956 },
-    {69959,  69959 },
-    {69968,  70002 },
-    {70006,  70006 },
-    {70019,  70066 },
-    {70081,  70084 },
-    {70106,  70106 },
-    {70108,  70108 },
-    {70144,  70161 },
-    {70163,  70187 },
-    {70272,  70278 },
-    {70280,  70280 },
-    {70282,  70285 },
-    {70287,  70301 },
-    {70303,  70312 },
-    {70320,  70366 },
-    {70405,  70412 },
-    {70415,  70416 },
-    {70419,  70440 },
-    {70442,  70448 },
-    {70450,  70451 },
-    {70453,  70457 },
-    {70461,  70461 },
-    {70480,  70480 },
-    {70493,  70497 },
-    {70656,  70708 },
-    {70727,  70730 },
-    {70751,  70753 },
-    {70784,  70831 },
-    {70852,  70853 },
-    {70855,  70855 },
-    {71040,  71086 },
-    {71128,  71131 },
-    {71168,  71215 },
-    {71236,  71236 },
-    {71296,  71338 },
-    {71352,  71352 },
-    {71424,  71450 },
-    {71488,  71494 },
-    {71680,  71723 },
-    {71935,  71942 },
-    {71945,  71945 },
-    {71948,  71955 },
-    {71957,  71958 },
-    {71960,  71983 },
-    {71999,  71999 },
-    {72001,  72001 },
-    {72096,  72103 },
-    {72106,  72144 },
-    {72161,  72161 },
-    {72163,  72163 },
-    {72192,  72192 },
-    {72203,  72242 },
-    {72250,  72250 },
-    {72272,  72272 },
-    {72284,  72329 },
-    {72349,  72349 },
-    {72368,  72440 },
-    {72704,  72712 },
-    {72714,  72750 },
-    {72768,  72768 },
-    {72818,  72847 },
-    {72960,  72966 },
-    {72968,  72969 },
-    {72971,  73008 },
-    {73030,  73030 },
-    {73056,  73061 },
-    {73063,  73064 },
-    {73066,  73097 },
-    {73112,  73112 },
-    {73440,  73458 },
-    {73648,  73648 },
-    {73728,  74649 },
-    {74880,  75075 },
-    {77712,  77808 },
-    {77824,  78894 },
-    {82944,  83526 },
-    {92160,  92728 },
-    {92736,  92766 },
-    {92784,  92862 },
-    {92880,  92909 },
-    {92928,  92975 },
-    {93027,  93047 },
-    {93053,  93071 },
-    {93952,  94026 },
-    {94032,  94032 },
-    {94208,  100343},
-    {100352, 101589},
-    {101632, 101640},
-    {110592, 110882},
-    {110928, 110930},
-    {110948, 110951},
-    {110960, 111355},
-    {113664, 113770},
-    {113776, 113788},
-    {113792, 113800},
-    {113808, 113817},
-    {122634, 122634},
-    {123136, 123180},
-    {123214, 123214},
-    {123536, 123565},
-    {123584, 123627},
-    {124896, 124902},
-    {124904, 124907},
-    {124909, 124910},
-    {124912, 124926},
-    {124928, 125124},
-    {126464, 126467},
-    {126469, 126495},
-    {126497, 126498},
-    {126500, 126500},
-    {126503, 126503},
-    {126505, 126514},
-    {126516, 126519},
-    {126521, 126521},
-    {126523, 126523},
-    {126530, 126530},
-    {126535, 126535},
-    {126537, 126537},
-    {126539, 126539},
-    {126541, 126543},
-    {126545, 126546},
-    {126548, 126548},
-    {126551, 126551},
-    {126553, 126553},
-    {126555, 126555},
-    {126557, 126557},
-    {126559, 126559},
-    {126561, 126562},
-    {126564, 126564},
-    {126567, 126570},
-    {126572, 126578},
-    {126580, 126583},
-    {126585, 126588},
-    {126590, 126590},
-    {126592, 126601},
-    {126603, 126619},
-    {126625, 126627},
-    {126629, 126633},
-    {126635, 126651},
-    {131072, 173791},
-    {173824, 177976},
-    {177984, 178205},
-    {178208, 183969},
-    {183984, 191456},
-    {194560, 195101},
-    {196608, 201546},
+    { 170, 170 },
+    { 186, 186 },
+    { 443, 443 },
+    { 448, 451 },
+    { 660, 660 },
+    { 1488, 1514 },
+    { 1519, 1522 },
+    { 1568, 1599 },
+    { 1601, 1610 },
+    { 1646, 1647 },
+    { 1649, 1747 },
+    { 1749, 1749 },
+    { 1774, 1775 },
+    { 1786, 1788 },
+    { 1791, 1791 },
+    { 1808, 1808 },
+    { 1810, 1839 },
+    { 1869, 1957 },
+    { 1969, 1969 },
+    { 1994, 2026 },
+    { 2048, 2069 },
+    { 2112, 2136 },
+    { 2144, 2154 },
+    { 2160, 2183 },
+    { 2185, 2190 },
+    { 2208, 2248 },
+    { 2308, 2361 },
+    { 2365, 2365 },
+    { 2384, 2384 },
+    { 2392, 2401 },
+    { 2418, 2432 },
+    { 2437, 2444 },
+    { 2447, 2448 },
+    { 2451, 2472 },
+    { 2474, 2480 },
+    { 2482, 2482 },
+    { 2486, 2489 },
+    { 2493, 2493 },
+    { 2510, 2510 },
+    { 2524, 2525 },
+    { 2527, 2529 },
+    { 2544, 2545 },
+    { 2556, 2556 },
+    { 2565, 2570 },
+    { 2575, 2576 },
+    { 2579, 2600 },
+    { 2602, 2608 },
+    { 2610, 2611 },
+    { 2613, 2614 },
+    { 2616, 2617 },
+    { 2649, 2652 },
+    { 2654, 2654 },
+    { 2674, 2676 },
+    { 2693, 2701 },
+    { 2703, 2705 },
+    { 2707, 2728 },
+    { 2730, 2736 },
+    { 2738, 2739 },
+    { 2741, 2745 },
+    { 2749, 2749 },
+    { 2768, 2768 },
+    { 2784, 2785 },
+    { 2809, 2809 },
+    { 2821, 2828 },
+    { 2831, 2832 },
+    { 2835, 2856 },
+    { 2858, 2864 },
+    { 2866, 2867 },
+    { 2869, 2873 },
+    { 2877, 2877 },
+    { 2908, 2909 },
+    { 2911, 2913 },
+    { 2929, 2929 },
+    { 2947, 2947 },
+    { 2949, 2954 },
+    { 2958, 2960 },
+    { 2962, 2965 },
+    { 2969, 2970 },
+    { 2972, 2972 },
+    { 2974, 2975 },
+    { 2979, 2980 },
+    { 2984, 2986 },
+    { 2990, 3001 },
+    { 3024, 3024 },
+    { 3077, 3084 },
+    { 3086, 3088 },
+    { 3090, 3112 },
+    { 3114, 3129 },
+    { 3133, 3133 },
+    { 3160, 3162 },
+    { 3165, 3165 },
+    { 3168, 3169 },
+    { 3200, 3200 },
+    { 3205, 3212 },
+    { 3214, 3216 },
+    { 3218, 3240 },
+    { 3242, 3251 },
+    { 3253, 3257 },
+    { 3261, 3261 },
+    { 3293, 3294 },
+    { 3296, 3297 },
+    { 3313, 3314 },
+    { 3332, 3340 },
+    { 3342, 3344 },
+    { 3346, 3386 },
+    { 3389, 3389 },
+    { 3406, 3406 },
+    { 3412, 3414 },
+    { 3423, 3425 },
+    { 3450, 3455 },
+    { 3461, 3478 },
+    { 3482, 3505 },
+    { 3507, 3515 },
+    { 3517, 3517 },
+    { 3520, 3526 },
+    { 3585, 3632 },
+    { 3634, 3635 },
+    { 3648, 3653 },
+    { 3713, 3714 },
+    { 3716, 3716 },
+    { 3718, 3722 },
+    { 3724, 3747 },
+    { 3749, 3749 },
+    { 3751, 3760 },
+    { 3762, 3763 },
+    { 3773, 3773 },
+    { 3776, 3780 },
+    { 3804, 3807 },
+    { 3840, 3840 },
+    { 3904, 3911 },
+    { 3913, 3948 },
+    { 3976, 3980 },
+    { 4096, 4138 },
+    { 4159, 4159 },
+    { 4176, 4181 },
+    { 4186, 4189 },
+    { 4193, 4193 },
+    { 4197, 4198 },
+    { 4206, 4208 },
+    { 4213, 4225 },
+    { 4238, 4238 },
+    { 4352, 4680 },
+    { 4682, 4685 },
+    { 4688, 4694 },
+    { 4696, 4696 },
+    { 4698, 4701 },
+    { 4704, 4744 },
+    { 4746, 4749 },
+    { 4752, 4784 },
+    { 4786, 4789 },
+    { 4792, 4798 },
+    { 4800, 4800 },
+    { 4802, 4805 },
+    { 4808, 4822 },
+    { 4824, 4880 },
+    { 4882, 4885 },
+    { 4888, 4954 },
+    { 4992, 5007 },
+    { 5121, 5740 },
+    { 5743, 5759 },
+    { 5761, 5786 },
+    { 5792, 5866 },
+    { 5873, 5880 },
+    { 5888, 5905 },
+    { 5919, 5937 },
+    { 5952, 5969 },
+    { 5984, 5996 },
+    { 5998, 6000 },
+    { 6016, 6067 },
+    { 6108, 6108 },
+    { 6176, 6210 },
+    { 6212, 6264 },
+    { 6272, 6276 },
+    { 6279, 6312 },
+    { 6314, 6314 },
+    { 6320, 6389 },
+    { 6400, 6430 },
+    { 6480, 6509 },
+    { 6512, 6516 },
+    { 6528, 6571 },
+    { 6576, 6601 },
+    { 6656, 6678 },
+    { 6688, 6740 },
+    { 6917, 6963 },
+    { 6981, 6988 },
+    { 7043, 7072 },
+    { 7086, 7087 },
+    { 7098, 7141 },
+    { 7168, 7203 },
+    { 7245, 7247 },
+    { 7258, 7287 },
+    { 7401, 7404 },
+    { 7406, 7411 },
+    { 7413, 7414 },
+    { 7418, 7418 },
+    { 8501, 8504 },
+    { 11568, 11623 },
+    { 11648, 11670 },
+    { 11680, 11686 },
+    { 11688, 11694 },
+    { 11696, 11702 },
+    { 11704, 11710 },
+    { 11712, 11718 },
+    { 11720, 11726 },
+    { 11728, 11734 },
+    { 11736, 11742 },
+    { 12294, 12294 },
+    { 12348, 12348 },
+    { 12353, 12438 },
+    { 12447, 12447 },
+    { 12449, 12538 },
+    { 12543, 12543 },
+    { 12549, 12591 },
+    { 12593, 12686 },
+    { 12704, 12735 },
+    { 12784, 12799 },
+    { 13312, 19903 },
+    { 19968, 40980 },
+    { 40982, 42124 },
+    { 42192, 42231 },
+    { 42240, 42507 },
+    { 42512, 42527 },
+    { 42538, 42539 },
+    { 42606, 42606 },
+    { 42656, 42725 },
+    { 42895, 42895 },
+    { 42999, 42999 },
+    { 43003, 43009 },
+    { 43011, 43013 },
+    { 43015, 43018 },
+    { 43020, 43042 },
+    { 43072, 43123 },
+    { 43138, 43187 },
+    { 43250, 43255 },
+    { 43259, 43259 },
+    { 43261, 43262 },
+    { 43274, 43301 },
+    { 43312, 43334 },
+    { 43360, 43388 },
+    { 43396, 43442 },
+    { 43488, 43492 },
+    { 43495, 43503 },
+    { 43514, 43518 },
+    { 43520, 43560 },
+    { 43584, 43586 },
+    { 43588, 43595 },
+    { 43616, 43631 },
+    { 43633, 43638 },
+    { 43642, 43642 },
+    { 43646, 43695 },
+    { 43697, 43697 },
+    { 43701, 43702 },
+    { 43705, 43709 },
+    { 43712, 43712 },
+    { 43714, 43714 },
+    { 43739, 43740 },
+    { 43744, 43754 },
+    { 43762, 43762 },
+    { 43777, 43782 },
+    { 43785, 43790 },
+    { 43793, 43798 },
+    { 43808, 43814 },
+    { 43816, 43822 },
+    { 43968, 44002 },
+    { 44032, 55203 },
+    { 55216, 55238 },
+    { 55243, 55291 },
+    { 63744, 64109 },
+    { 64112, 64217 },
+    { 64285, 64285 },
+    { 64287, 64296 },
+    { 64298, 64310 },
+    { 64312, 64316 },
+    { 64318, 64318 },
+    { 64320, 64321 },
+    { 64323, 64324 },
+    { 64326, 64433 },
+    { 64467, 64829 },
+    { 64848, 64911 },
+    { 64914, 64967 },
+    { 65008, 65019 },
+    { 65136, 65140 },
+    { 65142, 65276 },
+    { 65382, 65391 },
+    { 65393, 65437 },
+    { 65440, 65470 },
+    { 65474, 65479 },
+    { 65482, 65487 },
+    { 65490, 65495 },
+    { 65498, 65500 },
+    { 65536, 65547 },
+    { 65549, 65574 },
+    { 65576, 65594 },
+    { 65596, 65597 },
+    { 65599, 65613 },
+    { 65616, 65629 },
+    { 65664, 65786 },
+    { 66176, 66204 },
+    { 66208, 66256 },
+    { 66304, 66335 },
+    { 66349, 66368 },
+    { 66370, 66377 },
+    { 66384, 66421 },
+    { 66432, 66461 },
+    { 66464, 66499 },
+    { 66504, 66511 },
+    { 66640, 66717 },
+    { 66816, 66855 },
+    { 66864, 66915 },
+    { 67072, 67382 },
+    { 67392, 67413 },
+    { 67424, 67431 },
+    { 67584, 67589 },
+    { 67592, 67592 },
+    { 67594, 67637 },
+    { 67639, 67640 },
+    { 67644, 67644 },
+    { 67647, 67669 },
+    { 67680, 67702 },
+    { 67712, 67742 },
+    { 67808, 67826 },
+    { 67828, 67829 },
+    { 67840, 67861 },
+    { 67872, 67897 },
+    { 67968, 68023 },
+    { 68030, 68031 },
+    { 68096, 68096 },
+    { 68112, 68115 },
+    { 68117, 68119 },
+    { 68121, 68149 },
+    { 68192, 68220 },
+    { 68224, 68252 },
+    { 68288, 68295 },
+    { 68297, 68324 },
+    { 68352, 68405 },
+    { 68416, 68437 },
+    { 68448, 68466 },
+    { 68480, 68497 },
+    { 68608, 68680 },
+    { 68864, 68899 },
+    { 69248, 69289 },
+    { 69296, 69297 },
+    { 69376, 69404 },
+    { 69415, 69415 },
+    { 69424, 69445 },
+    { 69488, 69505 },
+    { 69552, 69572 },
+    { 69600, 69622 },
+    { 69635, 69687 },
+    { 69745, 69746 },
+    { 69749, 69749 },
+    { 69763, 69807 },
+    { 69840, 69864 },
+    { 69891, 69926 },
+    { 69956, 69956 },
+    { 69959, 69959 },
+    { 69968, 70002 },
+    { 70006, 70006 },
+    { 70019, 70066 },
+    { 70081, 70084 },
+    { 70106, 70106 },
+    { 70108, 70108 },
+    { 70144, 70161 },
+    { 70163, 70187 },
+    { 70272, 70278 },
+    { 70280, 70280 },
+    { 70282, 70285 },
+    { 70287, 70301 },
+    { 70303, 70312 },
+    { 70320, 70366 },
+    { 70405, 70412 },
+    { 70415, 70416 },
+    { 70419, 70440 },
+    { 70442, 70448 },
+    { 70450, 70451 },
+    { 70453, 70457 },
+    { 70461, 70461 },
+    { 70480, 70480 },
+    { 70493, 70497 },
+    { 70656, 70708 },
+    { 70727, 70730 },
+    { 70751, 70753 },
+    { 70784, 70831 },
+    { 70852, 70853 },
+    { 70855, 70855 },
+    { 71040, 71086 },
+    { 71128, 71131 },
+    { 71168, 71215 },
+    { 71236, 71236 },
+    { 71296, 71338 },
+    { 71352, 71352 },
+    { 71424, 71450 },
+    { 71488, 71494 },
+    { 71680, 71723 },
+    { 71935, 71942 },
+    { 71945, 71945 },
+    { 71948, 71955 },
+    { 71957, 71958 },
+    { 71960, 71983 },
+    { 71999, 71999 },
+    { 72001, 72001 },
+    { 72096, 72103 },
+    { 72106, 72144 },
+    { 72161, 72161 },
+    { 72163, 72163 },
+    { 72192, 72192 },
+    { 72203, 72242 },
+    { 72250, 72250 },
+    { 72272, 72272 },
+    { 72284, 72329 },
+    { 72349, 72349 },
+    { 72368, 72440 },
+    { 72704, 72712 },
+    { 72714, 72750 },
+    { 72768, 72768 },
+    { 72818, 72847 },
+    { 72960, 72966 },
+    { 72968, 72969 },
+    { 72971, 73008 },
+    { 73030, 73030 },
+    { 73056, 73061 },
+    { 73063, 73064 },
+    { 73066, 73097 },
+    { 73112, 73112 },
+    { 73440, 73458 },
+    { 73648, 73648 },
+    { 73728, 74649 },
+    { 74880, 75075 },
+    { 77712, 77808 },
+    { 77824, 78894 },
+    { 82944, 83526 },
+    { 92160, 92728 },
+    { 92736, 92766 },
+    { 92784, 92862 },
+    { 92880, 92909 },
+    { 92928, 92975 },
+    { 93027, 93047 },
+    { 93053, 93071 },
+    { 93952, 94026 },
+    { 94032, 94032 },
+    { 94208, 100343 },
+    { 100352, 101589 },
+    { 101632, 101640 },
+    { 110592, 110882 },
+    { 110928, 110930 },
+    { 110948, 110951 },
+    { 110960, 111355 },
+    { 113664, 113770 },
+    { 113776, 113788 },
+    { 113792, 113800 },
+    { 113808, 113817 },
+    { 122634, 122634 },
+    { 123136, 123180 },
+    { 123214, 123214 },
+    { 123536, 123565 },
+    { 123584, 123627 },
+    { 124896, 124902 },
+    { 124904, 124907 },
+    { 124909, 124910 },
+    { 124912, 124926 },
+    { 124928, 125124 },
+    { 126464, 126467 },
+    { 126469, 126495 },
+    { 126497, 126498 },
+    { 126500, 126500 },
+    { 126503, 126503 },
+    { 126505, 126514 },
+    { 126516, 126519 },
+    { 126521, 126521 },
+    { 126523, 126523 },
+    { 126530, 126530 },
+    { 126535, 126535 },
+    { 126537, 126537 },
+    { 126539, 126539 },
+    { 126541, 126543 },
+    { 126545, 126546 },
+    { 126548, 126548 },
+    { 126551, 126551 },
+    { 126553, 126553 },
+    { 126555, 126555 },
+    { 126557, 126557 },
+    { 126559, 126559 },
+    { 126561, 126562 },
+    { 126564, 126564 },
+    { 126567, 126570 },
+    { 126572, 126578 },
+    { 126580, 126583 },
+    { 126585, 126588 },
+    { 126590, 126590 },
+    { 126592, 126601 },
+    { 126603, 126619 },
+    { 126625, 126627 },
+    { 126629, 126633 },
+    { 126635, 126651 },
+    { 131072, 173791 },
+    { 173824, 177976 },
+    { 177984, 178205 },
+    { 178208, 183969 },
+    { 183984, 191456 },
+    { 194560, 195101 },
+    { 196608, 201546 },
 };
+// clang-format on
 
 bool c11__is_unicode_Lo_char(int c) {
     if(c == 0x1f955) return true;
@@ -8572,7 +8882,7 @@ void pk_names_finalize() {
 py_Name py_namev(c11_sv name) {
 #if PK_ENABLE_THREADS
     while(atomic_flag_test_and_set(&pk_string_table.lock)) {
-        c11_thrd_yield();
+        c11_thrd__yield();
     }
 #endif
     uint64_t hash = c11_sv__hash(name);
@@ -8747,7 +9057,7 @@ void SourceData__snapshot(const struct SourceData* self,
 #include <intrin.h>
 #endif
 
-PK_INLINE static int c11__bit_length(unsigned long x) {
+PK_INLINE int c11__bit_length(unsigned long x) {
 #if(defined(__clang__) || defined(__GNUC__))
     return x == 0 ? 0 : (int)sizeof(unsigned long) * 8 - __builtin_clzl(x);
 #elif defined(_MSC_VER)
@@ -8829,26 +9139,230 @@ void* c11_chunkedvector__at(c11_chunkedvector* self, int index) {
 }
 
 // src/common/threads.c
+#include <stdarg.h>
+
 #if PK_ENABLE_THREADS
 
 #if PK_USE_PTHREADS
 
-bool c11_thrd_create(c11_thrd_t* thrd, c11_thrd_retval_t (*func)(void*), void* arg) {
+bool c11_thrd__create(c11_thrd_t* thrd, c11_thrd_func_t func, void* arg) {
     int res = pthread_create(thrd, NULL, func, arg);
     return res == 0;
 }
 
-void c11_thrd_yield() { sched_yield(); }
+void c11_thrd__yield() { sched_yield(); }
+
+void c11_thrd__join(c11_thrd_t thrd) { pthread_join(thrd, NULL); }
+
+c11_thrd_t c11_thrd__current() { return pthread_self(); }
+
+bool c11_thrd__equal(c11_thrd_t a, c11_thrd_t b) { return pthread_equal(a, b); }
+
+void c11_mutex__ctor(c11_mutex_t* mutex) { pthread_mutex_init(mutex, NULL); }
+
+void c11_mutex__dtor(c11_mutex_t* mutex) { pthread_mutex_destroy(mutex); }
+
+void c11_mutex__lock(c11_mutex_t* mutex) { pthread_mutex_lock(mutex); }
+
+void c11_mutex__unlock(c11_mutex_t* mutex) { pthread_mutex_unlock(mutex); }
+
+void c11_cond__ctor(c11_cond_t* cond) { pthread_cond_init(cond, NULL); }
+
+void c11_cond__dtor(c11_cond_t* cond) { pthread_cond_destroy(cond); }
+
+void c11_cond__wait(c11_cond_t* cond, c11_mutex_t* mutex) { pthread_cond_wait(cond, mutex); }
+
+void c11_cond__signal(c11_cond_t* cond) { pthread_cond_signal(cond); }
+
+void c11_cond__broadcast(c11_cond_t* cond) { pthread_cond_broadcast(cond); }
 
 #else
 
-bool c11_thrd_create(c11_thrd_t* thrd, c11_thrd_retval_t (*func)(void*), void* arg) {
+bool c11_thrd__create(c11_thrd_t* thrd, c11_thrd_func_t func, void* arg) {
     int res = thrd_create(thrd, func, arg);
     return res == thrd_success;
 }
 
-void c11_thrd_yield() { thrd_yield(); }
+void c11_thrd__yield() { thrd_yield(); }
 
+void c11_thrd__join(c11_thrd_t thrd) { thrd_join(thrd, NULL); }
+
+c11_thrd_t c11_thrd__current() { return thrd_current(); }
+
+bool c11_thrd__equal(c11_thrd_t a, c11_thrd_t b) { return thrd_equal(a, b); }
+
+void c11_mutex__ctor(c11_mutex_t* mutex) { mtx_init(mutex, mtx_plain); }
+
+void c11_mutex__dtor(c11_mutex_t* mutex) { mtx_destroy(mutex); }
+
+void c11_mutex__lock(c11_mutex_t* mutex) { mtx_lock(mutex); }
+
+void c11_mutex__unlock(c11_mutex_t* mutex) { mtx_unlock(mutex); }
+
+void c11_cond__ctor(c11_cond_t* cond) { cnd_init(cond); }
+
+void c11_cond__dtor(c11_cond_t* cond) { cnd_destroy(cond); }
+
+void c11_cond__wait(c11_cond_t* cond, c11_mutex_t* mutex) { cnd_wait(cond, mutex); }
+
+void c11_cond__signal(c11_cond_t* cond) { cnd_signal(cond); }
+
+void c11_cond__broadcast(c11_cond_t* cond) { cnd_broadcast(cond); }
+
+#endif
+
+#define C11_THRDPOOL_DEBUG 0
+
+#if C11_THRDPOOL_DEBUG
+static void c11_thrdpool_debug_log(int index, const char* format, ...) {
+    va_list args;
+    va_start(args, format);
+    char buf[512];
+    int n = sprintf(buf, "[%.6f - Worker %2d] ", time_ns() / 1e9, index);
+    vsprintf(buf + n, format, args);
+    printf("%s\n", buf);
+    va_end(args);
+}
+#else
+#define c11_thrdpool_debug_log(...)                                                                \
+    do {                                                                                           \
+    } while(0)
+#endif
+
+static c11_thrd_retval_t _thrdpool_worker(void* arg) {
+    c11_thrdpool_worker* p_worker = (c11_thrdpool_worker*)arg;
+    c11_thrdpool_tasks* p_tasks = p_worker->p_tasks;
+
+    while(true) {
+        c11_thrdpool_debug_log(p_worker->index, "Waiting for mutex lock...");
+        c11_mutex__lock(p_worker->p_mutex);
+        atomic_fetch_add_explicit(p_worker->p_ready_workers_num, 1, memory_order_relaxed);
+        c11_thrdpool_debug_log(p_worker->index, "Mutex locked, checking for tasks...");
+
+        if(atomic_load_explicit(&p_tasks->sync_val, memory_order_relaxed) == -1) {
+            c11_mutex__unlock(p_worker->p_mutex);
+            return 0;  // force kill
+        }
+        while(true) {
+            c11_cond__wait(p_worker->p_cond, p_worker->p_mutex);
+            int sync_val = atomic_load_explicit(&p_tasks->sync_val, memory_order_relaxed);
+            c11_thrdpool_debug_log(p_worker->index,
+                                   "Woke up from condition variable, sync_val=%d",
+                                   sync_val);
+            if(sync_val == 1) break;
+            if(sync_val == -1) {
+                c11_mutex__unlock(p_worker->p_mutex);
+                return 0;  // force kill
+            }
+        }
+
+        atomic_fetch_sub_explicit(p_worker->p_ready_workers_num, 1, memory_order_relaxed);
+        c11_mutex__unlock(p_worker->p_mutex);
+
+        c11_thrdpool_debug_log(p_worker->index, "Received tasks, starting execution...");
+        // execute tasks
+        int completed_count = 0;
+        while(true) {
+            int arg_index =
+                atomic_fetch_add_explicit(&p_tasks->current_index, 1, memory_order_relaxed);
+            if(arg_index < p_tasks->length) {
+                void* arg = p_tasks->args[arg_index];
+                p_tasks->func(arg);
+                completed_count++;
+            } else {
+                break;
+            }
+        }
+        // sync point
+        atomic_fetch_add_explicit(&p_tasks->completed_count, completed_count, memory_order_release);
+
+        c11_thrdpool_debug_log(p_worker->index,
+                               "Execution complete, waiting for `sync_val` reset...");
+        while(true) {
+            int sync_val = atomic_load_explicit(&p_tasks->sync_val, memory_order_relaxed);
+            if(sync_val == 0) break;
+            if(sync_val == -1) return 0;  // force kill
+            c11_thrd__yield();
+        }
+        c11_thrdpool_debug_log(p_worker->index,
+                               "`sync_val` reset detected, waiting for next tasks...");
+    }
+    return 0;
+}
+
+void c11_thrdpool__ctor(c11_thrdpool* pool, int length) {
+    pool->length = length;
+    atomic_store_explicit(&pool->ready_workers_num, 0, memory_order_relaxed);
+    pool->workers = PK_MALLOC(sizeof(c11_thrdpool_worker) * length);
+
+    c11_mutex__ctor(&pool->workers_mutex);
+    c11_cond__ctor(&pool->workers_cond);
+
+    atomic_store_explicit(&pool->tasks.sync_val, 0, memory_order_relaxed);
+
+    for(int i = 0; i < length; i++) {
+        c11_thrdpool_worker* p_worker = &pool->workers[i];
+        p_worker->index = i;
+        p_worker->p_ready_workers_num = &pool->ready_workers_num;
+        p_worker->p_mutex = &pool->workers_mutex;
+        p_worker->p_cond = &pool->workers_cond;
+        p_worker->p_tasks = &pool->tasks;
+        bool ok = c11_thrd__create(&p_worker->thread, _thrdpool_worker, p_worker);
+        c11__rtassert(ok);
+    }
+}
+
+void c11_thrdpool__dtor(c11_thrdpool* pool) {
+    c11_mutex__lock(&pool->workers_mutex);
+    atomic_store_explicit(&pool->tasks.sync_val, -1, memory_order_relaxed);
+    c11_thrdpool_debug_log(-1, "Terminating all workers...");
+    c11_cond__broadcast(&pool->workers_cond);
+    c11_mutex__unlock(&pool->workers_mutex);
+
+    for(int i = 0; i < pool->length; i++) {
+        c11_thrdpool_worker* p_worker = &pool->workers[i];
+        c11_thrd__join(p_worker->thread);
+    }
+
+    c11_mutex__dtor(&pool->workers_mutex);
+    c11_cond__dtor(&pool->workers_cond);
+    PK_FREE(pool->workers);
+}
+
+void c11_thrdpool__map(c11_thrdpool* pool, c11_thrdpool_func_t func, void** args, int num_tasks) {
+    c11_thrdpool_debug_log(-1, "c11_thrdpool__map() called on %d tasks...", num_tasks);
+    while(atomic_load_explicit(&pool->ready_workers_num, memory_order_relaxed) < pool->length) {
+        c11_thrd__yield();
+    }
+    c11_thrdpool_debug_log(-1, "All %d workers are ready.", pool->length);
+
+    // assign tasks
+    c11_mutex__lock(&pool->workers_mutex);
+    pool->tasks.func = func;
+    pool->tasks.args = args;
+    pool->tasks.length = num_tasks;
+    atomic_store_explicit(&pool->tasks.sync_val, 1, memory_order_relaxed);
+    atomic_store_explicit(&pool->tasks.current_index, 0, memory_order_relaxed);
+    atomic_store_explicit(&pool->tasks.completed_count, 0, memory_order_relaxed);
+    c11_cond__broadcast(&pool->workers_cond);
+    c11_mutex__unlock(&pool->workers_mutex);
+}
+
+void c11_thrdpool__join(c11_thrdpool *pool) {
+    // wait for complete
+    int num_tasks = pool->tasks.length;
+    c11_thrdpool_debug_log(-1, "Waiting for %d tasks to complete...", num_tasks);
+    while(atomic_load_explicit(&pool->tasks.completed_count, memory_order_acquire) < num_tasks) {
+        c11_thrd__yield();
+    }
+    atomic_store_explicit(&pool->tasks.sync_val, 0, memory_order_relaxed);
+    c11_thrdpool_debug_log(-1, "All %d tasks completed, `sync_val` was reset.", num_tasks);
+}
+
+#undef C11_THRDPOOL_DEBUG
+
+#ifdef c11_thrdpool_debug_log
+#undef c11_thrdpool_debug_log
 #endif
 
 #endif  // PK_ENABLE_THREADS
@@ -10122,12 +10636,14 @@ void py_finalize() {
     pk_names_finalize();
 }
 
-int py_currentvm() {
+int VM__index(VM* self) {
     for(int i = 0; i < 16; i++) {
-        if(pk_all_vm[i] == pk_current_vm) return i;
+        if(pk_all_vm[i] == self) return i;
     }
     return -1;
 }
+
+int py_currentvm() { return VM__index(pk_current_vm); }
 
 void py_switchvm(int index) {
     if(index < 0 || index >= 16) c11__abort("invalid vm index");
@@ -10160,6 +10676,11 @@ void* py_getvmctx() { return pk_current_vm->ctx; }
 void py_setvmctx(void* ctx) { pk_current_vm->ctx = ctx; }
 
 py_Callbacks* py_callbacks() { return &pk_current_vm->callbacks; }
+
+py_AppCallbacks* py_appcallbacks() {
+    static py_AppCallbacks _callbacks = {0};
+    return &_callbacks;
+}
 
 /////////////////////////////
 
@@ -10407,7 +10928,10 @@ int load_module_from_dll_desktop_only(const char* path) PY_RAISE PY_RETURN;
 int py_import(const char* path_cstr) {
     VM* vm = pk_current_vm;
     c11_sv path = {path_cstr, strlen(path_cstr)};
-    if(path.size == 0) return ValueError("empty module name");
+    if(path.size == 0) {
+        ValueError("empty module name");
+        return -1;
+    }
 
     if(path.data[0] == '.') {
         // try relative import
@@ -10421,13 +10945,16 @@ int py_import(const char* path_cstr) {
         py_ModuleInfo* mi = py_touserdata(vm->top_frame->module);
         c11_sv package_sv = c11_string__sv(mi->path);
         if(package_sv.size == 0) {
-            return ImportError("attempted relative import with no known parent package");
+            ImportError("attempted relative import with no known parent package");
+            return -1;
         }
 
         c11_vector /* T=c11_sv */ cpnts = c11_sv__split(package_sv, '.');
         for(int i = is_init; i < dot_count; i++) {
-            if(cpnts.length == 0)
-                return ImportError("attempted relative import beyond top-level package");
+            if(cpnts.length == 0){
+                ImportError("attempted relative import beyond top-level package");
+                return -1;
+            }
             c11_vector__pop(&cpnts);
         }
 
@@ -10457,7 +10984,7 @@ int py_import(const char* path_cstr) {
     py_GlobalRef ext_mod = py_getmodule(path.data);
     if(ext_mod) {
         py_assign(py_retval(), ext_mod);
-        return true;
+        return 1;
     }
 
     if(vm->callbacks.lazyimport) {
@@ -12064,8 +12591,26 @@ static bool list__setitem__(int argc, py_Ref argv) {
 
 static bool list__delitem__(int argc, py_Ref argv) {
     PY_CHECK_ARGC(2);
-    PY_CHECK_ARG_TYPE(1, tp_int);
     List* self = py_touserdata(py_arg(0));
+
+    if(py_istype(py_arg(1), tp_slice)) {
+        int start, stop, step;
+        bool ok = pk__parse_int_slice(py_arg(1), self->length, &start, &stop, &step);
+        if(!ok) return false;
+        if(step != 1) return ValueError("slice step must be 1 for deletion");
+        int n = stop - start;
+        if(n > 0) {
+            py_TValue* p = self->data;
+            for(int i = stop; i < self->length; i++) {
+                p[start + i - stop] = p[i];
+            }
+            self->length -= n;
+        }
+        py_newnone(py_retval());
+        return true;
+    }
+
+    PY_CHECK_ARG_TYPE(1, tp_int);
     int index = py_toint(py_arg(1));
     if(!pk__normalize_index(&index, self->length)) return false;
     c11_vector__erase(py_TValue, self, index);
@@ -12365,7 +12910,8 @@ py_Type pk_list__register() {
 
 #define DECLARE_HANDLE_FN(name) void c11_dap_handle_##name(py_Ref arguments, c11_sbuf*);
 DAP_COMMAND_LIST(DECLARE_HANDLE_FN)
-#undef DECLARE_ARG_FN
+#undef DECLARE_HANDLE_FN
+
 
 typedef void (*c11_dap_arg_parser_fn)(py_Ref, c11_sbuf*);
 
@@ -12380,6 +12926,7 @@ static dap_command_entry dap_command_table[] = {
 };
 
 #undef DAP_ENTRY
+#undef DAP_COMMAND_LIST
 
 static struct c11_dap_server {
     int dap_next_seq;
@@ -12466,12 +13013,11 @@ void c11_dap_handle_setBreakpoints(py_Ref arguments, c11_sbuf* buffer) {
     PK_FREE((void*)sourcename);
 }
 
-inline static void c11_dap_build_ExceptionInfo(const char* exc_type, const char* exc_message, c11_sbuf* buffer) {
+static void c11_dap_build_ExceptionInfo(const char* exc_type, const char* exc_message, c11_sbuf* buffer) {
     const char* safe_type = exc_type ? exc_type : "UnknownException";
     const char* safe_message = exc_message ? exc_message : "No additional details available";
 
     c11_sv type_sv = {.data = safe_type, .size = strlen(safe_type)};
-    c11_sv message_sv = {.data = safe_message, .size = strlen(safe_message)};
 
     c11_sbuf combined_buffer;
     c11_sbuf__ctor(&combined_buffer);
@@ -15544,39 +16090,43 @@ DEF_TVALUE_METHODS(float, _f64)
 DEF_TVALUE_METHODS(vec2, _vec2)
 DEF_TVALUE_METHODS(vec2i, _vec2i)
 
+
 static bool pkpy_memory_usage(int argc, py_Ref argv) {
+    PY_CHECK_ARGC(0);
+    ManagedHeap* heap = &pk_current_vm->heap;
+    py_i64 size = MultiPool__total_allocated_bytes(&heap->small_objects);
+    size += heap->large_total_size;
+    size += sizeof(VM);
+    py_newint(py_retval(), size);
+    return true;
+}
+
+static bool pkpy_memory_usage_info(int argc, py_Ref argv) {
     PY_CHECK_ARGC(0);
     ManagedHeap* heap = &pk_current_vm->heap;
     c11_string* small_objects_usage = MultiPool__summary(&heap->small_objects);
     int large_object_count = heap->large_objects.length;
     c11_sbuf buf;
     c11_sbuf__ctor(&buf);
+    c11_sbuf__write_cstr(&buf, "== pre-allocated ==\n");
+    double vm_size_mb = sizeof(VM) / 1024.0 / 1024.0;
+    c11_sbuf__write_cstr(&buf, "VM: ");
+    c11_sbuf__write_f64(&buf, vm_size_mb, 2);
+    c11_sbuf__write_cstr(&buf, " MB\n");
     c11_sbuf__write_cstr(&buf, "== heap.small_objects ==\n");
     c11_sbuf__write_cstr(&buf, small_objects_usage->data);
     c11_sbuf__write_cstr(&buf, "== heap.large_objects ==\n");
     pk_sprintf(&buf, "len(large_objects)=%d\n", large_object_count);
+    double large_total_size_mb = (size_t)(heap->large_total_size / 1024) / 1024.0;
+    c11_sbuf__write_cstr(&buf, "Total: ~");
+    c11_sbuf__write_f64(&buf, large_total_size_mb, 2);
+    c11_sbuf__write_cstr(&buf, " MB\n");
     c11_sbuf__write_cstr(&buf, "== heap.gc ==\n");
     pk_sprintf(&buf, "gc_counter=%d\n", heap->gc_counter);
     pk_sprintf(&buf, "gc_threshold=%d", heap->gc_threshold);
     // c11_sbuf__write_cstr(&buf, "== vm.pool_frame ==\n");
     c11_sbuf__py_submit(&buf, py_retval());
     c11_string__delete(small_objects_usage);
-    return true;
-}
-
-static bool pkpy_is_user_defined_type(int argc, py_Ref argv) {
-    PY_CHECK_ARGC(1);
-    PY_CHECK_ARG_TYPE(0, tp_type);
-    py_TypeInfo* ti = py_touserdata(argv);
-    py_newbool(py_retval(), ti->is_python);
-    return true;
-}
-
-static bool pkpy_enable_full_buffering_mode(int argc, py_Ref argv) {
-    PY_CHECK_ARGC(0);
-    static char buf[1024 * 128];
-    setvbuf(stdout, buf, _IOFBF, sizeof(buf));
-    py_newnone(py_retval());
     return true;
 }
 
@@ -15735,7 +16285,7 @@ static bool ComputeThread_wait_for_done(int argc, py_Ref argv) {
     PY_CHECK_ARGC(1);
     c11_ComputeThread* self = py_touserdata(argv);
     while(!atomic_load(&self->is_done)) {
-        c11_thrd_yield();
+        c11_thrd__yield();
     }
     py_newnone(py_retval());
     return true;
@@ -15831,7 +16381,7 @@ static bool ComputeThread_submit_exec(int argc, py_Ref argv) {
     c11_ComputeThread__reset_job(self, job, ComputeThreadJobExec__dtor);
     /**************************/
     atomic_store(&self->is_done, false);
-    bool ok = c11_thrd_create(&self->thread, ComputeThreadJob_exec, job);
+    bool ok = c11_thrd__create(&self->thread, ComputeThreadJob_exec, job);
     if(!ok) {
         atomic_store(&self->is_done, true);
         return OSError("thrd_create() failed");
@@ -15854,7 +16404,7 @@ static bool ComputeThread_submit_eval(int argc, py_Ref argv) {
     c11_ComputeThread__reset_job(self, job, ComputeThreadJobExec__dtor);
     /**************************/
     atomic_store(&self->is_done, false);
-    bool ok = c11_thrd_create(&self->thread, ComputeThreadJob_exec, job);
+    bool ok = c11_thrd__create(&self->thread, ComputeThreadJob_exec, job);
     if(!ok) {
         atomic_store(&self->is_done, true);
         return OSError("thrd_create() failed");
@@ -15891,7 +16441,7 @@ static bool ComputeThread_submit_call(int argc, py_Ref argv) {
     c11_ComputeThread__reset_job(self, job, ComputeThreadJobCall__dtor);
     /**************************/
     atomic_store(&self->is_done, false);
-    bool ok = c11_thrd_create(&self->thread, ComputeThreadJob_call, job);
+    bool ok = c11_thrd__create(&self->thread, ComputeThreadJob_call, job);
     if(!ok) {
         atomic_store(&self->is_done, true);
         return OSError("thrd_create() failed");
@@ -16045,8 +16595,7 @@ void pk__add_module_pkpy() {
     py_pop();
 
     py_bindfunc(mod, "memory_usage", pkpy_memory_usage);
-    py_bindfunc(mod, "is_user_defined_type", pkpy_is_user_defined_type);
-    py_bindfunc(mod, "enable_full_buffering_mode", pkpy_enable_full_buffering_mode);
+    py_bindfunc(mod, "memory_usage_info", pkpy_memory_usage_info);
 
     py_bindfunc(mod, "currentvm", pkpy_currentvm);
 
@@ -16075,6 +16624,494 @@ void pk__add_module_pkpy() {
 }
 
 #undef DEF_TVALUE_METHODS
+// src/modules/picoterm.c
+#include <stdio.h>
+
+const char* c11__u32_east_asian_width(int c);
+
+static int c11__wcwidth(int c) {
+    if(c >= 32 && c < 0x7f) return 1;
+    if(c < 32) return 0;
+    const char* w = c11__u32_east_asian_width(c);
+    bool fullwidth = (w[0] == 'F' && w[1] == '\0') || (w[0] == 'W' && w[1] == '\0');
+    return fullwidth ? 2 : 1;
+}
+
+static bool picoterm_enable_full_buffering_mode(int argc, py_Ref argv) {
+    PY_CHECK_ARGC(0);
+    static char buf[1024 * 32];  // 32KB
+    setvbuf(stdout, buf, _IOFBF, sizeof(buf));
+    py_newnone(py_retval());
+    return true;
+}
+
+// https://gist.github.com/fnky/458719343aabd01cfb17a3a4f7296797
+typedef struct {
+    c11_sv text;
+    char suffix;
+} AnsiEscapedToken;
+
+static bool split_ansi_escaped_string(c11_sv sv, c11_vector* out_tokens);
+
+static bool picoterm_split_ansi_escaped_string(int argc, py_Ref argv) {
+    PY_CHECK_ARGC(1);
+    PY_CHECK_ARG_TYPE(0, tp_str);
+    c11_sv s = py_tosv(argv);
+    c11_vector /*T=AnsiEscapedToken*/ tokens;
+    c11_vector__ctor(&tokens, sizeof(AnsiEscapedToken));
+    if(!split_ansi_escaped_string(s, &tokens)) {
+        c11_vector__dtor(&tokens);
+        return ValueError("invalid ANSI escape sequences");
+    }
+    py_newlistn(py_retval(), tokens.length);
+    for(int i = 0; i < tokens.length; i++) {
+        AnsiEscapedToken t = c11__getitem(AnsiEscapedToken, &tokens, i);
+        py_ItemRef item = py_list_getitem(py_retval(), i);
+        py_newstrv(item, t.text);
+    }
+    c11_vector__dtor(&tokens);
+    return true;
+}
+
+static bool picoterm_wcwidth(int argc, py_Ref argv) {
+    PY_CHECK_ARGC(1);
+    PY_CHECK_ARG_TYPE(0, tp_int);
+    int c = py_toint(py_arg(0));
+    py_newint(py_retval(), c11__wcwidth(c));
+    return true;
+}
+
+static bool picoterm_wcswidth(int argc, py_Ref argv) {
+    PY_CHECK_ARGC(1);
+    PY_CHECK_ARG_TYPE(0, tp_str);
+    c11_sv sv = py_tosv(py_arg(0));
+    c11_vector /*T=AnsiEscapedToken*/ tokens;
+    c11_vector__ctor(&tokens, sizeof(AnsiEscapedToken));
+    if(!split_ansi_escaped_string(sv, &tokens)) {
+        c11_vector__dtor(&tokens);
+        return ValueError("invalid ANSI escape sequences");
+    }
+    int total_width = 0;
+    for(int i = 0; i < tokens.length; i++) {
+        AnsiEscapedToken* p_token = c11__at(AnsiEscapedToken, &tokens, i);
+        if(p_token->suffix != '\0') continue;
+        const char* curr_char = p_token->text.data;
+        const char* end_char = p_token->text.data + p_token->text.size;
+        while(curr_char < end_char) {
+            unsigned char c = *curr_char;
+            int u8bytes = c11__u8_header(c, true);
+            if(u8bytes == 0) return ValueError("invalid utf-8 header: %d", (int)c);
+            int value = c11__u8_value(u8bytes, curr_char);
+            total_width += c11__wcwidth(value);
+            curr_char += u8bytes;
+        }
+    }
+    c11_vector__dtor(&tokens);
+    py_newint(py_retval(), total_width);
+    return true;
+}
+
+static bool picoterm_sscanf(int argc, py_Ref argv) {
+    PY_CHECK_ARGC(3);
+    PY_CHECK_ARG_TYPE(0, tp_str);
+    PY_CHECK_ARG_TYPE(1, tp_str);
+    PY_CHECK_ARG_TYPE(2, tp_list);
+    const char* input = py_tostr(py_arg(0));
+    const char* format = py_tostr(py_arg(1));
+    py_Ref output_list = py_arg(2);
+    py_list_clear(output_list);
+
+    const char* p1 = input;
+    const char* p2 = format;
+
+    while(*p1 != '\0' && *p2 != '\0') {
+        if(*p2 == '%') {
+            p2++;
+            if(*p2 == 'd' || *p2 == 'i') {
+                bool negative = false;
+                if(*p1 == '-') {
+                    negative = true;
+                    p1++;
+                }
+                const char* start = p1;
+                while(*p1 >= '0' && *p1 <= '9')
+                    p1++;
+                c11_sv num_sv = {.data = start, .size = p1 - start};
+                if(num_sv.size == 0) break;
+
+                int64_t value = 0;
+                IntParsingResult res = c11__parse_uint(num_sv, &value, 10);
+                if(res != IntParsing_SUCCESS) break;
+
+                if(negative) value = -value;
+                py_ItemRef item = py_list_emplace(output_list);
+                py_newint(item, value);
+                p2++;
+            } else {
+                return ValueError("unsupported format specifier: %%%c", *p2);
+            }
+        } else {
+            if(*p1 != *p2) break;
+            p1++;
+            p2++;
+        }
+    }
+
+    py_newbool(py_retval(), *p2 == '\0');
+    return true;
+}
+
+void pk__add_module_picoterm() {
+    py_Ref mod = py_newmodule("picoterm");
+
+    py_bindfunc(mod, "enable_full_buffering_mode", picoterm_enable_full_buffering_mode);
+    py_bindfunc(mod, "split_ansi_escaped_string", picoterm_split_ansi_escaped_string);
+    py_bindfunc(mod, "wcwidth", picoterm_wcwidth);
+    py_bindfunc(mod, "wcswidth", picoterm_wcswidth);
+    py_bindfunc(mod, "sscanf", picoterm_sscanf);
+}
+
+static bool split_ansi_escaped_string(c11_sv sv, c11_vector* out_tokens) {
+    const char* p = sv.data;
+    int i = 0;
+    while(i < sv.size) {
+        if(p[i] == '\x1b') {
+            i++;  // skip '\x1b'
+            if(i >= sv.size || p[i] != '[') {
+                return false;  // invalid escape sequence
+            }
+
+            int esc_start = i - 1;
+            i++;  // skip '['
+
+            c11_sv content;
+            content.data = p + i;
+            while(i < sv.size && !((p[i] >= 'A' && p[i] <= 'Z') || (p[i] >= 'a' && p[i] <= 'z'))) {
+                i++;
+            }
+            content.size = p + i - content.data;
+            if(i >= sv.size) {
+                return false;  // invalid escape sequence
+            }
+
+            char suffix = p[i];
+            i++;  // skip suffix
+
+            AnsiEscapedToken token;
+            token.text = (c11_sv){p + esc_start, i - esc_start};
+            token.suffix = suffix;
+            c11_vector__push(AnsiEscapedToken, out_tokens, token);
+        } else if(p[i] == '\n') {
+            AnsiEscapedToken token;
+            token.text = (c11_sv){p + i, 1};
+            token.suffix = '\n';
+            c11_vector__push(AnsiEscapedToken, out_tokens, token);
+            i++;
+        } else {
+            int text_start = i;
+            while(i < sv.size && p[i] != '\x1b' && p[i] != '\n') {
+                i++;
+            }
+            AnsiEscapedToken token;
+            token.text = (c11_sv){p + text_start, i - text_start};
+            token.suffix = '\0';
+            c11_vector__push(AnsiEscapedToken, out_tokens, token);
+        }
+    }
+
+    return true;
+}
+
+// src/modules/stdc.c
+#include <string.h>
+
+#define DEF_BUILTIN_MEMORY_T(Char_, char_, tp_int_, py_newint_, py_toint_, py_i64_)                \
+    static bool stdc_##Char_##__new__(int argc, py_Ref argv) {                                     \
+        char_* ud = py_newobject(py_retval(), tp_stdc_##Char_, 0, sizeof(char_));                  \
+        if(argc == 2) {                                                                            \
+            PY_CHECK_ARG_TYPE(1, tp_int_);                                                         \
+            *ud = (char_)py_toint_(&argv[1]);                                                      \
+        } else if(argc > 2) {                                                                      \
+            return TypeError("expected 1 or 2 arguments, got %d", argc);                           \
+        }                                                                                          \
+        return true;                                                                               \
+    }                                                                                              \
+    static bool stdc_##Char_##__get_value(int argc, py_Ref argv) {                                 \
+        PY_CHECK_ARGC(1);                                                                          \
+        char_* ud = py_touserdata(argv);                                                           \
+        py_newint_(py_retval(), (py_i64_)(*ud));                                                   \
+        return true;                                                                               \
+    }                                                                                              \
+    static bool stdc_##Char_##__set_value(int argc, py_Ref argv) {                                 \
+        PY_CHECK_ARGC(2);                                                                          \
+        char_* ud = py_touserdata(argv);                                                           \
+        PY_CHECK_ARG_TYPE(1, tp_int_);                                                             \
+        *ud = (char_)py_toint_(&argv[1]);                                                          \
+        py_newnone(py_retval());                                                                   \
+        return true;                                                                               \
+    }                                                                                              \
+    static bool stdc_##Char_##__read_STATIC(int argc, py_Ref argv) {                               \
+        PY_CHECK_ARGC(2);                                                                          \
+        PY_CHECK_ARG_TYPE(0, tp_int);                                                              \
+        PY_CHECK_ARG_TYPE(1, tp_int);                                                              \
+        char_* p = (char_*)(intptr_t)py_toint(&argv[0]);                                           \
+        int offset = py_toint(&argv[1]);                                                           \
+        py_newint_(py_retval(), (py_i64_)(p[offset]));                                             \
+        return true;                                                                               \
+    }                                                                                              \
+    static bool stdc_##Char_##__write_STATIC(int argc, py_Ref argv) {                              \
+        PY_CHECK_ARGC(3);                                                                          \
+        PY_CHECK_ARG_TYPE(0, tp_int);                                                              \
+        PY_CHECK_ARG_TYPE(1, tp_int);                                                              \
+        PY_CHECK_ARG_TYPE(2, tp_int_);                                                             \
+        char_* p = (char_*)(intptr_t)py_toint(&argv[0]);                                           \
+        int offset = py_toint(&argv[1]);                                                           \
+        p[offset] = (char_)py_toint_(&argv[2]);                                                    \
+        py_newnone(py_retval());                                                                   \
+        return true;                                                                               \
+    }                                                                                              \
+    static bool stdc_##Char_##__array_STATIC(int argc, py_Ref argv) {                              \
+        PY_CHECK_ARGC(1);                                                                          \
+        PY_CHECK_ARG_TYPE(0, tp_int);                                                              \
+        int length = py_toint(argv);                                                               \
+        int size = sizeof(char_) * length;                                                         \
+        py_newobject(py_retval(), tp_stdc_##Char_, 0, size);                                       \
+        return true;                                                                               \
+    }                                                                                              \
+    static bool stdc_##Char_##__getitem__(int argc, py_Ref argv) {                                 \
+        PY_CHECK_ARGC(2);                                                                          \
+        char_* ud = py_touserdata(argv);                                                           \
+        PY_CHECK_ARG_TYPE(1, tp_int);                                                              \
+        int index = py_toint(&argv[1]);                                                            \
+        py_newint_(py_retval(), (py_i64_)(ud[index]));                                             \
+        return true;                                                                               \
+    }                                                                                              \
+    static bool stdc_##Char_##__setitem__(int argc, py_Ref argv) {                                 \
+        PY_CHECK_ARGC(3);                                                                          \
+        char_* ud = py_touserdata(argv);                                                           \
+        PY_CHECK_ARG_TYPE(1, tp_int);                                                              \
+        PY_CHECK_ARG_TYPE(2, tp_int_);                                                             \
+        int index = py_toint(&argv[1]);                                                            \
+        ud[index] = (char_)py_toint_(&argv[2]);                                                    \
+        py_newnone(py_retval());                                                                   \
+        return true;                                                                               \
+    }                                                                                              \
+    static void pk__bind_stdc_##Char_(py_Ref mod) {                                                \
+        py_Type type = py_newtype(#Char_, tp_stdc_Memory, mod, NULL);                              \
+        py_tpsetfinal(type);                                                                       \
+        assert(type == tp_stdc_##Char_);                                                           \
+        py_bindmagic(type, __new__, stdc_##Char_##__new__);                                        \
+        py_bindmagic(type, __getitem__, stdc_##Char_##__getitem__);                                \
+        py_bindmagic(type, __setitem__, stdc_##Char_##__setitem__);                                \
+        py_bindproperty(type, "value", stdc_##Char_##__get_value, stdc_##Char_##__set_value);      \
+        py_bindstaticmethod(type, "read", stdc_##Char_##__read_STATIC);                            \
+        py_bindstaticmethod(type, "write", stdc_##Char_##__write_STATIC);                          \
+        py_bindstaticmethod(type, "array", stdc_##Char_##__array_STATIC);                          \
+        py_newint(py_emplacedict(py_tpobject(type), py_name("size")), sizeof(char_));              \
+    }
+
+DEF_BUILTIN_MEMORY_T(Char, char, tp_int, py_newint, py_toint, py_i64)
+DEF_BUILTIN_MEMORY_T(UChar, unsigned char, tp_int, py_newint, py_toint, py_i64)
+DEF_BUILTIN_MEMORY_T(Short, short, tp_int, py_newint, py_toint, py_i64)
+DEF_BUILTIN_MEMORY_T(UShort, unsigned short, tp_int, py_newint, py_toint, py_i64)
+DEF_BUILTIN_MEMORY_T(Int, int, tp_int, py_newint, py_toint, py_i64)
+DEF_BUILTIN_MEMORY_T(UInt, unsigned int, tp_int, py_newint, py_toint, py_i64)
+DEF_BUILTIN_MEMORY_T(Long, long, tp_int, py_newint, py_toint, py_i64)
+DEF_BUILTIN_MEMORY_T(ULong, unsigned long, tp_int, py_newint, py_toint, py_i64)
+DEF_BUILTIN_MEMORY_T(LongLong, long long, tp_int, py_newint, py_toint, py_i64)
+DEF_BUILTIN_MEMORY_T(ULongLong, unsigned long long, tp_int, py_newint, py_toint, py_i64)
+DEF_BUILTIN_MEMORY_T(Float, float, tp_float, py_newfloat, py_tofloat, float)
+DEF_BUILTIN_MEMORY_T(Double, double, tp_float, py_newfloat, py_tofloat, double)
+DEF_BUILTIN_MEMORY_T(Pointer, void*, tp_int, py_newint, py_toint, py_i64)
+DEF_BUILTIN_MEMORY_T(Bool, bool, tp_bool, py_newbool, py_tobool, bool)
+
+#undef DEF_BUILTIN_MEMORY_T
+
+static bool stdc_malloc(int argc, py_Ref argv) {
+    PY_CHECK_ARGC(1);
+    PY_CHECK_ARG_TYPE(0, tp_int);
+    py_i64 size = py_toint(&argv[0]);
+    void* p = py_malloc(size);
+    py_newint(py_retval(), (py_i64)(intptr_t)p);
+    return true;
+}
+
+static bool stdc_free(int argc, py_Ref argv) {
+    PY_CHECK_ARGC(1);
+    PY_CHECK_ARG_TYPE(0, tp_int);
+    void* p = (void*)(intptr_t)py_toint(&argv[0]);
+    py_free(p);
+    py_newnone(py_retval());
+    return true;
+}
+
+static bool stdc_memcpy(int argc, py_Ref argv) {
+    PY_CHECK_ARGC(3);
+    PY_CHECK_ARG_TYPE(0, tp_int);
+    PY_CHECK_ARG_TYPE(1, tp_int);
+    PY_CHECK_ARG_TYPE(2, tp_int);
+    void* dst = (void*)(intptr_t)py_toint(&argv[0]);
+    void* src = (void*)(intptr_t)py_toint(&argv[1]);
+    py_i64 n = py_toint(&argv[2]);
+    memcpy(dst, src, (size_t)n);
+    py_newnone(py_retval());
+    return true;
+}
+
+static bool stdc_memset(int argc, py_Ref argv) {
+    PY_CHECK_ARGC(3);
+    PY_CHECK_ARG_TYPE(0, tp_int);
+    PY_CHECK_ARG_TYPE(1, tp_int);
+    PY_CHECK_ARG_TYPE(2, tp_int);
+    void* dst = (void*)(intptr_t)py_toint(&argv[0]);
+    int value = (int)py_toint(&argv[1]);
+    py_i64 n = py_toint(&argv[2]);
+    memset(dst, value, (size_t)n);
+    py_newnone(py_retval());
+    return true;
+}
+
+static bool stdc_memcmp(int argc, py_Ref argv) {
+    PY_CHECK_ARGC(3);
+    PY_CHECK_ARG_TYPE(0, tp_int);
+    PY_CHECK_ARG_TYPE(1, tp_int);
+    PY_CHECK_ARG_TYPE(2, tp_int);
+    void* p1 = (void*)(intptr_t)py_toint(&argv[0]);
+    void* p2 = (void*)(intptr_t)py_toint(&argv[1]);
+    py_i64 n = py_toint(&argv[2]);
+    int res = memcmp(p1, p2, (size_t)n);
+    py_newint(py_retval(), (py_i64)res);
+    return true;
+}
+
+static bool stdc_addressof(int argc, py_Ref argv) {
+    PY_CHECK_ARGC(1);
+    if(!py_checkinstance(argv, tp_stdc_Memory)) return false;
+    void* ud = py_touserdata(argv);
+    py_newint(py_retval(), (py_i64)(intptr_t)ud);
+    return true;
+}
+
+static bool stdc_sizeof(int argc, py_Ref argv) {
+    PY_CHECK_ARGC(1);
+    PY_CHECK_ARG_TYPE(0, tp_type);
+    py_Type type = py_totype(&argv[0]);
+    if(!py_issubclass(type, tp_stdc_Memory)) {
+        return TypeError("expected a type derived from stdc.Memory");
+    }
+    py_assign(py_retval(), py_getdict(py_tpobject(type), py_name("size")));
+    return true;
+}
+
+static bool stdc_read_cstr(int argc, py_Ref argv) {
+    PY_CHECK_ARGC(1);
+    PY_CHECK_ARG_TYPE(0, tp_int);
+    char* p = (char*)(intptr_t)py_toint(&argv[0]);
+    py_newstr(py_retval(), p);
+    return true;
+}
+
+static bool stdc_write_cstr(int argc, py_Ref argv) {
+    PY_CHECK_ARGC(2);
+    PY_CHECK_ARG_TYPE(0, tp_int);
+    PY_CHECK_ARG_TYPE(1, tp_str);
+    char* p = (char*)(intptr_t)py_toint(&argv[0]);
+    c11_sv sv = py_tosv(&argv[1]);
+    memcpy(p, sv.data, sv.size);
+    p[sv.size] = '\0';
+    py_newnone(py_retval());
+    return true;
+}
+
+static bool stdc_read_bytes(int argc, py_Ref argv) {
+    PY_CHECK_ARGC(2);
+    PY_CHECK_ARG_TYPE(0, tp_int);
+    PY_CHECK_ARG_TYPE(1, tp_int);
+    unsigned char* p = (unsigned char*)(intptr_t)py_toint(&argv[0]);
+    int size = py_toint(&argv[1]);
+    unsigned char* dst = py_newbytes(py_retval(), size);
+    memcpy(dst, p, size);
+    return true;
+}
+
+static bool stdc_write_bytes(int argc, py_Ref argv) {
+    PY_CHECK_ARGC(2);
+    PY_CHECK_ARG_TYPE(0, tp_int);
+    PY_CHECK_ARG_TYPE(1, tp_bytes);
+    unsigned char* p = (unsigned char*)(intptr_t)py_toint(&argv[0]);
+    int size;
+    unsigned char* src = py_tobytes(&argv[1], &size);
+    memcpy(p, src, size);
+    py_newnone(py_retval());
+    return true;
+}
+
+void pk__add_module_stdc() {
+    py_Ref mod = py_newmodule("stdc");
+
+    py_bindfunc(mod, "malloc", stdc_malloc);
+    py_bindfunc(mod, "free", stdc_free);
+    py_bindfunc(mod, "memcpy", stdc_memcpy);
+    py_bindfunc(mod, "memset", stdc_memset);
+    py_bindfunc(mod, "memcmp", stdc_memcmp);
+
+    py_bindfunc(mod, "addressof", stdc_addressof);
+    py_bindfunc(mod, "sizeof", stdc_sizeof);
+
+    py_bindfunc(mod, "read_cstr", stdc_read_cstr);
+    py_bindfunc(mod, "write_cstr", stdc_write_cstr);
+    py_bindfunc(mod, "read_bytes", stdc_read_bytes);
+    py_bindfunc(mod, "write_bytes", stdc_write_bytes);
+
+    py_Type Memory = py_newtype("Memory", tp_object, mod, NULL);
+    assert(Memory == tp_stdc_Memory);
+
+    pk__bind_stdc_Char(mod);
+    pk__bind_stdc_UChar(mod);
+    pk__bind_stdc_Short(mod);
+    pk__bind_stdc_UShort(mod);
+    pk__bind_stdc_Int(mod);
+    pk__bind_stdc_UInt(mod);
+    pk__bind_stdc_Long(mod);
+    pk__bind_stdc_ULong(mod);
+    pk__bind_stdc_LongLong(mod);
+    pk__bind_stdc_ULongLong(mod);
+
+    for(int size = 1; size <= 8; size *= 2) {
+        for(py_Type t = tp_stdc_Char; t <= tp_stdc_ULongLong; t += 2) {
+            py_Ref size_var = py_getdict(py_tpobject(t), py_name("size"));
+            if(py_toint(size_var) == size) {
+                char buf[16];
+                snprintf(buf, sizeof(buf), "Int%d", size * 8);
+                py_setdict(mod, py_name(buf), py_tpobject(t));
+                snprintf(buf, sizeof(buf), "UInt%d", size * 8);
+                py_setdict(mod, py_name(buf), py_tpobject(t + 1));
+                break;
+            }
+        }
+    }
+    for(py_Type t = tp_stdc_Char; t <= tp_stdc_ULongLong; t += 2) {
+        py_Ref size_var = py_getdict(py_tpobject(t), py_name("size"));
+        if(py_toint(size_var) == sizeof(size_t)) {
+            py_setdict(mod, py_name("SizeT"), py_tpobject(t + 1));
+            break;
+        }
+    }
+    if(sizeof(void*) == 4) {
+        py_setdict(mod, py_name("IntPtrT"), py_getdict(mod, py_name("Int32")));
+        py_setdict(mod, py_name("UIntPtrT"), py_getdict(mod, py_name("UInt32")));
+    } else if(sizeof(void*) == 8) {
+        py_setdict(mod, py_name("IntPtrT"), py_getdict(mod, py_name("Int64")));
+        py_setdict(mod, py_name("UIntPtrT"), py_getdict(mod, py_name("UInt64")));
+    } else {
+        c11__abort("unsupported pointer size");
+    }
+
+    pk__bind_stdc_Float(mod);
+    pk__bind_stdc_Double(mod);
+    pk__bind_stdc_Pointer(mod);
+    pk__bind_stdc_Bool(mod);
+}
 // src/modules/builtins.c
 #include <math.h>
 
@@ -16145,6 +17182,36 @@ static bool builtins_hex(int argc, py_Ref argv) {
         unsigned char cpnt = (val >> i) & 0xff;
         c11_sbuf__write_hex(&ss, cpnt, non_zero);
         if(cpnt != 0) non_zero = false;
+    }
+
+    c11_sbuf__py_submit(&ss, py_retval());
+    return true;
+}
+
+static bool builtins_bin(int argc, py_Ref argv) {
+    PY_CHECK_ARGC(1);
+    PY_CHECK_ARG_TYPE(0, tp_int);
+
+    py_i64 val = py_toint(argv);
+
+    if(val == 0) {
+        py_newstr(py_retval(), "0b0");
+        return true;
+    }
+
+    c11_sbuf ss;
+    c11_sbuf__ctor(&ss);
+
+    if(val < 0) {
+        c11_sbuf__write_char(&ss, '-');
+        val = -val;
+    }
+    c11_sbuf__write_cstr(&ss, "0b");
+    bool non_zero = true;
+    for(int i = 63; i >= 0; i--) {
+        unsigned char bit = (val >> i) & 1;
+        if(bit != 0) non_zero = false;
+        if(!non_zero) c11_sbuf__write_char(&ss, bit ? '1' : '0');
     }
 
     c11_sbuf__py_submit(&ss, py_retval());
@@ -16531,6 +17598,7 @@ py_GlobalRef pk_builtins__register() {
     py_bindfunc(builtins, "repr", builtins_repr);
     py_bindfunc(builtins, "len", builtins_len);
     py_bindfunc(builtins, "hex", builtins_hex);
+    py_bindfunc(builtins, "bin", builtins_bin);
     py_bindfunc(builtins, "iter", builtins_iter);
     py_bindfunc(builtins, "next", builtins_next);
     py_bindfunc(builtins, "hash", builtins_hash);
@@ -17747,11 +18815,21 @@ static bool inspect_isgeneratorfunction(int argc, py_Ref argv) {
     return true;
 }
 
+static bool inspect_is_user_defined_type(int argc, py_Ref argv) {
+    PY_CHECK_ARGC(1);
+    PY_CHECK_ARG_TYPE(0, tp_type);
+    py_TypeInfo* ti = py_touserdata(argv);
+    py_newbool(py_retval(), ti->is_python);
+    return true;
+}
+
 void pk__add_module_inspect() {
     py_Ref mod = py_newmodule("inspect");
 
     py_bindfunc(mod, "isgeneratorfunction", inspect_isgeneratorfunction);
+    py_bindfunc(mod, "is_user_defined_type", inspect_is_user_defined_type);
 }
+
 // src/modules/vmath.c
 #include <math.h>
 
@@ -18693,7 +19771,7 @@ static bool color32_to_hex(int argc, py_Ref argv) {
     return true;
 }
 
-static void c11_color32_premult(c11_color32* color) {
+void c11_color32_premult(c11_color32* color) {
     if(color->a == 255) return;
     float alpha = color->a / 255.0f;
     color->r = (unsigned char)(color->r * alpha);
@@ -18722,6 +19800,18 @@ static bool color32_to_vec3i(int argc, py_Ref argv) {
     v.y = (int)color.g;
     v.z = (int)color.b;
     py_newvec3i(py_retval(), v);
+    return true;
+}
+
+static bool color32_to_rgb565(int argc, py_Ref argv) {
+    PY_CHECK_ARGC(1);
+    c11_color32 color = py_tocolor32(argv);
+    c11_color32_premult(&color);
+    uint16_t r = (color.r >> 3) & 0x1F;
+    uint16_t g = (color.g >> 2) & 0x3F;
+    uint16_t b = (color.b >> 3) & 0x1F;
+    uint16_t rgb565 = (r << 11) | (g << 5) | b;
+    py_newint(py_retval(), rgb565);
     return true;
 }
 
@@ -19028,6 +20118,7 @@ void pk__add_module_vmath() {
     py_bindmethod(color32, "to_hex", color32_to_hex);
     py_bindmethod(color32, "to_vec3", color32_to_vec3);
     py_bindmethod(color32, "to_vec3i", color32_to_vec3i);
+    py_bindmethod(color32, "to_rgb565", color32_to_rgb565);
     py_bindmethod(color32, "ansi_fg", color32_ansi_fg);
     py_bindmethod(color32, "ansi_bg", color32_ansi_bg);
     py_bindfunc(mod, "rgb", vmath_rgb);
@@ -19041,10 +20132,6 @@ void pk__add_module_vmath() {
 #undef DEF_VECTOR_OPS
 #undef DEF_VECTOR_INT_OPS
 // src/modules/random.c
-#include <time.h>
-
-int64_t time_ns();  // from random.c
-
 /* https://github.com/clibs/mt19937ar
 
 Copyright (c) 2011 Mutsuo Saito, Makoto Matsumoto, Hiroshima
@@ -19425,7 +20512,7 @@ c11_array2d* c11_newarray2d(py_OutRef out, int n_cols, int n_rows) {
     ud->header.n_cols = n_cols;
     ud->header.n_rows = n_rows;
     ud->header.numel = numel;
-    ud->header.f_get = (py_Ref(*)(c11_array2d_like*, int, int))c11_array2d__get;
+    ud->header.f_get = (py_Ref (*)(c11_array2d_like*, int, int))c11_array2d__get;
     ud->header.f_set = (bool (*)(c11_array2d_like*, int, int, py_Ref))c11_array2d__set;
     ud->data = py_getslot(out, 0);
     return ud;
@@ -19534,10 +20621,90 @@ static bool array2d_like_render(int argc, py_Ref argv) {
     for(int j = 0; j < self->n_rows; j++) {
         for(int i = 0; i < self->n_cols; i++) {
             py_Ref item = self->f_get(self, i, j);
-            if(!py_str(item)) return false;
+            if(!py_str(item)) {
+                c11_sbuf__dtor(&buf);
+                return false;
+            }
             c11_sbuf__write_sv(&buf, py_tosv(py_retval()));
         }
         if(j < self->n_rows - 1) c11_sbuf__write_char(&buf, '\n');
+    }
+    c11_sbuf__py_submit(&buf, py_retval());
+    return true;
+}
+
+void c11_color32_premult(c11_color32* color);
+
+static bool array2d_like_render_with_color(int argc, py_Ref argv) {
+    PY_CHECK_ARGC(3);
+    c11_sbuf buf;
+    c11_sbuf__ctor(&buf);
+    c11_array2d_like* self = py_touserdata(argv);
+
+    if(!py_checkinstance(py_arg(1), tp_array2d_like)) return false;
+    if(!py_checkinstance(py_arg(2), tp_array2d_like)) return false;
+    c11_array2d_like* fg_colors = py_touserdata(py_arg(1));
+    c11_array2d_like* bg_colors = py_touserdata(py_arg(2));
+
+    c11_color32 curr_fg, curr_bg;
+    curr_fg.u32 = 0;
+    curr_bg.u32 = 0;
+
+    for(int j = 0; j < self->n_rows; j++) {
+        for(int i = 0; i < self->n_cols; i++) {
+            py_Ref item = self->f_get(self, i, j);
+            if(!py_str(item)) {
+                c11_sbuf__dtor(&buf);
+                return false;
+            }
+
+            py_Ref fg_item = fg_colors->f_get(fg_colors, i, j);
+            py_Ref bg_item = bg_colors->f_get(bg_colors, i, j);
+
+            c11_color32 new_fg, new_bg;
+            if(py_isnone(fg_item)) {
+                new_fg.u32 = 0;
+            } else {
+                if(!py_checktype(fg_item, tp_color32)) {
+                    c11_sbuf__dtor(&buf);
+                    return false;
+                }
+                new_fg = py_tocolor32(fg_item);
+            }
+            if(py_isnone(bg_item)) {
+                new_bg.u32 = 0;
+            } else {
+                if(!py_checktype(bg_item, tp_color32)) {
+                    c11_sbuf__dtor(&buf);
+                    return false;
+                }
+                new_bg = py_tocolor32(bg_item);
+            }
+
+            if(curr_fg.u32 != new_fg.u32 || curr_bg.u32 != new_bg.u32) {
+                if(curr_fg.u32 != 0 || curr_bg.u32 != 0) c11_sbuf__write_cstr(&buf, "\x1b[0m");
+                curr_fg = new_fg;
+                curr_bg = new_bg;
+                if(curr_fg.u32 != 0) {
+                    c11_color32_premult(&curr_fg);
+                    pk_sprintf(&buf, "\x1b[38;2;%d;%d;%dm", curr_fg.r, curr_fg.g, curr_fg.b);
+                }
+                if(curr_bg.u32 != 0) {
+                    c11_color32_premult(&curr_bg);
+                    pk_sprintf(&buf, "\x1b[48;2;%d;%d;%dm", curr_bg.r, curr_bg.g, curr_bg.b);
+                }
+            }
+
+            c11_sbuf__write_sv(&buf, py_tosv(py_retval()));
+        }
+        // newline
+        if(j < self->n_rows - 1) {
+            curr_fg.u32 = 0;
+            curr_bg.u32 = 0;
+            c11_sbuf__write_cstr(&buf, "\x1b[0m\n");
+        } else {
+            c11_sbuf__write_cstr(&buf, "\x1b[0m");
+        }
     }
     c11_sbuf__py_submit(&buf, py_retval());
     return true;
@@ -19812,7 +20979,7 @@ static c11_array2d_view* _array2d_view__new(py_OutRef out,
     res->header.n_cols = width;
     res->header.n_rows = height;
     res->header.numel = width * height;
-    res->header.f_get = (py_Ref(*)(c11_array2d_like*, int, int))c11_array2d_view__get;
+    res->header.f_get = (py_Ref (*)(c11_array2d_like*, int, int))c11_array2d_view__get;
     res->header.f_set = (bool (*)(c11_array2d_like*, int, int, py_Ref))c11_array2d_view__set;
     res->origin.x = start_col;
     res->origin.y = start_row;
@@ -19830,7 +20997,7 @@ static bool _array2d_view(py_OutRef out,
     c11_array2d_view* res = _array2d_view__new(out, keepalive, start_col, start_row, width, height);
     if(res == NULL) return false;
     res->ctx = array;
-    res->f_get = (py_Ref(*)(void*, int, int))array->f_get;
+    res->f_get = (py_Ref (*)(void*, int, int))array->f_get;
     res->f_set = (bool (*)(void*, int, int, py_Ref))array->f_set;
     return true;
 }
@@ -19845,7 +21012,7 @@ static bool _chunked_array2d_view(py_OutRef out,
     c11_array2d_view* res = _array2d_view__new(out, keepalive, start_col, start_row, width, height);
     if(res == NULL) return false;
     res->ctx = array;
-    res->f_get = (py_Ref(*)(void*, int, int))c11_chunked_array2d__get;
+    res->f_get = (py_Ref (*)(void*, int, int))c11_chunked_array2d__get;
     res->f_set = (bool (*)(void*, int, int, py_Ref))c11_chunked_array2d__set;
     return true;
 }
@@ -20157,6 +21324,7 @@ static void register_array2d_like(py_Ref mod) {
     py_bindmethod(type, "index", array2d_like_index);
 
     py_bindmethod(type, "render", array2d_like_render);
+    py_bindmethod(type, "render_with_color", array2d_like_render_with_color);
 
     py_bindmethod(type, "all", array2d_like_all);
     py_bindmethod(type, "any", array2d_like_any);
@@ -21176,1025 +22344,1027 @@ void pk__add_module_easing() {
 }
 
 // src/modules/unicodedata.c
+// clang-format off
 const static c11_u32_range kEastAsianWidthRanges[] = {
-    {32,      126,     "Na\0"},
-    {161,     161,     "A\0" },
-    {162,     163,     "Na\0"},
-    {164,     164,     "A\0" },
-    {165,     166,     "Na\0"},
-    {167,     168,     "A\0" },
-    {170,     170,     "A\0" },
-    {172,     172,     "Na\0"},
-    {173,     174,     "A\0" },
-    {175,     175,     "Na\0"},
-    {176,     180,     "A\0" },
-    {182,     186,     "A\0" },
-    {188,     191,     "A\0" },
-    {198,     198,     "A\0" },
-    {208,     208,     "A\0" },
-    {215,     216,     "A\0" },
-    {222,     225,     "A\0" },
-    {230,     230,     "A\0" },
-    {232,     234,     "A\0" },
-    {236,     237,     "A\0" },
-    {240,     240,     "A\0" },
-    {242,     243,     "A\0" },
-    {247,     250,     "A\0" },
-    {252,     252,     "A\0" },
-    {254,     254,     "A\0" },
-    {257,     257,     "A\0" },
-    {273,     273,     "A\0" },
-    {275,     275,     "A\0" },
-    {283,     283,     "A\0" },
-    {294,     295,     "A\0" },
-    {299,     299,     "A\0" },
-    {305,     307,     "A\0" },
-    {312,     312,     "A\0" },
-    {319,     322,     "A\0" },
-    {324,     324,     "A\0" },
-    {328,     331,     "A\0" },
-    {333,     333,     "A\0" },
-    {338,     339,     "A\0" },
-    {358,     359,     "A\0" },
-    {363,     363,     "A\0" },
-    {462,     462,     "A\0" },
-    {464,     464,     "A\0" },
-    {466,     466,     "A\0" },
-    {468,     468,     "A\0" },
-    {470,     470,     "A\0" },
-    {472,     472,     "A\0" },
-    {474,     474,     "A\0" },
-    {476,     476,     "A\0" },
-    {593,     593,     "A\0" },
-    {609,     609,     "A\0" },
-    {708,     708,     "A\0" },
-    {711,     711,     "A\0" },
-    {713,     715,     "A\0" },
-    {717,     717,     "A\0" },
-    {720,     720,     "A\0" },
-    {728,     731,     "A\0" },
-    {733,     733,     "A\0" },
-    {735,     735,     "A\0" },
-    {768,     879,     "A\0" },
-    {888,     889,     "F\0" },
-    {896,     899,     "F\0" },
-    {907,     907,     "F\0" },
-    {909,     909,     "F\0" },
-    {913,     929,     "A\0" },
-    {930,     930,     "F\0" },
-    {931,     937,     "A\0" },
-    {945,     961,     "A\0" },
-    {963,     969,     "A\0" },
-    {1025,    1025,    "A\0" },
-    {1040,    1103,    "A\0" },
-    {1105,    1105,    "A\0" },
-    {1328,    1328,    "F\0" },
-    {1367,    1368,    "F\0" },
-    {1419,    1420,    "F\0" },
-    {1424,    1424,    "F\0" },
-    {1480,    1487,    "F\0" },
-    {1515,    1518,    "F\0" },
-    {1525,    1535,    "F\0" },
-    {1806,    1806,    "F\0" },
-    {1867,    1868,    "F\0" },
-    {1970,    1983,    "F\0" },
-    {2043,    2044,    "F\0" },
-    {2094,    2095,    "F\0" },
-    {2111,    2111,    "F\0" },
-    {2140,    2141,    "F\0" },
-    {2143,    2143,    "F\0" },
-    {2155,    2159,    "F\0" },
-    {2191,    2191,    "F\0" },
-    {2194,    2199,    "F\0" },
-    {2436,    2436,    "F\0" },
-    {2445,    2446,    "F\0" },
-    {2449,    2450,    "F\0" },
-    {2473,    2473,    "F\0" },
-    {2481,    2481,    "F\0" },
-    {2483,    2485,    "F\0" },
-    {2490,    2491,    "F\0" },
-    {2501,    2502,    "F\0" },
-    {2505,    2506,    "F\0" },
-    {2511,    2518,    "F\0" },
-    {2520,    2523,    "F\0" },
-    {2526,    2526,    "F\0" },
-    {2532,    2533,    "F\0" },
-    {2559,    2560,    "F\0" },
-    {2564,    2564,    "F\0" },
-    {2571,    2574,    "F\0" },
-    {2577,    2578,    "F\0" },
-    {2601,    2601,    "F\0" },
-    {2609,    2609,    "F\0" },
-    {2612,    2612,    "F\0" },
-    {2615,    2615,    "F\0" },
-    {2618,    2619,    "F\0" },
-    {2621,    2621,    "F\0" },
-    {2627,    2630,    "F\0" },
-    {2633,    2634,    "F\0" },
-    {2638,    2640,    "F\0" },
-    {2642,    2648,    "F\0" },
-    {2653,    2653,    "F\0" },
-    {2655,    2661,    "F\0" },
-    {2679,    2688,    "F\0" },
-    {2692,    2692,    "F\0" },
-    {2702,    2702,    "F\0" },
-    {2706,    2706,    "F\0" },
-    {2729,    2729,    "F\0" },
-    {2737,    2737,    "F\0" },
-    {2740,    2740,    "F\0" },
-    {2746,    2747,    "F\0" },
-    {2758,    2758,    "F\0" },
-    {2762,    2762,    "F\0" },
-    {2766,    2767,    "F\0" },
-    {2769,    2783,    "F\0" },
-    {2788,    2789,    "F\0" },
-    {2802,    2808,    "F\0" },
-    {2816,    2816,    "F\0" },
-    {2820,    2820,    "F\0" },
-    {2829,    2830,    "F\0" },
-    {2833,    2834,    "F\0" },
-    {2857,    2857,    "F\0" },
-    {2865,    2865,    "F\0" },
-    {2868,    2868,    "F\0" },
-    {2874,    2875,    "F\0" },
-    {2885,    2886,    "F\0" },
-    {2889,    2890,    "F\0" },
-    {2894,    2900,    "F\0" },
-    {2904,    2907,    "F\0" },
-    {2910,    2910,    "F\0" },
-    {2916,    2917,    "F\0" },
-    {2936,    2945,    "F\0" },
-    {2948,    2948,    "F\0" },
-    {2955,    2957,    "F\0" },
-    {2961,    2961,    "F\0" },
-    {2966,    2968,    "F\0" },
-    {2971,    2971,    "F\0" },
-    {2973,    2973,    "F\0" },
-    {2976,    2978,    "F\0" },
-    {2981,    2983,    "F\0" },
-    {2987,    2989,    "F\0" },
-    {3002,    3005,    "F\0" },
-    {3011,    3013,    "F\0" },
-    {3017,    3017,    "F\0" },
-    {3022,    3023,    "F\0" },
-    {3025,    3030,    "F\0" },
-    {3032,    3045,    "F\0" },
-    {3067,    3071,    "F\0" },
-    {3085,    3085,    "F\0" },
-    {3089,    3089,    "F\0" },
-    {3113,    3113,    "F\0" },
-    {3130,    3131,    "F\0" },
-    {3141,    3141,    "F\0" },
-    {3145,    3145,    "F\0" },
-    {3150,    3156,    "F\0" },
-    {3159,    3159,    "F\0" },
-    {3163,    3164,    "F\0" },
-    {3166,    3167,    "F\0" },
-    {3172,    3173,    "F\0" },
-    {3184,    3190,    "F\0" },
-    {3213,    3213,    "F\0" },
-    {3217,    3217,    "F\0" },
-    {3241,    3241,    "F\0" },
-    {3252,    3252,    "F\0" },
-    {3258,    3259,    "F\0" },
-    {3269,    3269,    "F\0" },
-    {3273,    3273,    "F\0" },
-    {3278,    3284,    "F\0" },
-    {3287,    3292,    "F\0" },
-    {3295,    3295,    "F\0" },
-    {3300,    3301,    "F\0" },
-    {3312,    3312,    "F\0" },
-    {3315,    3327,    "F\0" },
-    {3341,    3341,    "F\0" },
-    {3345,    3345,    "F\0" },
-    {3397,    3397,    "F\0" },
-    {3401,    3401,    "F\0" },
-    {3408,    3411,    "F\0" },
-    {3428,    3429,    "F\0" },
-    {3456,    3456,    "F\0" },
-    {3460,    3460,    "F\0" },
-    {3479,    3481,    "F\0" },
-    {3506,    3506,    "F\0" },
-    {3516,    3516,    "F\0" },
-    {3518,    3519,    "F\0" },
-    {3527,    3529,    "F\0" },
-    {3531,    3534,    "F\0" },
-    {3541,    3541,    "F\0" },
-    {3543,    3543,    "F\0" },
-    {3552,    3557,    "F\0" },
-    {3568,    3569,    "F\0" },
-    {3573,    3584,    "F\0" },
-    {3643,    3646,    "F\0" },
-    {3676,    3712,    "F\0" },
-    {3715,    3715,    "F\0" },
-    {3717,    3717,    "F\0" },
-    {3723,    3723,    "F\0" },
-    {3748,    3748,    "F\0" },
-    {3750,    3750,    "F\0" },
-    {3774,    3775,    "F\0" },
-    {3781,    3781,    "F\0" },
-    {3783,    3783,    "F\0" },
-    {3790,    3791,    "F\0" },
-    {3802,    3803,    "F\0" },
-    {3808,    3839,    "F\0" },
-    {3912,    3912,    "F\0" },
-    {3949,    3952,    "F\0" },
-    {3992,    3992,    "F\0" },
-    {4029,    4029,    "F\0" },
-    {4045,    4045,    "F\0" },
-    {4059,    4095,    "F\0" },
-    {4294,    4294,    "F\0" },
-    {4296,    4300,    "F\0" },
-    {4302,    4303,    "F\0" },
-    {4352,    4447,    "W\0" },
-    {4681,    4681,    "F\0" },
-    {4686,    4687,    "F\0" },
-    {4695,    4695,    "F\0" },
-    {4697,    4697,    "F\0" },
-    {4702,    4703,    "F\0" },
-    {4745,    4745,    "F\0" },
-    {4750,    4751,    "F\0" },
-    {4785,    4785,    "F\0" },
-    {4790,    4791,    "F\0" },
-    {4799,    4799,    "F\0" },
-    {4801,    4801,    "F\0" },
-    {4806,    4807,    "F\0" },
-    {4823,    4823,    "F\0" },
-    {4881,    4881,    "F\0" },
-    {4886,    4887,    "F\0" },
-    {4955,    4956,    "F\0" },
-    {4989,    4991,    "F\0" },
-    {5018,    5023,    "F\0" },
-    {5110,    5111,    "F\0" },
-    {5118,    5119,    "F\0" },
-    {5789,    5791,    "F\0" },
-    {5881,    5887,    "F\0" },
-    {5910,    5918,    "F\0" },
-    {5943,    5951,    "F\0" },
-    {5972,    5983,    "F\0" },
-    {5997,    5997,    "F\0" },
-    {6001,    6001,    "F\0" },
-    {6004,    6015,    "F\0" },
-    {6110,    6111,    "F\0" },
-    {6122,    6127,    "F\0" },
-    {6138,    6143,    "F\0" },
-    {6170,    6175,    "F\0" },
-    {6265,    6271,    "F\0" },
-    {6315,    6319,    "F\0" },
-    {6390,    6399,    "F\0" },
-    {6431,    6431,    "F\0" },
-    {6444,    6447,    "F\0" },
-    {6460,    6463,    "F\0" },
-    {6465,    6467,    "F\0" },
-    {6510,    6511,    "F\0" },
-    {6517,    6527,    "F\0" },
-    {6572,    6575,    "F\0" },
-    {6602,    6607,    "F\0" },
-    {6619,    6621,    "F\0" },
-    {6684,    6685,    "F\0" },
-    {6751,    6751,    "F\0" },
-    {6781,    6782,    "F\0" },
-    {6794,    6799,    "F\0" },
-    {6810,    6815,    "F\0" },
-    {6830,    6831,    "F\0" },
-    {6863,    6911,    "F\0" },
-    {6989,    6991,    "F\0" },
-    {7039,    7039,    "F\0" },
-    {7156,    7163,    "F\0" },
-    {7224,    7226,    "F\0" },
-    {7242,    7244,    "F\0" },
-    {7305,    7311,    "F\0" },
-    {7355,    7356,    "F\0" },
-    {7368,    7375,    "F\0" },
-    {7419,    7423,    "F\0" },
-    {7958,    7959,    "F\0" },
-    {7966,    7967,    "F\0" },
-    {8006,    8007,    "F\0" },
-    {8014,    8015,    "F\0" },
-    {8024,    8024,    "F\0" },
-    {8026,    8026,    "F\0" },
-    {8028,    8028,    "F\0" },
-    {8030,    8030,    "F\0" },
-    {8062,    8063,    "F\0" },
-    {8117,    8117,    "F\0" },
-    {8133,    8133,    "F\0" },
-    {8148,    8149,    "F\0" },
-    {8156,    8156,    "F\0" },
-    {8176,    8177,    "F\0" },
-    {8181,    8181,    "F\0" },
-    {8191,    8191,    "F\0" },
-    {8208,    8208,    "A\0" },
-    {8211,    8214,    "A\0" },
-    {8216,    8217,    "A\0" },
-    {8220,    8221,    "A\0" },
-    {8224,    8226,    "A\0" },
-    {8228,    8231,    "A\0" },
-    {8240,    8240,    "A\0" },
-    {8242,    8243,    "A\0" },
-    {8245,    8245,    "A\0" },
-    {8251,    8251,    "A\0" },
-    {8254,    8254,    "A\0" },
-    {8293,    8293,    "F\0" },
-    {8306,    8307,    "F\0" },
-    {8308,    8308,    "A\0" },
-    {8319,    8319,    "A\0" },
-    {8321,    8324,    "A\0" },
-    {8335,    8335,    "F\0" },
-    {8349,    8351,    "F\0" },
-    {8361,    8361,    "H\0" },
-    {8364,    8364,    "A\0" },
-    {8385,    8399,    "F\0" },
-    {8433,    8447,    "F\0" },
-    {8451,    8451,    "A\0" },
-    {8453,    8453,    "A\0" },
-    {8457,    8457,    "A\0" },
-    {8467,    8467,    "A\0" },
-    {8470,    8470,    "A\0" },
-    {8481,    8482,    "A\0" },
-    {8486,    8486,    "A\0" },
-    {8491,    8491,    "A\0" },
-    {8531,    8532,    "A\0" },
-    {8539,    8542,    "A\0" },
-    {8544,    8555,    "A\0" },
-    {8560,    8569,    "A\0" },
-    {8585,    8585,    "A\0" },
-    {8588,    8591,    "F\0" },
-    {8592,    8601,    "A\0" },
-    {8632,    8633,    "A\0" },
-    {8658,    8658,    "A\0" },
-    {8660,    8660,    "A\0" },
-    {8679,    8679,    "A\0" },
-    {8704,    8704,    "A\0" },
-    {8706,    8707,    "A\0" },
-    {8711,    8712,    "A\0" },
-    {8715,    8715,    "A\0" },
-    {8719,    8719,    "A\0" },
-    {8721,    8721,    "A\0" },
-    {8725,    8725,    "A\0" },
-    {8730,    8730,    "A\0" },
-    {8733,    8736,    "A\0" },
-    {8739,    8739,    "A\0" },
-    {8741,    8741,    "A\0" },
-    {8743,    8748,    "A\0" },
-    {8750,    8750,    "A\0" },
-    {8756,    8759,    "A\0" },
-    {8764,    8765,    "A\0" },
-    {8776,    8776,    "A\0" },
-    {8780,    8780,    "A\0" },
-    {8786,    8786,    "A\0" },
-    {8800,    8801,    "A\0" },
-    {8804,    8807,    "A\0" },
-    {8810,    8811,    "A\0" },
-    {8814,    8815,    "A\0" },
-    {8834,    8835,    "A\0" },
-    {8838,    8839,    "A\0" },
-    {8853,    8853,    "A\0" },
-    {8857,    8857,    "A\0" },
-    {8869,    8869,    "A\0" },
-    {8895,    8895,    "A\0" },
-    {8978,    8978,    "A\0" },
-    {8986,    8987,    "W\0" },
-    {9001,    9002,    "W\0" },
-    {9193,    9196,    "W\0" },
-    {9200,    9200,    "W\0" },
-    {9203,    9203,    "W\0" },
-    {9255,    9279,    "F\0" },
-    {9291,    9311,    "F\0" },
-    {9312,    9449,    "A\0" },
-    {9451,    9547,    "A\0" },
-    {9552,    9587,    "A\0" },
-    {9600,    9615,    "A\0" },
-    {9618,    9621,    "A\0" },
-    {9632,    9633,    "A\0" },
-    {9635,    9641,    "A\0" },
-    {9650,    9651,    "A\0" },
-    {9654,    9655,    "A\0" },
-    {9660,    9661,    "A\0" },
-    {9664,    9665,    "A\0" },
-    {9670,    9672,    "A\0" },
-    {9675,    9675,    "A\0" },
-    {9678,    9681,    "A\0" },
-    {9698,    9701,    "A\0" },
-    {9711,    9711,    "A\0" },
-    {9725,    9726,    "W\0" },
-    {9733,    9734,    "A\0" },
-    {9737,    9737,    "A\0" },
-    {9742,    9743,    "A\0" },
-    {9748,    9749,    "W\0" },
-    {9756,    9756,    "A\0" },
-    {9758,    9758,    "A\0" },
-    {9792,    9792,    "A\0" },
-    {9794,    9794,    "A\0" },
-    {9800,    9811,    "W\0" },
-    {9824,    9825,    "A\0" },
-    {9827,    9829,    "A\0" },
-    {9831,    9834,    "A\0" },
-    {9836,    9837,    "A\0" },
-    {9839,    9839,    "A\0" },
-    {9855,    9855,    "W\0" },
-    {9875,    9875,    "W\0" },
-    {9886,    9887,    "A\0" },
-    {9889,    9889,    "W\0" },
-    {9898,    9899,    "W\0" },
-    {9917,    9918,    "W\0" },
-    {9919,    9919,    "A\0" },
-    {9924,    9925,    "W\0" },
-    {9926,    9933,    "A\0" },
-    {9934,    9934,    "W\0" },
-    {9935,    9939,    "A\0" },
-    {9940,    9940,    "W\0" },
-    {9941,    9953,    "A\0" },
-    {9955,    9955,    "A\0" },
-    {9960,    9961,    "A\0" },
-    {9962,    9962,    "W\0" },
-    {9963,    9969,    "A\0" },
-    {9970,    9971,    "W\0" },
-    {9972,    9972,    "A\0" },
-    {9973,    9973,    "W\0" },
-    {9974,    9977,    "A\0" },
-    {9978,    9978,    "W\0" },
-    {9979,    9980,    "A\0" },
-    {9981,    9981,    "W\0" },
-    {9982,    9983,    "A\0" },
-    {9989,    9989,    "W\0" },
-    {9994,    9995,    "W\0" },
-    {10024,   10024,   "W\0" },
-    {10045,   10045,   "A\0" },
-    {10060,   10060,   "W\0" },
-    {10062,   10062,   "W\0" },
-    {10067,   10069,   "W\0" },
-    {10071,   10071,   "W\0" },
-    {10102,   10111,   "A\0" },
-    {10133,   10135,   "W\0" },
-    {10160,   10160,   "W\0" },
-    {10175,   10175,   "W\0" },
-    {10214,   10221,   "Na\0"},
-    {10629,   10630,   "Na\0"},
-    {11035,   11036,   "W\0" },
-    {11088,   11088,   "W\0" },
-    {11093,   11093,   "W\0" },
-    {11094,   11097,   "A\0" },
-    {11124,   11125,   "F\0" },
-    {11158,   11158,   "F\0" },
-    {11508,   11512,   "F\0" },
-    {11558,   11558,   "F\0" },
-    {11560,   11564,   "F\0" },
-    {11566,   11567,   "F\0" },
-    {11624,   11630,   "F\0" },
-    {11633,   11646,   "F\0" },
-    {11671,   11679,   "F\0" },
-    {11687,   11687,   "F\0" },
-    {11695,   11695,   "F\0" },
-    {11703,   11703,   "F\0" },
-    {11711,   11711,   "F\0" },
-    {11719,   11719,   "F\0" },
-    {11727,   11727,   "F\0" },
-    {11735,   11735,   "F\0" },
-    {11743,   11743,   "F\0" },
-    {11870,   11903,   "F\0" },
-    {11904,   11929,   "W\0" },
-    {11930,   11930,   "F\0" },
-    {11931,   12019,   "W\0" },
-    {12020,   12031,   "F\0" },
-    {12032,   12245,   "W\0" },
-    {12246,   12271,   "F\0" },
-    {12272,   12283,   "W\0" },
-    {12284,   12288,   "F\0" },
-    {12289,   12350,   "W\0" },
-    {12352,   12352,   "F\0" },
-    {12353,   12438,   "W\0" },
-    {12439,   12440,   "F\0" },
-    {12441,   12543,   "W\0" },
-    {12544,   12548,   "F\0" },
-    {12549,   12591,   "W\0" },
-    {12592,   12592,   "F\0" },
-    {12593,   12686,   "W\0" },
-    {12687,   12687,   "F\0" },
-    {12688,   12771,   "W\0" },
-    {12772,   12783,   "F\0" },
-    {12784,   12830,   "W\0" },
-    {12831,   12831,   "F\0" },
-    {12832,   12871,   "W\0" },
-    {12872,   12879,   "A\0" },
-    {12880,   19903,   "W\0" },
-    {19968,   42124,   "W\0" },
-    {42125,   42127,   "F\0" },
-    {42128,   42182,   "W\0" },
-    {42183,   42191,   "F\0" },
-    {42540,   42559,   "F\0" },
-    {42744,   42751,   "F\0" },
-    {42955,   42959,   "F\0" },
-    {42962,   42962,   "F\0" },
-    {42964,   42964,   "F\0" },
-    {42970,   42993,   "F\0" },
-    {43053,   43055,   "F\0" },
-    {43066,   43071,   "F\0" },
-    {43128,   43135,   "F\0" },
-    {43206,   43213,   "F\0" },
-    {43226,   43231,   "F\0" },
-    {43348,   43358,   "F\0" },
-    {43360,   43388,   "W\0" },
-    {43389,   43391,   "F\0" },
-    {43470,   43470,   "F\0" },
-    {43482,   43485,   "F\0" },
-    {43519,   43519,   "F\0" },
-    {43575,   43583,   "F\0" },
-    {43598,   43599,   "F\0" },
-    {43610,   43611,   "F\0" },
-    {43715,   43738,   "F\0" },
-    {43767,   43776,   "F\0" },
-    {43783,   43784,   "F\0" },
-    {43791,   43792,   "F\0" },
-    {43799,   43807,   "F\0" },
-    {43815,   43815,   "F\0" },
-    {43823,   43823,   "F\0" },
-    {43884,   43887,   "F\0" },
-    {44014,   44015,   "F\0" },
-    {44026,   44031,   "F\0" },
-    {44032,   55203,   "W\0" },
-    {55204,   55215,   "F\0" },
-    {55239,   55242,   "F\0" },
-    {55292,   55295,   "F\0" },
-    {57344,   63743,   "A\0" },
-    {63744,   64109,   "W\0" },
-    {64110,   64111,   "F\0" },
-    {64112,   64217,   "W\0" },
-    {64218,   64255,   "F\0" },
-    {64263,   64274,   "F\0" },
-    {64280,   64284,   "F\0" },
-    {64311,   64311,   "F\0" },
-    {64317,   64317,   "F\0" },
-    {64319,   64319,   "F\0" },
-    {64322,   64322,   "F\0" },
-    {64325,   64325,   "F\0" },
-    {64451,   64466,   "F\0" },
-    {64912,   64913,   "F\0" },
-    {64968,   64974,   "F\0" },
-    {64976,   65007,   "F\0" },
-    {65024,   65039,   "A\0" },
-    {65040,   65049,   "W\0" },
-    {65050,   65055,   "F\0" },
-    {65072,   65106,   "W\0" },
-    {65107,   65107,   "F\0" },
-    {65108,   65126,   "W\0" },
-    {65127,   65127,   "F\0" },
-    {65128,   65131,   "W\0" },
-    {65132,   65135,   "F\0" },
-    {65141,   65141,   "F\0" },
-    {65277,   65278,   "F\0" },
-    {65280,   65376,   "F\0" },
-    {65377,   65470,   "H\0" },
-    {65471,   65473,   "F\0" },
-    {65474,   65479,   "H\0" },
-    {65480,   65481,   "F\0" },
-    {65482,   65487,   "H\0" },
-    {65488,   65489,   "F\0" },
-    {65490,   65495,   "H\0" },
-    {65496,   65497,   "F\0" },
-    {65498,   65500,   "H\0" },
-    {65501,   65511,   "F\0" },
-    {65512,   65518,   "H\0" },
-    {65519,   65528,   "F\0" },
-    {65533,   65533,   "A\0" },
-    {65534,   65535,   "F\0" },
-    {65548,   65548,   "F\0" },
-    {65575,   65575,   "F\0" },
-    {65595,   65595,   "F\0" },
-    {65598,   65598,   "F\0" },
-    {65614,   65615,   "F\0" },
-    {65630,   65663,   "F\0" },
-    {65787,   65791,   "F\0" },
-    {65795,   65798,   "F\0" },
-    {65844,   65846,   "F\0" },
-    {65935,   65935,   "F\0" },
-    {65949,   65951,   "F\0" },
-    {65953,   65999,   "F\0" },
-    {66046,   66175,   "F\0" },
-    {66205,   66207,   "F\0" },
-    {66257,   66271,   "F\0" },
-    {66300,   66303,   "F\0" },
-    {66340,   66348,   "F\0" },
-    {66379,   66383,   "F\0" },
-    {66427,   66431,   "F\0" },
-    {66462,   66462,   "F\0" },
-    {66500,   66503,   "F\0" },
-    {66518,   66559,   "F\0" },
-    {66718,   66719,   "F\0" },
-    {66730,   66735,   "F\0" },
-    {66772,   66775,   "F\0" },
-    {66812,   66815,   "F\0" },
-    {66856,   66863,   "F\0" },
-    {66916,   66926,   "F\0" },
-    {66939,   66939,   "F\0" },
-    {66955,   66955,   "F\0" },
-    {66963,   66963,   "F\0" },
-    {66966,   66966,   "F\0" },
-    {66978,   66978,   "F\0" },
-    {66994,   66994,   "F\0" },
-    {67002,   67002,   "F\0" },
-    {67005,   67071,   "F\0" },
-    {67383,   67391,   "F\0" },
-    {67414,   67423,   "F\0" },
-    {67432,   67455,   "F\0" },
-    {67462,   67462,   "F\0" },
-    {67505,   67505,   "F\0" },
-    {67515,   67583,   "F\0" },
-    {67590,   67591,   "F\0" },
-    {67593,   67593,   "F\0" },
-    {67638,   67638,   "F\0" },
-    {67641,   67643,   "F\0" },
-    {67645,   67646,   "F\0" },
-    {67670,   67670,   "F\0" },
-    {67743,   67750,   "F\0" },
-    {67760,   67807,   "F\0" },
-    {67827,   67827,   "F\0" },
-    {67830,   67834,   "F\0" },
-    {67868,   67870,   "F\0" },
-    {67898,   67902,   "F\0" },
-    {67904,   67967,   "F\0" },
-    {68024,   68027,   "F\0" },
-    {68048,   68049,   "F\0" },
-    {68100,   68100,   "F\0" },
-    {68103,   68107,   "F\0" },
-    {68116,   68116,   "F\0" },
-    {68120,   68120,   "F\0" },
-    {68150,   68151,   "F\0" },
-    {68155,   68158,   "F\0" },
-    {68169,   68175,   "F\0" },
-    {68185,   68191,   "F\0" },
-    {68256,   68287,   "F\0" },
-    {68327,   68330,   "F\0" },
-    {68343,   68351,   "F\0" },
-    {68406,   68408,   "F\0" },
-    {68438,   68439,   "F\0" },
-    {68467,   68471,   "F\0" },
-    {68498,   68504,   "F\0" },
-    {68509,   68520,   "F\0" },
-    {68528,   68607,   "F\0" },
-    {68681,   68735,   "F\0" },
-    {68787,   68799,   "F\0" },
-    {68851,   68857,   "F\0" },
-    {68904,   68911,   "F\0" },
-    {68922,   69215,   "F\0" },
-    {69247,   69247,   "F\0" },
-    {69290,   69290,   "F\0" },
-    {69294,   69295,   "F\0" },
-    {69298,   69375,   "F\0" },
-    {69416,   69423,   "F\0" },
-    {69466,   69487,   "F\0" },
-    {69514,   69551,   "F\0" },
-    {69580,   69599,   "F\0" },
-    {69623,   69631,   "F\0" },
-    {69710,   69713,   "F\0" },
-    {69750,   69758,   "F\0" },
-    {69827,   69836,   "F\0" },
-    {69838,   69839,   "F\0" },
-    {69865,   69871,   "F\0" },
-    {69882,   69887,   "F\0" },
-    {69941,   69941,   "F\0" },
-    {69960,   69967,   "F\0" },
-    {70007,   70015,   "F\0" },
-    {70112,   70112,   "F\0" },
-    {70133,   70143,   "F\0" },
-    {70162,   70162,   "F\0" },
-    {70207,   70271,   "F\0" },
-    {70279,   70279,   "F\0" },
-    {70281,   70281,   "F\0" },
-    {70286,   70286,   "F\0" },
-    {70302,   70302,   "F\0" },
-    {70314,   70319,   "F\0" },
-    {70379,   70383,   "F\0" },
-    {70394,   70399,   "F\0" },
-    {70404,   70404,   "F\0" },
-    {70413,   70414,   "F\0" },
-    {70417,   70418,   "F\0" },
-    {70441,   70441,   "F\0" },
-    {70449,   70449,   "F\0" },
-    {70452,   70452,   "F\0" },
-    {70458,   70458,   "F\0" },
-    {70469,   70470,   "F\0" },
-    {70473,   70474,   "F\0" },
-    {70478,   70479,   "F\0" },
-    {70481,   70486,   "F\0" },
-    {70488,   70492,   "F\0" },
-    {70500,   70501,   "F\0" },
-    {70509,   70511,   "F\0" },
-    {70517,   70655,   "F\0" },
-    {70748,   70748,   "F\0" },
-    {70754,   70783,   "F\0" },
-    {70856,   70863,   "F\0" },
-    {70874,   71039,   "F\0" },
-    {71094,   71095,   "F\0" },
-    {71134,   71167,   "F\0" },
-    {71237,   71247,   "F\0" },
-    {71258,   71263,   "F\0" },
-    {71277,   71295,   "F\0" },
-    {71354,   71359,   "F\0" },
-    {71370,   71423,   "F\0" },
-    {71451,   71452,   "F\0" },
-    {71468,   71471,   "F\0" },
-    {71495,   71679,   "F\0" },
-    {71740,   71839,   "F\0" },
-    {71923,   71934,   "F\0" },
-    {71943,   71944,   "F\0" },
-    {71946,   71947,   "F\0" },
-    {71956,   71956,   "F\0" },
-    {71959,   71959,   "F\0" },
-    {71990,   71990,   "F\0" },
-    {71993,   71994,   "F\0" },
-    {72007,   72015,   "F\0" },
-    {72026,   72095,   "F\0" },
-    {72104,   72105,   "F\0" },
-    {72152,   72153,   "F\0" },
-    {72165,   72191,   "F\0" },
-    {72264,   72271,   "F\0" },
-    {72355,   72367,   "F\0" },
-    {72441,   72703,   "F\0" },
-    {72713,   72713,   "F\0" },
-    {72759,   72759,   "F\0" },
-    {72774,   72783,   "F\0" },
-    {72813,   72815,   "F\0" },
-    {72848,   72849,   "F\0" },
-    {72872,   72872,   "F\0" },
-    {72887,   72959,   "F\0" },
-    {72967,   72967,   "F\0" },
-    {72970,   72970,   "F\0" },
-    {73015,   73017,   "F\0" },
-    {73019,   73019,   "F\0" },
-    {73022,   73022,   "F\0" },
-    {73032,   73039,   "F\0" },
-    {73050,   73055,   "F\0" },
-    {73062,   73062,   "F\0" },
-    {73065,   73065,   "F\0" },
-    {73103,   73103,   "F\0" },
-    {73106,   73106,   "F\0" },
-    {73113,   73119,   "F\0" },
-    {73130,   73439,   "F\0" },
-    {73465,   73647,   "F\0" },
-    {73649,   73663,   "F\0" },
-    {73714,   73726,   "F\0" },
-    {74650,   74751,   "F\0" },
-    {74863,   74863,   "F\0" },
-    {74869,   74879,   "F\0" },
-    {75076,   77711,   "F\0" },
-    {77811,   77823,   "F\0" },
-    {78895,   78895,   "F\0" },
-    {78905,   82943,   "F\0" },
-    {83527,   92159,   "F\0" },
-    {92729,   92735,   "F\0" },
-    {92767,   92767,   "F\0" },
-    {92778,   92781,   "F\0" },
-    {92863,   92863,   "F\0" },
-    {92874,   92879,   "F\0" },
-    {92910,   92911,   "F\0" },
-    {92918,   92927,   "F\0" },
-    {92998,   93007,   "F\0" },
-    {93018,   93018,   "F\0" },
-    {93026,   93026,   "F\0" },
-    {93048,   93052,   "F\0" },
-    {93072,   93759,   "F\0" },
-    {93851,   93951,   "F\0" },
-    {94027,   94030,   "F\0" },
-    {94088,   94094,   "F\0" },
-    {94112,   94175,   "F\0" },
-    {94176,   94180,   "W\0" },
-    {94181,   94191,   "F\0" },
-    {94192,   94193,   "W\0" },
-    {94194,   94207,   "F\0" },
-    {94208,   100343,  "W\0" },
-    {100344,  100351,  "F\0" },
-    {100352,  101589,  "W\0" },
-    {101590,  101631,  "F\0" },
-    {101632,  101640,  "W\0" },
-    {101641,  110575,  "F\0" },
-    {110576,  110579,  "W\0" },
-    {110580,  110580,  "F\0" },
-    {110581,  110587,  "W\0" },
-    {110588,  110588,  "F\0" },
-    {110589,  110590,  "W\0" },
-    {110591,  110591,  "F\0" },
-    {110592,  110882,  "W\0" },
-    {110883,  110927,  "F\0" },
-    {110928,  110930,  "W\0" },
-    {110931,  110947,  "F\0" },
-    {110948,  110951,  "W\0" },
-    {110952,  110959,  "F\0" },
-    {110960,  111355,  "W\0" },
-    {111356,  113663,  "F\0" },
-    {113771,  113775,  "F\0" },
-    {113789,  113791,  "F\0" },
-    {113801,  113807,  "F\0" },
-    {113818,  113819,  "F\0" },
-    {113828,  118527,  "F\0" },
-    {118574,  118575,  "F\0" },
-    {118599,  118607,  "F\0" },
-    {118724,  118783,  "F\0" },
-    {119030,  119039,  "F\0" },
-    {119079,  119080,  "F\0" },
-    {119275,  119295,  "F\0" },
-    {119366,  119519,  "F\0" },
-    {119540,  119551,  "F\0" },
-    {119639,  119647,  "F\0" },
-    {119673,  119807,  "F\0" },
-    {119893,  119893,  "F\0" },
-    {119965,  119965,  "F\0" },
-    {119968,  119969,  "F\0" },
-    {119971,  119972,  "F\0" },
-    {119975,  119976,  "F\0" },
-    {119981,  119981,  "F\0" },
-    {119994,  119994,  "F\0" },
-    {119996,  119996,  "F\0" },
-    {120004,  120004,  "F\0" },
-    {120070,  120070,  "F\0" },
-    {120075,  120076,  "F\0" },
-    {120085,  120085,  "F\0" },
-    {120093,  120093,  "F\0" },
-    {120122,  120122,  "F\0" },
-    {120127,  120127,  "F\0" },
-    {120133,  120133,  "F\0" },
-    {120135,  120137,  "F\0" },
-    {120145,  120145,  "F\0" },
-    {120486,  120487,  "F\0" },
-    {120780,  120781,  "F\0" },
-    {121484,  121498,  "F\0" },
-    {121504,  121504,  "F\0" },
-    {121520,  122623,  "F\0" },
-    {122655,  122879,  "F\0" },
-    {122887,  122887,  "F\0" },
-    {122905,  122906,  "F\0" },
-    {122914,  122914,  "F\0" },
-    {122917,  122917,  "F\0" },
-    {122923,  123135,  "F\0" },
-    {123181,  123183,  "F\0" },
-    {123198,  123199,  "F\0" },
-    {123210,  123213,  "F\0" },
-    {123216,  123535,  "F\0" },
-    {123567,  123583,  "F\0" },
-    {123642,  123646,  "F\0" },
-    {123648,  124895,  "F\0" },
-    {124903,  124903,  "F\0" },
-    {124908,  124908,  "F\0" },
-    {124911,  124911,  "F\0" },
-    {124927,  124927,  "F\0" },
-    {125125,  125126,  "F\0" },
-    {125143,  125183,  "F\0" },
-    {125260,  125263,  "F\0" },
-    {125274,  125277,  "F\0" },
-    {125280,  126064,  "F\0" },
-    {126133,  126208,  "F\0" },
-    {126270,  126463,  "F\0" },
-    {126468,  126468,  "F\0" },
-    {126496,  126496,  "F\0" },
-    {126499,  126499,  "F\0" },
-    {126501,  126502,  "F\0" },
-    {126504,  126504,  "F\0" },
-    {126515,  126515,  "F\0" },
-    {126520,  126520,  "F\0" },
-    {126522,  126522,  "F\0" },
-    {126524,  126529,  "F\0" },
-    {126531,  126534,  "F\0" },
-    {126536,  126536,  "F\0" },
-    {126538,  126538,  "F\0" },
-    {126540,  126540,  "F\0" },
-    {126544,  126544,  "F\0" },
-    {126547,  126547,  "F\0" },
-    {126549,  126550,  "F\0" },
-    {126552,  126552,  "F\0" },
-    {126554,  126554,  "F\0" },
-    {126556,  126556,  "F\0" },
-    {126558,  126558,  "F\0" },
-    {126560,  126560,  "F\0" },
-    {126563,  126563,  "F\0" },
-    {126565,  126566,  "F\0" },
-    {126571,  126571,  "F\0" },
-    {126579,  126579,  "F\0" },
-    {126584,  126584,  "F\0" },
-    {126589,  126589,  "F\0" },
-    {126591,  126591,  "F\0" },
-    {126602,  126602,  "F\0" },
-    {126620,  126624,  "F\0" },
-    {126628,  126628,  "F\0" },
-    {126634,  126634,  "F\0" },
-    {126652,  126703,  "F\0" },
-    {126706,  126975,  "F\0" },
-    {126980,  126980,  "W\0" },
-    {127020,  127023,  "F\0" },
-    {127124,  127135,  "F\0" },
-    {127151,  127152,  "F\0" },
-    {127168,  127168,  "F\0" },
-    {127183,  127183,  "W\0" },
-    {127184,  127184,  "F\0" },
-    {127222,  127231,  "F\0" },
-    {127232,  127242,  "A\0" },
-    {127248,  127277,  "A\0" },
-    {127280,  127337,  "A\0" },
-    {127344,  127373,  "A\0" },
-    {127374,  127374,  "W\0" },
-    {127375,  127376,  "A\0" },
-    {127377,  127386,  "W\0" },
-    {127387,  127404,  "A\0" },
-    {127406,  127461,  "F\0" },
-    {127488,  127490,  "W\0" },
-    {127491,  127503,  "F\0" },
-    {127504,  127547,  "W\0" },
-    {127548,  127551,  "F\0" },
-    {127552,  127560,  "W\0" },
-    {127561,  127567,  "F\0" },
-    {127568,  127569,  "W\0" },
-    {127570,  127583,  "F\0" },
-    {127584,  127589,  "W\0" },
-    {127590,  127743,  "F\0" },
-    {127744,  127776,  "W\0" },
-    {127789,  127797,  "W\0" },
-    {127799,  127868,  "W\0" },
-    {127870,  127891,  "W\0" },
-    {127904,  127946,  "W\0" },
-    {127951,  127955,  "W\0" },
-    {127968,  127984,  "W\0" },
-    {127988,  127988,  "W\0" },
-    {127992,  128062,  "W\0" },
-    {128064,  128064,  "W\0" },
-    {128066,  128252,  "W\0" },
-    {128255,  128317,  "W\0" },
-    {128331,  128334,  "W\0" },
-    {128336,  128359,  "W\0" },
-    {128378,  128378,  "W\0" },
-    {128405,  128406,  "W\0" },
-    {128420,  128420,  "W\0" },
-    {128507,  128591,  "W\0" },
-    {128640,  128709,  "W\0" },
-    {128716,  128716,  "W\0" },
-    {128720,  128722,  "W\0" },
-    {128725,  128727,  "W\0" },
-    {128728,  128732,  "F\0" },
-    {128733,  128735,  "W\0" },
-    {128747,  128748,  "W\0" },
-    {128749,  128751,  "F\0" },
-    {128756,  128764,  "W\0" },
-    {128765,  128767,  "F\0" },
-    {128884,  128895,  "F\0" },
-    {128985,  128991,  "F\0" },
-    {128992,  129003,  "W\0" },
-    {129004,  129007,  "F\0" },
-    {129008,  129008,  "W\0" },
-    {129009,  129023,  "F\0" },
-    {129036,  129039,  "F\0" },
-    {129096,  129103,  "F\0" },
-    {129114,  129119,  "F\0" },
-    {129160,  129167,  "F\0" },
-    {129198,  129199,  "F\0" },
-    {129202,  129279,  "F\0" },
-    {129292,  129338,  "W\0" },
-    {129340,  129349,  "W\0" },
-    {129351,  129535,  "W\0" },
-    {129620,  129631,  "F\0" },
-    {129646,  129647,  "F\0" },
-    {129648,  129652,  "W\0" },
-    {129653,  129655,  "F\0" },
-    {129656,  129660,  "W\0" },
-    {129661,  129663,  "F\0" },
-    {129664,  129670,  "W\0" },
-    {129671,  129679,  "F\0" },
-    {129680,  129708,  "W\0" },
-    {129709,  129711,  "F\0" },
-    {129712,  129722,  "W\0" },
-    {129723,  129727,  "F\0" },
-    {129728,  129733,  "W\0" },
-    {129734,  129743,  "F\0" },
-    {129744,  129753,  "W\0" },
-    {129754,  129759,  "F\0" },
-    {129760,  129767,  "W\0" },
-    {129768,  129775,  "F\0" },
-    {129776,  129782,  "W\0" },
-    {129783,  129791,  "F\0" },
-    {129939,  129939,  "F\0" },
-    {129995,  130031,  "F\0" },
-    {130042,  131071,  "F\0" },
-    {131072,  173791,  "W\0" },
-    {173792,  173823,  "F\0" },
-    {173824,  177976,  "W\0" },
-    {177977,  177983,  "F\0" },
-    {177984,  178205,  "W\0" },
-    {178206,  178207,  "F\0" },
-    {178208,  183969,  "W\0" },
-    {183970,  183983,  "F\0" },
-    {183984,  191456,  "W\0" },
-    {191457,  194559,  "F\0" },
-    {194560,  195101,  "W\0" },
-    {195102,  196607,  "F\0" },
-    {196608,  201546,  "W\0" },
-    {201547,  917504,  "F\0" },
-    {917506,  917535,  "F\0" },
-    {917632,  917759,  "F\0" },
-    {917760,  917999,  "A\0" },
-    {918000,  983039,  "F\0" },
-    {983040,  1048573, "A\0" },
-    {1048574, 1048575, "F\0" },
-    {1048576, 1114109, "A\0" },
-    {1114110, 1114111, "F\0" },
+    { 32, 126, "Na\0" },
+    { 161, 161, "A\0" },
+    { 162, 163, "Na\0" },
+    { 164, 164, "A\0" },
+    { 165, 166, "Na\0" },
+    { 167, 168, "A\0" },
+    { 170, 170, "A\0" },
+    { 172, 172, "Na\0" },
+    { 173, 174, "A\0" },
+    { 175, 175, "Na\0" },
+    { 176, 180, "A\0" },
+    { 182, 186, "A\0" },
+    { 188, 191, "A\0" },
+    { 198, 198, "A\0" },
+    { 208, 208, "A\0" },
+    { 215, 216, "A\0" },
+    { 222, 225, "A\0" },
+    { 230, 230, "A\0" },
+    { 232, 234, "A\0" },
+    { 236, 237, "A\0" },
+    { 240, 240, "A\0" },
+    { 242, 243, "A\0" },
+    { 247, 250, "A\0" },
+    { 252, 252, "A\0" },
+    { 254, 254, "A\0" },
+    { 257, 257, "A\0" },
+    { 273, 273, "A\0" },
+    { 275, 275, "A\0" },
+    { 283, 283, "A\0" },
+    { 294, 295, "A\0" },
+    { 299, 299, "A\0" },
+    { 305, 307, "A\0" },
+    { 312, 312, "A\0" },
+    { 319, 322, "A\0" },
+    { 324, 324, "A\0" },
+    { 328, 331, "A\0" },
+    { 333, 333, "A\0" },
+    { 338, 339, "A\0" },
+    { 358, 359, "A\0" },
+    { 363, 363, "A\0" },
+    { 462, 462, "A\0" },
+    { 464, 464, "A\0" },
+    { 466, 466, "A\0" },
+    { 468, 468, "A\0" },
+    { 470, 470, "A\0" },
+    { 472, 472, "A\0" },
+    { 474, 474, "A\0" },
+    { 476, 476, "A\0" },
+    { 593, 593, "A\0" },
+    { 609, 609, "A\0" },
+    { 708, 708, "A\0" },
+    { 711, 711, "A\0" },
+    { 713, 715, "A\0" },
+    { 717, 717, "A\0" },
+    { 720, 720, "A\0" },
+    { 728, 731, "A\0" },
+    { 733, 733, "A\0" },
+    { 735, 735, "A\0" },
+    { 768, 879, "A\0" },
+    { 888, 889, "F\0" },
+    { 896, 899, "F\0" },
+    { 907, 907, "F\0" },
+    { 909, 909, "F\0" },
+    { 913, 929, "A\0" },
+    { 930, 930, "F\0" },
+    { 931, 937, "A\0" },
+    { 945, 961, "A\0" },
+    { 963, 969, "A\0" },
+    { 1025, 1025, "A\0" },
+    { 1040, 1103, "A\0" },
+    { 1105, 1105, "A\0" },
+    { 1328, 1328, "F\0" },
+    { 1367, 1368, "F\0" },
+    { 1419, 1420, "F\0" },
+    { 1424, 1424, "F\0" },
+    { 1480, 1487, "F\0" },
+    { 1515, 1518, "F\0" },
+    { 1525, 1535, "F\0" },
+    { 1806, 1806, "F\0" },
+    { 1867, 1868, "F\0" },
+    { 1970, 1983, "F\0" },
+    { 2043, 2044, "F\0" },
+    { 2094, 2095, "F\0" },
+    { 2111, 2111, "F\0" },
+    { 2140, 2141, "F\0" },
+    { 2143, 2143, "F\0" },
+    { 2155, 2159, "F\0" },
+    { 2191, 2191, "F\0" },
+    { 2194, 2199, "F\0" },
+    { 2436, 2436, "F\0" },
+    { 2445, 2446, "F\0" },
+    { 2449, 2450, "F\0" },
+    { 2473, 2473, "F\0" },
+    { 2481, 2481, "F\0" },
+    { 2483, 2485, "F\0" },
+    { 2490, 2491, "F\0" },
+    { 2501, 2502, "F\0" },
+    { 2505, 2506, "F\0" },
+    { 2511, 2518, "F\0" },
+    { 2520, 2523, "F\0" },
+    { 2526, 2526, "F\0" },
+    { 2532, 2533, "F\0" },
+    { 2559, 2560, "F\0" },
+    { 2564, 2564, "F\0" },
+    { 2571, 2574, "F\0" },
+    { 2577, 2578, "F\0" },
+    { 2601, 2601, "F\0" },
+    { 2609, 2609, "F\0" },
+    { 2612, 2612, "F\0" },
+    { 2615, 2615, "F\0" },
+    { 2618, 2619, "F\0" },
+    { 2621, 2621, "F\0" },
+    { 2627, 2630, "F\0" },
+    { 2633, 2634, "F\0" },
+    { 2638, 2640, "F\0" },
+    { 2642, 2648, "F\0" },
+    { 2653, 2653, "F\0" },
+    { 2655, 2661, "F\0" },
+    { 2679, 2688, "F\0" },
+    { 2692, 2692, "F\0" },
+    { 2702, 2702, "F\0" },
+    { 2706, 2706, "F\0" },
+    { 2729, 2729, "F\0" },
+    { 2737, 2737, "F\0" },
+    { 2740, 2740, "F\0" },
+    { 2746, 2747, "F\0" },
+    { 2758, 2758, "F\0" },
+    { 2762, 2762, "F\0" },
+    { 2766, 2767, "F\0" },
+    { 2769, 2783, "F\0" },
+    { 2788, 2789, "F\0" },
+    { 2802, 2808, "F\0" },
+    { 2816, 2816, "F\0" },
+    { 2820, 2820, "F\0" },
+    { 2829, 2830, "F\0" },
+    { 2833, 2834, "F\0" },
+    { 2857, 2857, "F\0" },
+    { 2865, 2865, "F\0" },
+    { 2868, 2868, "F\0" },
+    { 2874, 2875, "F\0" },
+    { 2885, 2886, "F\0" },
+    { 2889, 2890, "F\0" },
+    { 2894, 2900, "F\0" },
+    { 2904, 2907, "F\0" },
+    { 2910, 2910, "F\0" },
+    { 2916, 2917, "F\0" },
+    { 2936, 2945, "F\0" },
+    { 2948, 2948, "F\0" },
+    { 2955, 2957, "F\0" },
+    { 2961, 2961, "F\0" },
+    { 2966, 2968, "F\0" },
+    { 2971, 2971, "F\0" },
+    { 2973, 2973, "F\0" },
+    { 2976, 2978, "F\0" },
+    { 2981, 2983, "F\0" },
+    { 2987, 2989, "F\0" },
+    { 3002, 3005, "F\0" },
+    { 3011, 3013, "F\0" },
+    { 3017, 3017, "F\0" },
+    { 3022, 3023, "F\0" },
+    { 3025, 3030, "F\0" },
+    { 3032, 3045, "F\0" },
+    { 3067, 3071, "F\0" },
+    { 3085, 3085, "F\0" },
+    { 3089, 3089, "F\0" },
+    { 3113, 3113, "F\0" },
+    { 3130, 3131, "F\0" },
+    { 3141, 3141, "F\0" },
+    { 3145, 3145, "F\0" },
+    { 3150, 3156, "F\0" },
+    { 3159, 3159, "F\0" },
+    { 3163, 3164, "F\0" },
+    { 3166, 3167, "F\0" },
+    { 3172, 3173, "F\0" },
+    { 3184, 3190, "F\0" },
+    { 3213, 3213, "F\0" },
+    { 3217, 3217, "F\0" },
+    { 3241, 3241, "F\0" },
+    { 3252, 3252, "F\0" },
+    { 3258, 3259, "F\0" },
+    { 3269, 3269, "F\0" },
+    { 3273, 3273, "F\0" },
+    { 3278, 3284, "F\0" },
+    { 3287, 3292, "F\0" },
+    { 3295, 3295, "F\0" },
+    { 3300, 3301, "F\0" },
+    { 3312, 3312, "F\0" },
+    { 3315, 3327, "F\0" },
+    { 3341, 3341, "F\0" },
+    { 3345, 3345, "F\0" },
+    { 3397, 3397, "F\0" },
+    { 3401, 3401, "F\0" },
+    { 3408, 3411, "F\0" },
+    { 3428, 3429, "F\0" },
+    { 3456, 3456, "F\0" },
+    { 3460, 3460, "F\0" },
+    { 3479, 3481, "F\0" },
+    { 3506, 3506, "F\0" },
+    { 3516, 3516, "F\0" },
+    { 3518, 3519, "F\0" },
+    { 3527, 3529, "F\0" },
+    { 3531, 3534, "F\0" },
+    { 3541, 3541, "F\0" },
+    { 3543, 3543, "F\0" },
+    { 3552, 3557, "F\0" },
+    { 3568, 3569, "F\0" },
+    { 3573, 3584, "F\0" },
+    { 3643, 3646, "F\0" },
+    { 3676, 3712, "F\0" },
+    { 3715, 3715, "F\0" },
+    { 3717, 3717, "F\0" },
+    { 3723, 3723, "F\0" },
+    { 3748, 3748, "F\0" },
+    { 3750, 3750, "F\0" },
+    { 3774, 3775, "F\0" },
+    { 3781, 3781, "F\0" },
+    { 3783, 3783, "F\0" },
+    { 3790, 3791, "F\0" },
+    { 3802, 3803, "F\0" },
+    { 3808, 3839, "F\0" },
+    { 3912, 3912, "F\0" },
+    { 3949, 3952, "F\0" },
+    { 3992, 3992, "F\0" },
+    { 4029, 4029, "F\0" },
+    { 4045, 4045, "F\0" },
+    { 4059, 4095, "F\0" },
+    { 4294, 4294, "F\0" },
+    { 4296, 4300, "F\0" },
+    { 4302, 4303, "F\0" },
+    { 4352, 4447, "W\0" },
+    { 4681, 4681, "F\0" },
+    { 4686, 4687, "F\0" },
+    { 4695, 4695, "F\0" },
+    { 4697, 4697, "F\0" },
+    { 4702, 4703, "F\0" },
+    { 4745, 4745, "F\0" },
+    { 4750, 4751, "F\0" },
+    { 4785, 4785, "F\0" },
+    { 4790, 4791, "F\0" },
+    { 4799, 4799, "F\0" },
+    { 4801, 4801, "F\0" },
+    { 4806, 4807, "F\0" },
+    { 4823, 4823, "F\0" },
+    { 4881, 4881, "F\0" },
+    { 4886, 4887, "F\0" },
+    { 4955, 4956, "F\0" },
+    { 4989, 4991, "F\0" },
+    { 5018, 5023, "F\0" },
+    { 5110, 5111, "F\0" },
+    { 5118, 5119, "F\0" },
+    { 5789, 5791, "F\0" },
+    { 5881, 5887, "F\0" },
+    { 5910, 5918, "F\0" },
+    { 5943, 5951, "F\0" },
+    { 5972, 5983, "F\0" },
+    { 5997, 5997, "F\0" },
+    { 6001, 6001, "F\0" },
+    { 6004, 6015, "F\0" },
+    { 6110, 6111, "F\0" },
+    { 6122, 6127, "F\0" },
+    { 6138, 6143, "F\0" },
+    { 6170, 6175, "F\0" },
+    { 6265, 6271, "F\0" },
+    { 6315, 6319, "F\0" },
+    { 6390, 6399, "F\0" },
+    { 6431, 6431, "F\0" },
+    { 6444, 6447, "F\0" },
+    { 6460, 6463, "F\0" },
+    { 6465, 6467, "F\0" },
+    { 6510, 6511, "F\0" },
+    { 6517, 6527, "F\0" },
+    { 6572, 6575, "F\0" },
+    { 6602, 6607, "F\0" },
+    { 6619, 6621, "F\0" },
+    { 6684, 6685, "F\0" },
+    { 6751, 6751, "F\0" },
+    { 6781, 6782, "F\0" },
+    { 6794, 6799, "F\0" },
+    { 6810, 6815, "F\0" },
+    { 6830, 6831, "F\0" },
+    { 6863, 6911, "F\0" },
+    { 6989, 6991, "F\0" },
+    { 7039, 7039, "F\0" },
+    { 7156, 7163, "F\0" },
+    { 7224, 7226, "F\0" },
+    { 7242, 7244, "F\0" },
+    { 7305, 7311, "F\0" },
+    { 7355, 7356, "F\0" },
+    { 7368, 7375, "F\0" },
+    { 7419, 7423, "F\0" },
+    { 7958, 7959, "F\0" },
+    { 7966, 7967, "F\0" },
+    { 8006, 8007, "F\0" },
+    { 8014, 8015, "F\0" },
+    { 8024, 8024, "F\0" },
+    { 8026, 8026, "F\0" },
+    { 8028, 8028, "F\0" },
+    { 8030, 8030, "F\0" },
+    { 8062, 8063, "F\0" },
+    { 8117, 8117, "F\0" },
+    { 8133, 8133, "F\0" },
+    { 8148, 8149, "F\0" },
+    { 8156, 8156, "F\0" },
+    { 8176, 8177, "F\0" },
+    { 8181, 8181, "F\0" },
+    { 8191, 8191, "F\0" },
+    { 8208, 8208, "A\0" },
+    { 8211, 8214, "A\0" },
+    { 8216, 8217, "A\0" },
+    { 8220, 8221, "A\0" },
+    { 8224, 8226, "A\0" },
+    { 8228, 8231, "A\0" },
+    { 8240, 8240, "A\0" },
+    { 8242, 8243, "A\0" },
+    { 8245, 8245, "A\0" },
+    { 8251, 8251, "A\0" },
+    { 8254, 8254, "A\0" },
+    { 8293, 8293, "F\0" },
+    { 8306, 8307, "F\0" },
+    { 8308, 8308, "A\0" },
+    { 8319, 8319, "A\0" },
+    { 8321, 8324, "A\0" },
+    { 8335, 8335, "F\0" },
+    { 8349, 8351, "F\0" },
+    { 8361, 8361, "H\0" },
+    { 8364, 8364, "A\0" },
+    { 8385, 8399, "F\0" },
+    { 8433, 8447, "F\0" },
+    { 8451, 8451, "A\0" },
+    { 8453, 8453, "A\0" },
+    { 8457, 8457, "A\0" },
+    { 8467, 8467, "A\0" },
+    { 8470, 8470, "A\0" },
+    { 8481, 8482, "A\0" },
+    { 8486, 8486, "A\0" },
+    { 8491, 8491, "A\0" },
+    { 8531, 8532, "A\0" },
+    { 8539, 8542, "A\0" },
+    { 8544, 8555, "A\0" },
+    { 8560, 8569, "A\0" },
+    { 8585, 8585, "A\0" },
+    { 8588, 8591, "F\0" },
+    { 8592, 8601, "A\0" },
+    { 8632, 8633, "A\0" },
+    { 8658, 8658, "A\0" },
+    { 8660, 8660, "A\0" },
+    { 8679, 8679, "A\0" },
+    { 8704, 8704, "A\0" },
+    { 8706, 8707, "A\0" },
+    { 8711, 8712, "A\0" },
+    { 8715, 8715, "A\0" },
+    { 8719, 8719, "A\0" },
+    { 8721, 8721, "A\0" },
+    { 8725, 8725, "A\0" },
+    { 8730, 8730, "A\0" },
+    { 8733, 8736, "A\0" },
+    { 8739, 8739, "A\0" },
+    { 8741, 8741, "A\0" },
+    { 8743, 8748, "A\0" },
+    { 8750, 8750, "A\0" },
+    { 8756, 8759, "A\0" },
+    { 8764, 8765, "A\0" },
+    { 8776, 8776, "A\0" },
+    { 8780, 8780, "A\0" },
+    { 8786, 8786, "A\0" },
+    { 8800, 8801, "A\0" },
+    { 8804, 8807, "A\0" },
+    { 8810, 8811, "A\0" },
+    { 8814, 8815, "A\0" },
+    { 8834, 8835, "A\0" },
+    { 8838, 8839, "A\0" },
+    { 8853, 8853, "A\0" },
+    { 8857, 8857, "A\0" },
+    { 8869, 8869, "A\0" },
+    { 8895, 8895, "A\0" },
+    { 8978, 8978, "A\0" },
+    { 8986, 8987, "W\0" },
+    { 9001, 9002, "W\0" },
+    { 9193, 9196, "W\0" },
+    { 9200, 9200, "W\0" },
+    { 9203, 9203, "W\0" },
+    { 9255, 9279, "F\0" },
+    { 9291, 9311, "F\0" },
+    { 9312, 9449, "A\0" },
+    { 9451, 9547, "A\0" },
+    { 9552, 9587, "A\0" },
+    { 9600, 9615, "A\0" },
+    { 9618, 9621, "A\0" },
+    { 9632, 9633, "A\0" },
+    { 9635, 9641, "A\0" },
+    { 9650, 9651, "A\0" },
+    { 9654, 9655, "A\0" },
+    { 9660, 9661, "A\0" },
+    { 9664, 9665, "A\0" },
+    { 9670, 9672, "A\0" },
+    { 9675, 9675, "A\0" },
+    { 9678, 9681, "A\0" },
+    { 9698, 9701, "A\0" },
+    { 9711, 9711, "A\0" },
+    { 9725, 9726, "W\0" },
+    { 9733, 9734, "A\0" },
+    { 9737, 9737, "A\0" },
+    { 9742, 9743, "A\0" },
+    { 9748, 9749, "W\0" },
+    { 9756, 9756, "A\0" },
+    { 9758, 9758, "A\0" },
+    { 9792, 9792, "A\0" },
+    { 9794, 9794, "A\0" },
+    { 9800, 9811, "W\0" },
+    { 9824, 9825, "A\0" },
+    { 9827, 9829, "A\0" },
+    { 9831, 9834, "A\0" },
+    { 9836, 9837, "A\0" },
+    { 9839, 9839, "A\0" },
+    { 9855, 9855, "W\0" },
+    { 9875, 9875, "W\0" },
+    { 9886, 9887, "A\0" },
+    { 9889, 9889, "W\0" },
+    { 9898, 9899, "W\0" },
+    { 9917, 9918, "W\0" },
+    { 9919, 9919, "A\0" },
+    { 9924, 9925, "W\0" },
+    { 9926, 9933, "A\0" },
+    { 9934, 9934, "W\0" },
+    { 9935, 9939, "A\0" },
+    { 9940, 9940, "W\0" },
+    { 9941, 9953, "A\0" },
+    { 9955, 9955, "A\0" },
+    { 9960, 9961, "A\0" },
+    { 9962, 9962, "W\0" },
+    { 9963, 9969, "A\0" },
+    { 9970, 9971, "W\0" },
+    { 9972, 9972, "A\0" },
+    { 9973, 9973, "W\0" },
+    { 9974, 9977, "A\0" },
+    { 9978, 9978, "W\0" },
+    { 9979, 9980, "A\0" },
+    { 9981, 9981, "W\0" },
+    { 9982, 9983, "A\0" },
+    { 9989, 9989, "W\0" },
+    { 9994, 9995, "W\0" },
+    { 10024, 10024, "W\0" },
+    { 10045, 10045, "A\0" },
+    { 10060, 10060, "W\0" },
+    { 10062, 10062, "W\0" },
+    { 10067, 10069, "W\0" },
+    { 10071, 10071, "W\0" },
+    { 10102, 10111, "A\0" },
+    { 10133, 10135, "W\0" },
+    { 10160, 10160, "W\0" },
+    { 10175, 10175, "W\0" },
+    { 10214, 10221, "Na\0" },
+    { 10629, 10630, "Na\0" },
+    { 11035, 11036, "W\0" },
+    { 11088, 11088, "W\0" },
+    { 11093, 11093, "W\0" },
+    { 11094, 11097, "A\0" },
+    { 11124, 11125, "F\0" },
+    { 11158, 11158, "F\0" },
+    { 11508, 11512, "F\0" },
+    { 11558, 11558, "F\0" },
+    { 11560, 11564, "F\0" },
+    { 11566, 11567, "F\0" },
+    { 11624, 11630, "F\0" },
+    { 11633, 11646, "F\0" },
+    { 11671, 11679, "F\0" },
+    { 11687, 11687, "F\0" },
+    { 11695, 11695, "F\0" },
+    { 11703, 11703, "F\0" },
+    { 11711, 11711, "F\0" },
+    { 11719, 11719, "F\0" },
+    { 11727, 11727, "F\0" },
+    { 11735, 11735, "F\0" },
+    { 11743, 11743, "F\0" },
+    { 11870, 11903, "F\0" },
+    { 11904, 11929, "W\0" },
+    { 11930, 11930, "F\0" },
+    { 11931, 12019, "W\0" },
+    { 12020, 12031, "F\0" },
+    { 12032, 12245, "W\0" },
+    { 12246, 12271, "F\0" },
+    { 12272, 12283, "W\0" },
+    { 12284, 12288, "F\0" },
+    { 12289, 12350, "W\0" },
+    { 12352, 12352, "F\0" },
+    { 12353, 12438, "W\0" },
+    { 12439, 12440, "F\0" },
+    { 12441, 12543, "W\0" },
+    { 12544, 12548, "F\0" },
+    { 12549, 12591, "W\0" },
+    { 12592, 12592, "F\0" },
+    { 12593, 12686, "W\0" },
+    { 12687, 12687, "F\0" },
+    { 12688, 12771, "W\0" },
+    { 12772, 12783, "F\0" },
+    { 12784, 12830, "W\0" },
+    { 12831, 12831, "F\0" },
+    { 12832, 12871, "W\0" },
+    { 12872, 12879, "A\0" },
+    { 12880, 19903, "W\0" },
+    { 19968, 42124, "W\0" },
+    { 42125, 42127, "F\0" },
+    { 42128, 42182, "W\0" },
+    { 42183, 42191, "F\0" },
+    { 42540, 42559, "F\0" },
+    { 42744, 42751, "F\0" },
+    { 42955, 42959, "F\0" },
+    { 42962, 42962, "F\0" },
+    { 42964, 42964, "F\0" },
+    { 42970, 42993, "F\0" },
+    { 43053, 43055, "F\0" },
+    { 43066, 43071, "F\0" },
+    { 43128, 43135, "F\0" },
+    { 43206, 43213, "F\0" },
+    { 43226, 43231, "F\0" },
+    { 43348, 43358, "F\0" },
+    { 43360, 43388, "W\0" },
+    { 43389, 43391, "F\0" },
+    { 43470, 43470, "F\0" },
+    { 43482, 43485, "F\0" },
+    { 43519, 43519, "F\0" },
+    { 43575, 43583, "F\0" },
+    { 43598, 43599, "F\0" },
+    { 43610, 43611, "F\0" },
+    { 43715, 43738, "F\0" },
+    { 43767, 43776, "F\0" },
+    { 43783, 43784, "F\0" },
+    { 43791, 43792, "F\0" },
+    { 43799, 43807, "F\0" },
+    { 43815, 43815, "F\0" },
+    { 43823, 43823, "F\0" },
+    { 43884, 43887, "F\0" },
+    { 44014, 44015, "F\0" },
+    { 44026, 44031, "F\0" },
+    { 44032, 55203, "W\0" },
+    { 55204, 55215, "F\0" },
+    { 55239, 55242, "F\0" },
+    { 55292, 55295, "F\0" },
+    { 57344, 63743, "A\0" },
+    { 63744, 64109, "W\0" },
+    { 64110, 64111, "F\0" },
+    { 64112, 64217, "W\0" },
+    { 64218, 64255, "F\0" },
+    { 64263, 64274, "F\0" },
+    { 64280, 64284, "F\0" },
+    { 64311, 64311, "F\0" },
+    { 64317, 64317, "F\0" },
+    { 64319, 64319, "F\0" },
+    { 64322, 64322, "F\0" },
+    { 64325, 64325, "F\0" },
+    { 64451, 64466, "F\0" },
+    { 64912, 64913, "F\0" },
+    { 64968, 64974, "F\0" },
+    { 64976, 65007, "F\0" },
+    { 65024, 65039, "A\0" },
+    { 65040, 65049, "W\0" },
+    { 65050, 65055, "F\0" },
+    { 65072, 65106, "W\0" },
+    { 65107, 65107, "F\0" },
+    { 65108, 65126, "W\0" },
+    { 65127, 65127, "F\0" },
+    { 65128, 65131, "W\0" },
+    { 65132, 65135, "F\0" },
+    { 65141, 65141, "F\0" },
+    { 65277, 65278, "F\0" },
+    { 65280, 65376, "F\0" },
+    { 65377, 65470, "H\0" },
+    { 65471, 65473, "F\0" },
+    { 65474, 65479, "H\0" },
+    { 65480, 65481, "F\0" },
+    { 65482, 65487, "H\0" },
+    { 65488, 65489, "F\0" },
+    { 65490, 65495, "H\0" },
+    { 65496, 65497, "F\0" },
+    { 65498, 65500, "H\0" },
+    { 65501, 65511, "F\0" },
+    { 65512, 65518, "H\0" },
+    { 65519, 65528, "F\0" },
+    { 65533, 65533, "A\0" },
+    { 65534, 65535, "F\0" },
+    { 65548, 65548, "F\0" },
+    { 65575, 65575, "F\0" },
+    { 65595, 65595, "F\0" },
+    { 65598, 65598, "F\0" },
+    { 65614, 65615, "F\0" },
+    { 65630, 65663, "F\0" },
+    { 65787, 65791, "F\0" },
+    { 65795, 65798, "F\0" },
+    { 65844, 65846, "F\0" },
+    { 65935, 65935, "F\0" },
+    { 65949, 65951, "F\0" },
+    { 65953, 65999, "F\0" },
+    { 66046, 66175, "F\0" },
+    { 66205, 66207, "F\0" },
+    { 66257, 66271, "F\0" },
+    { 66300, 66303, "F\0" },
+    { 66340, 66348, "F\0" },
+    { 66379, 66383, "F\0" },
+    { 66427, 66431, "F\0" },
+    { 66462, 66462, "F\0" },
+    { 66500, 66503, "F\0" },
+    { 66518, 66559, "F\0" },
+    { 66718, 66719, "F\0" },
+    { 66730, 66735, "F\0" },
+    { 66772, 66775, "F\0" },
+    { 66812, 66815, "F\0" },
+    { 66856, 66863, "F\0" },
+    { 66916, 66926, "F\0" },
+    { 66939, 66939, "F\0" },
+    { 66955, 66955, "F\0" },
+    { 66963, 66963, "F\0" },
+    { 66966, 66966, "F\0" },
+    { 66978, 66978, "F\0" },
+    { 66994, 66994, "F\0" },
+    { 67002, 67002, "F\0" },
+    { 67005, 67071, "F\0" },
+    { 67383, 67391, "F\0" },
+    { 67414, 67423, "F\0" },
+    { 67432, 67455, "F\0" },
+    { 67462, 67462, "F\0" },
+    { 67505, 67505, "F\0" },
+    { 67515, 67583, "F\0" },
+    { 67590, 67591, "F\0" },
+    { 67593, 67593, "F\0" },
+    { 67638, 67638, "F\0" },
+    { 67641, 67643, "F\0" },
+    { 67645, 67646, "F\0" },
+    { 67670, 67670, "F\0" },
+    { 67743, 67750, "F\0" },
+    { 67760, 67807, "F\0" },
+    { 67827, 67827, "F\0" },
+    { 67830, 67834, "F\0" },
+    { 67868, 67870, "F\0" },
+    { 67898, 67902, "F\0" },
+    { 67904, 67967, "F\0" },
+    { 68024, 68027, "F\0" },
+    { 68048, 68049, "F\0" },
+    { 68100, 68100, "F\0" },
+    { 68103, 68107, "F\0" },
+    { 68116, 68116, "F\0" },
+    { 68120, 68120, "F\0" },
+    { 68150, 68151, "F\0" },
+    { 68155, 68158, "F\0" },
+    { 68169, 68175, "F\0" },
+    { 68185, 68191, "F\0" },
+    { 68256, 68287, "F\0" },
+    { 68327, 68330, "F\0" },
+    { 68343, 68351, "F\0" },
+    { 68406, 68408, "F\0" },
+    { 68438, 68439, "F\0" },
+    { 68467, 68471, "F\0" },
+    { 68498, 68504, "F\0" },
+    { 68509, 68520, "F\0" },
+    { 68528, 68607, "F\0" },
+    { 68681, 68735, "F\0" },
+    { 68787, 68799, "F\0" },
+    { 68851, 68857, "F\0" },
+    { 68904, 68911, "F\0" },
+    { 68922, 69215, "F\0" },
+    { 69247, 69247, "F\0" },
+    { 69290, 69290, "F\0" },
+    { 69294, 69295, "F\0" },
+    { 69298, 69375, "F\0" },
+    { 69416, 69423, "F\0" },
+    { 69466, 69487, "F\0" },
+    { 69514, 69551, "F\0" },
+    { 69580, 69599, "F\0" },
+    { 69623, 69631, "F\0" },
+    { 69710, 69713, "F\0" },
+    { 69750, 69758, "F\0" },
+    { 69827, 69836, "F\0" },
+    { 69838, 69839, "F\0" },
+    { 69865, 69871, "F\0" },
+    { 69882, 69887, "F\0" },
+    { 69941, 69941, "F\0" },
+    { 69960, 69967, "F\0" },
+    { 70007, 70015, "F\0" },
+    { 70112, 70112, "F\0" },
+    { 70133, 70143, "F\0" },
+    { 70162, 70162, "F\0" },
+    { 70207, 70271, "F\0" },
+    { 70279, 70279, "F\0" },
+    { 70281, 70281, "F\0" },
+    { 70286, 70286, "F\0" },
+    { 70302, 70302, "F\0" },
+    { 70314, 70319, "F\0" },
+    { 70379, 70383, "F\0" },
+    { 70394, 70399, "F\0" },
+    { 70404, 70404, "F\0" },
+    { 70413, 70414, "F\0" },
+    { 70417, 70418, "F\0" },
+    { 70441, 70441, "F\0" },
+    { 70449, 70449, "F\0" },
+    { 70452, 70452, "F\0" },
+    { 70458, 70458, "F\0" },
+    { 70469, 70470, "F\0" },
+    { 70473, 70474, "F\0" },
+    { 70478, 70479, "F\0" },
+    { 70481, 70486, "F\0" },
+    { 70488, 70492, "F\0" },
+    { 70500, 70501, "F\0" },
+    { 70509, 70511, "F\0" },
+    { 70517, 70655, "F\0" },
+    { 70748, 70748, "F\0" },
+    { 70754, 70783, "F\0" },
+    { 70856, 70863, "F\0" },
+    { 70874, 71039, "F\0" },
+    { 71094, 71095, "F\0" },
+    { 71134, 71167, "F\0" },
+    { 71237, 71247, "F\0" },
+    { 71258, 71263, "F\0" },
+    { 71277, 71295, "F\0" },
+    { 71354, 71359, "F\0" },
+    { 71370, 71423, "F\0" },
+    { 71451, 71452, "F\0" },
+    { 71468, 71471, "F\0" },
+    { 71495, 71679, "F\0" },
+    { 71740, 71839, "F\0" },
+    { 71923, 71934, "F\0" },
+    { 71943, 71944, "F\0" },
+    { 71946, 71947, "F\0" },
+    { 71956, 71956, "F\0" },
+    { 71959, 71959, "F\0" },
+    { 71990, 71990, "F\0" },
+    { 71993, 71994, "F\0" },
+    { 72007, 72015, "F\0" },
+    { 72026, 72095, "F\0" },
+    { 72104, 72105, "F\0" },
+    { 72152, 72153, "F\0" },
+    { 72165, 72191, "F\0" },
+    { 72264, 72271, "F\0" },
+    { 72355, 72367, "F\0" },
+    { 72441, 72703, "F\0" },
+    { 72713, 72713, "F\0" },
+    { 72759, 72759, "F\0" },
+    { 72774, 72783, "F\0" },
+    { 72813, 72815, "F\0" },
+    { 72848, 72849, "F\0" },
+    { 72872, 72872, "F\0" },
+    { 72887, 72959, "F\0" },
+    { 72967, 72967, "F\0" },
+    { 72970, 72970, "F\0" },
+    { 73015, 73017, "F\0" },
+    { 73019, 73019, "F\0" },
+    { 73022, 73022, "F\0" },
+    { 73032, 73039, "F\0" },
+    { 73050, 73055, "F\0" },
+    { 73062, 73062, "F\0" },
+    { 73065, 73065, "F\0" },
+    { 73103, 73103, "F\0" },
+    { 73106, 73106, "F\0" },
+    { 73113, 73119, "F\0" },
+    { 73130, 73439, "F\0" },
+    { 73465, 73647, "F\0" },
+    { 73649, 73663, "F\0" },
+    { 73714, 73726, "F\0" },
+    { 74650, 74751, "F\0" },
+    { 74863, 74863, "F\0" },
+    { 74869, 74879, "F\0" },
+    { 75076, 77711, "F\0" },
+    { 77811, 77823, "F\0" },
+    { 78895, 78895, "F\0" },
+    { 78905, 82943, "F\0" },
+    { 83527, 92159, "F\0" },
+    { 92729, 92735, "F\0" },
+    { 92767, 92767, "F\0" },
+    { 92778, 92781, "F\0" },
+    { 92863, 92863, "F\0" },
+    { 92874, 92879, "F\0" },
+    { 92910, 92911, "F\0" },
+    { 92918, 92927, "F\0" },
+    { 92998, 93007, "F\0" },
+    { 93018, 93018, "F\0" },
+    { 93026, 93026, "F\0" },
+    { 93048, 93052, "F\0" },
+    { 93072, 93759, "F\0" },
+    { 93851, 93951, "F\0" },
+    { 94027, 94030, "F\0" },
+    { 94088, 94094, "F\0" },
+    { 94112, 94175, "F\0" },
+    { 94176, 94180, "W\0" },
+    { 94181, 94191, "F\0" },
+    { 94192, 94193, "W\0" },
+    { 94194, 94207, "F\0" },
+    { 94208, 100343, "W\0" },
+    { 100344, 100351, "F\0" },
+    { 100352, 101589, "W\0" },
+    { 101590, 101631, "F\0" },
+    { 101632, 101640, "W\0" },
+    { 101641, 110575, "F\0" },
+    { 110576, 110579, "W\0" },
+    { 110580, 110580, "F\0" },
+    { 110581, 110587, "W\0" },
+    { 110588, 110588, "F\0" },
+    { 110589, 110590, "W\0" },
+    { 110591, 110591, "F\0" },
+    { 110592, 110882, "W\0" },
+    { 110883, 110927, "F\0" },
+    { 110928, 110930, "W\0" },
+    { 110931, 110947, "F\0" },
+    { 110948, 110951, "W\0" },
+    { 110952, 110959, "F\0" },
+    { 110960, 111355, "W\0" },
+    { 111356, 113663, "F\0" },
+    { 113771, 113775, "F\0" },
+    { 113789, 113791, "F\0" },
+    { 113801, 113807, "F\0" },
+    { 113818, 113819, "F\0" },
+    { 113828, 118527, "F\0" },
+    { 118574, 118575, "F\0" },
+    { 118599, 118607, "F\0" },
+    { 118724, 118783, "F\0" },
+    { 119030, 119039, "F\0" },
+    { 119079, 119080, "F\0" },
+    { 119275, 119295, "F\0" },
+    { 119366, 119519, "F\0" },
+    { 119540, 119551, "F\0" },
+    { 119639, 119647, "F\0" },
+    { 119673, 119807, "F\0" },
+    { 119893, 119893, "F\0" },
+    { 119965, 119965, "F\0" },
+    { 119968, 119969, "F\0" },
+    { 119971, 119972, "F\0" },
+    { 119975, 119976, "F\0" },
+    { 119981, 119981, "F\0" },
+    { 119994, 119994, "F\0" },
+    { 119996, 119996, "F\0" },
+    { 120004, 120004, "F\0" },
+    { 120070, 120070, "F\0" },
+    { 120075, 120076, "F\0" },
+    { 120085, 120085, "F\0" },
+    { 120093, 120093, "F\0" },
+    { 120122, 120122, "F\0" },
+    { 120127, 120127, "F\0" },
+    { 120133, 120133, "F\0" },
+    { 120135, 120137, "F\0" },
+    { 120145, 120145, "F\0" },
+    { 120486, 120487, "F\0" },
+    { 120780, 120781, "F\0" },
+    { 121484, 121498, "F\0" },
+    { 121504, 121504, "F\0" },
+    { 121520, 122623, "F\0" },
+    { 122655, 122879, "F\0" },
+    { 122887, 122887, "F\0" },
+    { 122905, 122906, "F\0" },
+    { 122914, 122914, "F\0" },
+    { 122917, 122917, "F\0" },
+    { 122923, 123135, "F\0" },
+    { 123181, 123183, "F\0" },
+    { 123198, 123199, "F\0" },
+    { 123210, 123213, "F\0" },
+    { 123216, 123535, "F\0" },
+    { 123567, 123583, "F\0" },
+    { 123642, 123646, "F\0" },
+    { 123648, 124895, "F\0" },
+    { 124903, 124903, "F\0" },
+    { 124908, 124908, "F\0" },
+    { 124911, 124911, "F\0" },
+    { 124927, 124927, "F\0" },
+    { 125125, 125126, "F\0" },
+    { 125143, 125183, "F\0" },
+    { 125260, 125263, "F\0" },
+    { 125274, 125277, "F\0" },
+    { 125280, 126064, "F\0" },
+    { 126133, 126208, "F\0" },
+    { 126270, 126463, "F\0" },
+    { 126468, 126468, "F\0" },
+    { 126496, 126496, "F\0" },
+    { 126499, 126499, "F\0" },
+    { 126501, 126502, "F\0" },
+    { 126504, 126504, "F\0" },
+    { 126515, 126515, "F\0" },
+    { 126520, 126520, "F\0" },
+    { 126522, 126522, "F\0" },
+    { 126524, 126529, "F\0" },
+    { 126531, 126534, "F\0" },
+    { 126536, 126536, "F\0" },
+    { 126538, 126538, "F\0" },
+    { 126540, 126540, "F\0" },
+    { 126544, 126544, "F\0" },
+    { 126547, 126547, "F\0" },
+    { 126549, 126550, "F\0" },
+    { 126552, 126552, "F\0" },
+    { 126554, 126554, "F\0" },
+    { 126556, 126556, "F\0" },
+    { 126558, 126558, "F\0" },
+    { 126560, 126560, "F\0" },
+    { 126563, 126563, "F\0" },
+    { 126565, 126566, "F\0" },
+    { 126571, 126571, "F\0" },
+    { 126579, 126579, "F\0" },
+    { 126584, 126584, "F\0" },
+    { 126589, 126589, "F\0" },
+    { 126591, 126591, "F\0" },
+    { 126602, 126602, "F\0" },
+    { 126620, 126624, "F\0" },
+    { 126628, 126628, "F\0" },
+    { 126634, 126634, "F\0" },
+    { 126652, 126703, "F\0" },
+    { 126706, 126975, "F\0" },
+    { 126980, 126980, "W\0" },
+    { 127020, 127023, "F\0" },
+    { 127124, 127135, "F\0" },
+    { 127151, 127152, "F\0" },
+    { 127168, 127168, "F\0" },
+    { 127183, 127183, "W\0" },
+    { 127184, 127184, "F\0" },
+    { 127222, 127231, "F\0" },
+    { 127232, 127242, "A\0" },
+    { 127248, 127277, "A\0" },
+    { 127280, 127337, "A\0" },
+    { 127344, 127373, "A\0" },
+    { 127374, 127374, "W\0" },
+    { 127375, 127376, "A\0" },
+    { 127377, 127386, "W\0" },
+    { 127387, 127404, "A\0" },
+    { 127406, 127461, "F\0" },
+    { 127488, 127490, "W\0" },
+    { 127491, 127503, "F\0" },
+    { 127504, 127547, "W\0" },
+    { 127548, 127551, "F\0" },
+    { 127552, 127560, "W\0" },
+    { 127561, 127567, "F\0" },
+    { 127568, 127569, "W\0" },
+    { 127570, 127583, "F\0" },
+    { 127584, 127589, "W\0" },
+    { 127590, 127743, "F\0" },
+    { 127744, 127776, "W\0" },
+    { 127789, 127797, "W\0" },
+    { 127799, 127868, "W\0" },
+    { 127870, 127891, "W\0" },
+    { 127904, 127946, "W\0" },
+    { 127951, 127955, "W\0" },
+    { 127968, 127984, "W\0" },
+    { 127988, 127988, "W\0" },
+    { 127992, 128062, "W\0" },
+    { 128064, 128064, "W\0" },
+    { 128066, 128252, "W\0" },
+    { 128255, 128317, "W\0" },
+    { 128331, 128334, "W\0" },
+    { 128336, 128359, "W\0" },
+    { 128378, 128378, "W\0" },
+    { 128405, 128406, "W\0" },
+    { 128420, 128420, "W\0" },
+    { 128507, 128591, "W\0" },
+    { 128640, 128709, "W\0" },
+    { 128716, 128716, "W\0" },
+    { 128720, 128722, "W\0" },
+    { 128725, 128727, "W\0" },
+    { 128728, 128732, "F\0" },
+    { 128733, 128735, "W\0" },
+    { 128747, 128748, "W\0" },
+    { 128749, 128751, "F\0" },
+    { 128756, 128764, "W\0" },
+    { 128765, 128767, "F\0" },
+    { 128884, 128895, "F\0" },
+    { 128985, 128991, "F\0" },
+    { 128992, 129003, "W\0" },
+    { 129004, 129007, "F\0" },
+    { 129008, 129008, "W\0" },
+    { 129009, 129023, "F\0" },
+    { 129036, 129039, "F\0" },
+    { 129096, 129103, "F\0" },
+    { 129114, 129119, "F\0" },
+    { 129160, 129167, "F\0" },
+    { 129198, 129199, "F\0" },
+    { 129202, 129279, "F\0" },
+    { 129292, 129338, "W\0" },
+    { 129340, 129349, "W\0" },
+    { 129351, 129535, "W\0" },
+    { 129620, 129631, "F\0" },
+    { 129646, 129647, "F\0" },
+    { 129648, 129652, "W\0" },
+    { 129653, 129655, "F\0" },
+    { 129656, 129660, "W\0" },
+    { 129661, 129663, "F\0" },
+    { 129664, 129670, "W\0" },
+    { 129671, 129679, "F\0" },
+    { 129680, 129708, "W\0" },
+    { 129709, 129711, "F\0" },
+    { 129712, 129722, "W\0" },
+    { 129723, 129727, "F\0" },
+    { 129728, 129733, "W\0" },
+    { 129734, 129743, "F\0" },
+    { 129744, 129753, "W\0" },
+    { 129754, 129759, "F\0" },
+    { 129760, 129767, "W\0" },
+    { 129768, 129775, "F\0" },
+    { 129776, 129782, "W\0" },
+    { 129783, 129791, "F\0" },
+    { 129939, 129939, "F\0" },
+    { 129995, 130031, "F\0" },
+    { 130042, 131071, "F\0" },
+    { 131072, 173791, "W\0" },
+    { 173792, 173823, "F\0" },
+    { 173824, 177976, "W\0" },
+    { 177977, 177983, "F\0" },
+    { 177984, 178205, "W\0" },
+    { 178206, 178207, "F\0" },
+    { 178208, 183969, "W\0" },
+    { 183970, 183983, "F\0" },
+    { 183984, 191456, "W\0" },
+    { 191457, 194559, "F\0" },
+    { 194560, 195101, "W\0" },
+    { 195102, 196607, "F\0" },
+    { 196608, 201546, "W\0" },
+    { 201547, 917504, "F\0" },
+    { 917506, 917535, "F\0" },
+    { 917632, 917759, "F\0" },
+    { 917760, 917999, "A\0" },
+    { 918000, 983039, "F\0" },
+    { 983040, 1048573, "A\0" },
+    { 1048574, 1048575, "F\0" },
+    { 1048576, 1114109, "A\0" },
+    { 1114110, 1114111, "F\0" },
 };
+// clang-format on
 
-const static char* c11__u32_east_asian_width(int c) {
+const char* c11__u32_east_asian_width(int c) {
     const char* data =
         c11__search_u32_ranges(c,
                                kEastAsianWidthRanges,
@@ -22225,13 +23395,36 @@ void pk__add_module_unicodedata() {
     py_bindfunc(mod, "east_asian_width", unicodedata_east_asian_width);
 }
 // src/modules/time.c
+#define _XOPEN_SOURCE 700
 #include <time.h>
+#undef _XOPEN_SOURCE
+
+#ifdef _WIN32
+#define WIN32_LEAN_AND_MEAN
+#include <windows.h>
+#include <profileapi.h>
+#undef WIN32_LEAN_AND_MEAN
+#endif
+
 #include <assert.h>
 
 #define NANOS_PER_SEC 1000000000
 
 #ifndef __circle__
+
 int64_t time_ns() {
+#ifdef _WIN32
+    FILETIME system_time;
+    ULARGE_INTEGER large;
+
+    GetSystemTimePreciseAsFileTime(&system_time);
+    large.u.LowPart = system_time.dwLowDateTime;
+    large.u.HighPart = system_time.dwHighDateTime;
+    /* 11,644,473,600,000,000,000: number of nanoseconds between
+       the 1st january 1601 and the 1st january 1970 (369 years + 89 leap
+       days). */
+    return (large.QuadPart - 116444736000000000) * 100;
+#else
     struct timespec tms;
 #ifdef CLOCK_REALTIME
     clock_gettime(CLOCK_REALTIME, &tms);
@@ -22244,9 +23437,36 @@ int64_t time_ns() {
     /* Add full nanoseconds */
     nanos += tms.tv_nsec;
     return nanos;
+#endif
+}
+
+int64_t time_monotonic_ns() {
+#ifdef _WIN32
+    LARGE_INTEGER now;
+    QueryPerformanceCounter(&now);
+    LONGLONG ticksll = now.QuadPart;
+    static LARGE_INTEGER freq;
+    if(freq.QuadPart == 0) QueryPerformanceFrequency(&freq);
+    /* Convert ticks to nanoseconds */
+    return (ticksll * NANOS_PER_SEC) / freq.QuadPart;
+#else
+    struct timespec tms;
+#ifdef CLOCK_MONOTONIC
+    clock_gettime(CLOCK_MONOTONIC, &tms);
+#else
+    /* The C11 way */
+    timespec_get(&tms, TIME_UTC);
+#endif
+    /* seconds, multiplied with 1 billion */
+    int64_t nanos = tms.tv_sec * (int64_t)NANOS_PER_SEC;
+    /* Add full nanoseconds */
+    nanos += tms.tv_nsec;
+    return nanos;
+#endif
 }
 #else
 int64_t time_ns() { return 0; }
+int64_t time_monotonic_ns() { return 0; }
 #endif
 
 static bool time_time(int argc, py_Ref argv) {
@@ -22263,7 +23483,25 @@ static bool time_time_ns(int argc, py_Ref argv) {
     return true;
 }
 
+static bool time_time_monotonic(int argc, py_Ref argv) {
+    PY_CHECK_ARGC(0);
+    int64_t nanos = time_monotonic_ns();
+    py_newfloat(py_retval(), (double)nanos / NANOS_PER_SEC);
+    return true;
+}
+
+static bool time_time_monotonic_ns(int argc, py_Ref argv) {
+    PY_CHECK_ARGC(0);
+    int64_t nanos = time_monotonic_ns();
+    py_newint(py_retval(), nanos);
+    return true;
+}
+
 static bool time_perf_counter(int argc, py_Ref argv) {
+    return time_time_monotonic(argc, argv);
+}
+
+static bool time_process_time(int argc, py_Ref argv) {
     PY_CHECK_ARGC(0);
     py_newfloat(py_retval(), (double)clock() / CLOCKS_PER_SEC);
     return true;
@@ -22274,11 +23512,14 @@ static bool time_sleep(int argc, py_Ref argv) {
     py_f64 secs;
     if(!py_castfloat(argv, &secs)) return false;
 
-    clock_t start = clock();
-    const clock_t end = start + (clock_t)(secs * CLOCKS_PER_SEC);
+    int64_t start = time_monotonic_ns();
+    const int64_t end = start + secs * NANOS_PER_SEC;
     while(true) {
-        clock_t now = clock();
+        int64_t now = time_monotonic_ns();
         if(now >= end) break;
+#if PK_ENABLE_THREADS
+        c11_thrd__yield();
+#endif
     }
     py_newnone(py_retval());
     return true;
@@ -22331,7 +23572,10 @@ void pk__add_module_time() {
 
     py_bindfunc(mod, "time", time_time);
     py_bindfunc(mod, "time_ns", time_time_ns);
+    py_bindfunc(mod, "monotonic", time_time_monotonic);
+    py_bindfunc(mod, "monotonic_ns", time_time_monotonic_ns);
     py_bindfunc(mod, "perf_counter", time_perf_counter);
+    py_bindfunc(mod, "process_time", time_process_time);
     py_bindfunc(mod, "sleep", time_sleep);
     py_bindfunc(mod, "localtime", time_localtime);
 }
@@ -22901,12 +24145,6 @@ void pk__add_module_os() {
     py_newdict(py_emplacedict(mod, py_name("environ")));
 }
 
-typedef struct {
-    const char* path;
-    const char* mode;
-    FILE* file;
-} io_FileIO;
-
 static bool io_FileIO__new__(int argc, py_Ref argv) {
     // __new__(cls, file, mode)
     PY_CHECK_ARGC(3);
@@ -23013,6 +24251,14 @@ static bool io_FileIO_write(int argc, py_Ref argv) {
     return true;
 }
 
+static bool io_FileIO_flush(int argc, py_Ref argv) {
+    PY_CHECK_ARGC(1);
+    io_FileIO* ud = py_touserdata(py_arg(0));
+    fflush(ud->file);
+    py_newnone(py_retval());
+    return true;
+}
+
 void pk__add_module_io() {
     py_Ref mod = py_newmodule("io");
 
@@ -23026,6 +24272,7 @@ void pk__add_module_io() {
     py_bindmethod(FileIO, "close", io_FileIO_close);
     py_bindmethod(FileIO, "tell", io_FileIO_tell);
     py_bindmethod(FileIO, "seek", io_FileIO_seek);
+    py_bindmethod(FileIO, "flush", io_FileIO_flush);
 
     py_newint(py_emplacedict(mod, py_name("SEEK_SET")), SEEK_SET);
     py_newint(py_emplacedict(mod, py_name("SEEK_CUR")), SEEK_CUR);
@@ -23349,6 +24596,7 @@ void pk__add_module_lz4() {}
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
 #include <conio.h>
+#undef WIN32_LEAN_AND_MEAN
 
 #elif PY_SYS_PLATFORM == 3 || PY_SYS_PLATFORM == 5
 
@@ -23472,14 +24720,6 @@ void pk__add_module_conio() {}
 #endif
 
 // src/modules/gc.c
-static bool gc_collect(int argc, py_Ref argv) {
-    PY_CHECK_ARGC(0);
-    ManagedHeap* heap = &pk_current_vm->heap;
-    int res = ManagedHeap__collect(heap);
-    py_newint(py_retval(), res);
-    return true;
-}
-
 static bool gc_enable(int argc, py_Ref argv) {
     PY_CHECK_ARGC(0);
     ManagedHeap* heap = &pk_current_vm->heap;
@@ -23503,13 +24743,40 @@ static bool gc_isenabled(int argc, py_Ref argv) {
     return true;
 }
 
+static bool gc_collect(int argc, py_Ref argv) {
+    PY_CHECK_ARGC(0);
+    ManagedHeap* heap = &pk_current_vm->heap;
+    int freed = ManagedHeap__collect(heap);
+    py_newint(py_retval(), freed);
+    return true;
+}
+
+static bool gc_collect_hint(int argc, py_Ref argv) {
+    PY_CHECK_ARGC(0);
+    ManagedHeap* heap = &pk_current_vm->heap;
+    int freed = ManagedHeap__collect_hint(heap);
+    py_newint(py_retval(), freed);
+    return true;
+}
+
+static bool gc_setup_debug_callback(int argc, py_Ref argv) {
+    PY_CHECK_ARGC(1);
+    ManagedHeap* heap = &pk_current_vm->heap;
+    heap->debug_callback = *argv;
+    py_newnone(py_retval());
+    return true;
+}
+
 void pk__add_module_gc() {
     py_Ref mod = py_newmodule("gc");
 
-    py_bindfunc(mod, "collect", gc_collect);
     py_bindfunc(mod, "enable", gc_enable);
     py_bindfunc(mod, "disable", gc_disable);
     py_bindfunc(mod, "isenabled", gc_isenabled);
+
+    py_bindfunc(mod, "collect", gc_collect);
+    py_bindfunc(mod, "collect_hint", gc_collect_hint);
+    py_bindfunc(mod, "setup_debug_callback", gc_setup_debug_callback);
 }
 
 // src/compiler/lexer.c
@@ -24076,6 +25343,7 @@ static Error* lex_one_token(Lexer* self, bool* eof, bool is_fstring) {
             case ' ':
             case '\t': eat_spaces(self); break;
             case '\n': {
+                if(self->brackets_level > 0) return NULL;
                 add_token(self, TK_EOL);
                 if(!eat_indentation(self)) {
                     return LexerError(self, "unindent does not match any outer indentation level");
@@ -25691,11 +26959,9 @@ static Error* EXPR_TUPLE_ALLOW_SLICE(Compiler* self, bool allow_slice) {
     // tuple expression     // (a, )
     int count = 1;
     do {
-        if(curr()->brackets_level) match_newlines();
         if(!is_expression(self, allow_slice)) break;
         check(parse_expression(self, PREC_LOWEST + 1, allow_slice));
         count += 1;
-        if(curr()->brackets_level) match_newlines();
     } while(match(TK_COMMA));
     // pop `count` expressions from the stack and merge them into a TupleExpr
     SequenceExpr* e = TupleExpr__new(prev()->line, count);
@@ -25992,9 +27258,7 @@ static Error* exprGroup(Compiler* self) {
         Ctx__s_push(ctx(), (Expr*)TupleExpr__new(line, 0));
         return NULL;
     }
-    match_newlines();
     check(EXPR_TUPLE(self));  // () is just for change precedence
-    match_newlines();
     consume(TK_RPAREN);
     if(Ctx__s_top(ctx())->vt->is_tuple) return NULL;
     GroupedExpr* g = GroupedExpr__new(line, Ctx__s_popx(ctx()));
@@ -26037,7 +27301,6 @@ static Error* consume_comp(Compiler* self, Opcode op0, Opcode op1) {
     check(EXPR_VARS(self));  // [expr, vars]
     consume(TK_IN);
     check(parse_expression(self, PREC_TERNARY + 1, false));  // [expr, vars, iter]
-    match_newlines();
     if(match(TK_IF)) {
         check(parse_expression(self, PREC_TERNARY + 1, false));  // [expr, vars, iter, cond]
         has_cond = true;
@@ -26048,7 +27311,6 @@ static Error* consume_comp(Compiler* self, Opcode op0, Opcode op1) {
     ce->vars = Ctx__s_popx(ctx());
     ce->expr = Ctx__s_popx(ctx());
     Ctx__s_push(ctx(), (Expr*)ce);
-    match_newlines();
     return NULL;
 }
 
@@ -26057,17 +27319,14 @@ static Error* exprList(Compiler* self) {
     int line = prev()->line;
     int count = 0;
     do {
-        match_newlines();
         if(curr()->type == TK_RBRACKET) break;
         check(EXPR(self));
         count += 1;
-        match_newlines();
         if(count == 1 && match(TK_FOR)) {
             check(consume_comp(self, OP_BUILD_LIST, OP_LIST_APPEND));
             consume(TK_RBRACKET);
             return NULL;
         }
-        match_newlines();
     } while(match(TK_COMMA));
     consume(TK_RBRACKET);
     SequenceExpr* e = ListExpr__new(line, count);
@@ -26084,7 +27343,6 @@ static Error* exprMap(Compiler* self) {
     bool parsing_dict = false;  // {...} may be dict or set
     int count = 0;
     do {
-        match_newlines();
         if(curr()->type == TK_RBRACE) break;
         check(EXPR(self));  // [key]
         if(curr()->type == TK_COLON) { parsing_dict = true; }
@@ -26097,7 +27355,6 @@ static Error* exprMap(Compiler* self) {
             Ctx__s_push(ctx(), (Expr*)item);
         }
         count += 1;  // key-value pair count
-        match_newlines();
         if(count == 1 && match(TK_FOR)) {
             if(parsing_dict) {
                 check(consume_comp(self, OP_BUILD_DICT, OP_DICT_ADD));
@@ -26107,7 +27364,6 @@ static Error* exprMap(Compiler* self) {
             consume(TK_RBRACE);
             return NULL;
         }
-        match_newlines();
     } while(match(TK_COMMA));
     consume(TK_RBRACE);
 
@@ -26135,7 +27391,6 @@ static Error* exprCompileTimeCall(Compiler* self, py_ItemRef func, int line) {
     uint16_t kwargc = 0;
     // copied from `exprCall`
     do {
-        match_newlines();
         if(curr()->type == TK_RPAREN) break;
         if(curr()->type == TK_ID && next()->type == TK_ASSIGN) {
             consume(TK_ID);
@@ -26152,7 +27407,6 @@ static Error* exprCompileTimeCall(Compiler* self, py_ItemRef func, int line) {
             check(read_literal(self, py_pushtmp()));
             argc += 1;
         }
-        match_newlines();
     } while(match(TK_COMMA));
     consume(TK_RPAREN);
 
@@ -26190,7 +27444,6 @@ static Error* exprCall(Compiler* self) {
     CallExpr* e = CallExpr__new(line, callable);
     Ctx__s_push(ctx(), (Expr*)e);  // push onto the stack in advance
     do {
-        match_newlines();
         if(curr()->type == TK_RPAREN) break;
         if(curr()->type == TK_ID && next()->type == TK_ASSIGN) {
             consume(TK_ID);
@@ -26216,7 +27469,6 @@ static Error* exprCall(Compiler* self) {
                 c11_vector__push(Expr*, &e->args, Ctx__s_popx(ctx()));
             }
         }
-        match_newlines();
     } while(match(TK_COMMA));
     consume(TK_RPAREN);
     return NULL;
@@ -26266,9 +27518,7 @@ static Error* exprSlice1(Compiler* self) {
 static Error* exprSubscr(Compiler* self) {
     Error* err;
     int line = prev()->line;
-    match_newlines();
     check(EXPR_TUPLE_ALLOW_SLICE(self, true));
-    match_newlines();
     consume(TK_RBRACKET);  // [lhs, rhs]
     SubscrExpr* e = SubscrExpr__new(line);
     e->rhs = Ctx__s_popx(ctx());  // [lhs]
@@ -26597,7 +27847,6 @@ static Error* _compile_f_args(Compiler* self, FuncDecl* decl, bool is_lambda) {
     int state = 0;  // 0 for args, 1 for *args, 2 for k=v, 3 for **kwargs
     Error* err;
     do {
-        if(!is_lambda) match_newlines();
         if(state >= 3) return SyntaxError(self, "**kwargs should be the last argument");
         if(match(TK_MUL)) {
             if(state < 1)
@@ -26636,7 +27885,6 @@ static Error* _compile_f_args(Compiler* self, FuncDecl* decl, bool is_lambda) {
                 break;
         }
     } while(match(TK_COMMA));
-    if(!is_lambda) match_newlines();
     return NULL;
 }
 
@@ -26840,7 +28088,6 @@ __EAT_DOTS_END:
 
     bool has_bracket = match(TK_LPAREN);
     do {
-        if(has_bracket) match_newlines();
         Ctx__emit_(ctx(), OP_DUP_TOP, BC_NOARG, BC_KEEPLINE);
         consume(TK_ID);
         c11_sv name = Token__sv(prev());
@@ -26852,7 +28099,6 @@ __EAT_DOTS_END:
         Ctx__emit_store_name(ctx(), name_scope(self), py_namev(name), prev()->line);
     } while(match(TK_COMMA));
     if(has_bracket) {
-        match_newlines();
         consume(TK_RPAREN);
     }
     Ctx__emit_(ctx(), OP_POP_TOP, BC_NOARG, BC_KEEPLINE);
