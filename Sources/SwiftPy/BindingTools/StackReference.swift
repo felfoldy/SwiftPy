@@ -26,27 +26,39 @@ public class StackReference {
             py_iter(reference)
         }
         
-        let iter = PyAPI.returnValue.toStack
+        let iter = PyAPI.returnValue.retained
         
         while try Interpreter.printItemError(py_next(iter.reference)) {
-            try next(PyAPI.returnValue.toStack)
+            try next(PyAPI.returnValue.retained)
         }
     }
-    
+
     deinit {
         py_pop()
     }
 }
 
 public extension PythonConvertible {
+    @available(*, deprecated, renamed: "retained")
     var toStack: StackReference {
+        StackReference(self)
+    }
+
+    /// Creates a temporary reference on stack.
+    var retained: StackReference {
         StackReference(self)
     }
 }
 
 @MainActor
 public extension PyAPI.Reference {
+    @available(*, deprecated, renamed: "retained")
     var toStack: StackReference {
+        StackReference(self)
+    }
+
+    /// Creates a temporary reference on stack.
+    var retained: StackReference {
         StackReference(self)
     }
 }

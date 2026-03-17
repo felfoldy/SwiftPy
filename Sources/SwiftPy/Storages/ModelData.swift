@@ -114,7 +114,7 @@ class ModelContainer: PythonBindable {
     
     func insert(model: object) throws {
         // TODO: Update metadata if needed.
-        let dataRef = try model.attribute("_data")?.toStack
+        let dataRef = try model.attribute("_data")?.retained
         guard let modelData = ModelData(dataRef?.reference),
               let keys = modelData.keys,
               let name = keys.first(where: { $0.key == "__name__" })?.value else {
@@ -129,7 +129,7 @@ class ModelContainer: PythonBindable {
     
     func fetch(_ type: object) throws -> object? {
         let typeName = py_totype(type).name
-        let modelsRef = try context.fetch(.models(name: typeName)).toStack
+        let modelsRef = try context.fetch(.models(name: typeName)).retained
         guard let makeModels = try type.attribute("_makemodels") else {
             throw PythonError.ValueError("Type does not support fetching models")
         }
@@ -137,7 +137,7 @@ class ModelContainer: PythonBindable {
     }
 
     func delete(model: object) throws {
-        let dataRef = try model.attribute("_data")?.toStack
+        let dataRef = try model.attribute("_data")?.retained
         guard let modelData = ModelData(dataRef?.reference) else {
             throw PythonError.ValueError("Invalid model data")
         }

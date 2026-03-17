@@ -95,7 +95,7 @@ public class AsyncTask: ViewRepresentable {
 
                     let hasNext = try Interpreter.printItemError(py_next(iterator))
 
-                    let stack = PyAPI.returnValue.toStack
+                    let stack = PyAPI.returnValue.retained
 
                     if hasNext {
                         if let task = AsyncTask(stack.reference) {

@@ -120,7 +120,7 @@ struct AsyncTests {
 
         await Interpreter.asyncRun("""
         def async_generator():
-            a = yield from async_func()
+            a = await async_func()
             return a
         
         gen = async_generator()
@@ -178,5 +178,24 @@ struct AsyncTests {
         await Interpreter.asyncRun("chainAsyncTasks_result = await chainAsyncTasks_make()")
         
         #expect(Interpreter.evaluate("chainAsyncTasks_result") == 12)
+    }
+
+    @Test func childFailing() async {
+        await Interpreter.asyncRun("""
+        childFailing_result = 0
+
+        async def childFailing_child():
+            raise RuntimeError("child failed")
+            yield
+
+        async def childFailing_parent():
+            print("before")
+            await childFailing_child()
+            childFailing_result = 1
+        """)
+        
+        await Interpreter.asyncRun("await childFailing_parent()")
+        
+        #expect(Interpreter.main["childFailing_result"] == 0)
     }
 }

@@ -184,14 +184,14 @@ extension Array: PythonConvertible {
                 log.error("\(value) is not convertible to Python")
                 continue
             }
-            py_list_append(reference, value.toStack.reference)
+            py_list_append(reference, value.retained.reference)
         }
     }
 
     public static func fromPython(_ reference: PyAPI.Reference) -> [Element] {
         var items: [Element] = []
         
-        let array = reference.toStack
+        let array = reference.retained
         
         try? array.iterate { item in
             if Element.self == Any?.self {
@@ -231,8 +231,8 @@ extension Dictionary: PythonConvertible where Key: PythonConvertible {
                 continue
             }
  
-            let keyStack = key.toStack
-            let valueStack = value.toStack
+            let keyStack = key.retained
+            let valueStack = value.retained
             py_dict_setitem(reference, keyStack.reference, valueStack.reference)
         }
     }
@@ -241,7 +241,7 @@ extension Dictionary: PythonConvertible where Key: PythonConvertible {
         var dict = [Key: Value]()
         
         do {
-            let items = try reference.attribute("items")?.call().toStack
+            let items = try reference.attribute("items")?.call()?.retained
             
             try items?.iterate { item in
                 let keyRef = py_tuple_getitem(item.reference, 0)

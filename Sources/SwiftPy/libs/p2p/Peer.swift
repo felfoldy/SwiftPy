@@ -109,7 +109,7 @@ extension Peer: MCSessionDelegate {
     
     nonisolated public func session(_ session: MCSession, didReceive data: Data, fromPeer peerID: MCPeerID) {
         Task { @MainActor [self] in
-            let bytes = data.toStack
+            let bytes = data.retained
             _ = try? self[.onMessage]?.call([bytes.reference])
             onMessageHandler?(data)
         }

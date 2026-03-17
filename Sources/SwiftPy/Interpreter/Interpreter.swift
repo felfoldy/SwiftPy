@@ -83,7 +83,7 @@ public final class Interpreter {
             py_compile(code, filename, mode.pyMode, false)
         }
         
-        let code = PyAPI.returnValue.toStack
+        let code = PyAPI.returnValue.retained
         
         try Interpreter.printErrors {
             let function: PyAPI.Reference? = mode == .evaluation ? .functions.eval : .functions.exec
@@ -182,7 +182,7 @@ public extension Interpreter {
     static func evaluate<Result: PythonConvertible>(_ expression: String) -> Result? {
         do {
             try shared.execute(expression, filename: "<string>", mode: .evaluation)
-            let result = PyAPI.returnValue.toStack
+            let result = PyAPI.returnValue.retained
             return try Result.cast(result.reference)
         } catch {
             return nil
@@ -196,7 +196,7 @@ public extension Interpreter {
     static func complete(_ text: String) -> [String] {
         let module = Interpreter.shared.module("interpreter")
         let completions = module?["completions"]
-        let textStack = text.toStack
+        let textStack = text.retained
         
         let result = try? completions?.call([textStack.reference])
         return [String](result) ?? []

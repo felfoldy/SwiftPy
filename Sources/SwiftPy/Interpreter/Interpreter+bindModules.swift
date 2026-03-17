@@ -102,7 +102,7 @@ extension Interpreter {
         let osName = "unknown"
         #endif
         
-        let osNameRef = osName.toStack
+        let osNameRef = osName.retained
         py_setattr(sys, py_name("os"), osNameRef.reference)
     }
     

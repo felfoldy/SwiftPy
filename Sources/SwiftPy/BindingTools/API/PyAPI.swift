@@ -54,8 +54,8 @@ public extension PyAPI {
         }
 
         if let error = error as? StopIteration {
-            let valueRef = error.value.toStack
-            let objRef = try? PyType.StopIteration.new(valueRef.reference).toStack
+            let valueRef = error.value?.retained
+            let objRef = try? PyType.StopIteration.new(valueRef?.reference)?.retained
             return py_raise(objRef?.reference)
         }
 
@@ -248,7 +248,7 @@ public extension PyAPI.Reference {
     
     @inlinable
     func castAttribute<Result: PythonConvertible>(_ name: String) throws -> Result {
-        let ref = try attribute(name)?.toStack
+        let ref = try attribute(name)?.retained
         return try Result.cast(ref?.reference)
     }
     
@@ -346,7 +346,7 @@ public extension PyAPI.Reference {
         let doc = docstring?.withCString(strdup)
         let name = py_newfunction(temp, signature, function, doc, -1)
 
-        let sigRet = signature.toStack
+        let sigRet = signature.retained
         py_setdict(temp, py_name("_signature"), sigRet.reference)
         
         var interface = "def \(signature):"
@@ -356,7 +356,7 @@ public extension PyAPI.Reference {
         } else {
             interface += " ..."
         }
-        let interfaceRet = interface.toStack
+        let interfaceRet = interface.retained
         py_setdict(temp, py_name("_interface"), interfaceRet.reference)
         
         py_setdict(self, name, temp)

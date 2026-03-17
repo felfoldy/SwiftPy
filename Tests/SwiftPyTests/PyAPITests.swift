@@ -39,10 +39,9 @@ struct PyAPITests {
         """)
         
         let addFunction = Interpreter.main["add"]
-        let a = 10.toStack
-        let b = 20.toStack
-        let sum = try addFunction?.call([a.reference, b.reference])
-            .toStack
+        let a = 10.retained
+        let b = 20.retained
+        let sum = try addFunction?.call([a.reference, b.reference])?.retained
         
         #expect(sum?.reference == 30)
     }
