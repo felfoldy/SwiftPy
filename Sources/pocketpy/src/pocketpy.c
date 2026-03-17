@@ -24885,6 +24885,35 @@ static void add_token_with_value(Lexer* self, TokenIndex type, TokenValue value)
                    self->current_line - ((type == TK_EOL) ? 1 : 0),
                    self->brackets_level,
                    value};
+
+    if(type == TK_ID && token.length == 5 && strncmp(token.start, "await", 5) == 0) {
+        // await -> yield from
+        token.type = TK_YIELD_FROM;
+    }
+
+    // handle "async def", "not in", "is not", "yield from"
+    Token* back = &c11_vector__back(Token, &self->nexts);
+
+    if(back->type == TK_ID && back->length == 5 && strncmp(back->start, "async", 5) == 0 &&
+       type == TK_DEF) {
+        // remove previous async token
+        self->nexts.length--;
+        
+        Token deco = *back;
+        deco.type = TK_DECORATOR;
+        c11_vector__push(Token, &self->nexts, deco);
+        
+        Token id = *back;
+        id.type = TK_ID;
+        c11_vector__push(Token, &self->nexts, id);
+        
+        Token eol = *back;
+        eol.type = TK_EOL;
+        c11_vector__push(Token, &self->nexts, eol);
+        // def
+        c11_vector__push(Token, &self->nexts, token);
+        return;
+    }
     // handle "not in", "is not", "yield from"
     if(self->nexts.length > 0) {
         Token* back = &c11_vector__back(Token, &self->nexts);

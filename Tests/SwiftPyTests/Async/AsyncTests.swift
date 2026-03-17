@@ -146,8 +146,7 @@ struct AsyncTests {
         Interpreter.run("""
         import asyncio
         
-        @asyncio.coroutine
-        def asyncTaskFromGenerator_make():
+        async def asyncTaskFromGenerator_make():
             yield 1
             return 2
         """)
@@ -168,13 +167,10 @@ struct AsyncTests {
         }
         
         Interpreter.run("""
-        import asyncio
-            
-        @asyncio.coroutine
-        def chainAsyncTasks_make():
-            a = yield from chainAsyncTasks_task1()
+        async def chainAsyncTasks_make():
+            a = await chainAsyncTasks_task1()
             print(f'a: {a}')
-            b = yield from chainAsyncTasks_task2()
+            b = await chainAsyncTasks_task2()
             print(f'b: {b}')
             return a * b
         """)

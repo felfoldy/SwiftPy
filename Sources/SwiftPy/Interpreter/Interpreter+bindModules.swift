@@ -13,6 +13,7 @@ import UIKit
 
 extension Interpreter {
     static func bindModules() {
+        bindAsync()
         bindOS()
         bindSys()
         
@@ -103,5 +104,19 @@ extension Interpreter {
         
         let osNameRef = osName.toStack
         py_setattr(sys, py_name("os"), osNameRef.reference)
+    }
+    
+    private static func bindAsync() {
+        let builtins = py_getmodule("builtins")
+
+        let asyncSource = """
+        def async(func):
+            import asyncio
+            def coroutine(*args,**kwargs):
+                cr = func(*args,**kwargs)
+                return asyncio.AsyncTask(cr)
+            return coroutine
+        """
+        py_exec(asyncSource, "<stdin>", CompileMode.execution.pyMode, builtins)
     }
 }

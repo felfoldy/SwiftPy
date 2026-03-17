@@ -92,9 +92,7 @@ public final class Interpreter {
             let isExecuted = py_call(function, 1, code.reference)
             profiler.end()
 
-            Interpreter.output.executionTime(
-                profiler.executionTime
-            )
+            Interpreter.output.executionTime(profiler.executionTime)
 
             return isExecuted
         }
