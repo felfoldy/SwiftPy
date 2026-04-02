@@ -28,22 +28,34 @@ public final class Path {
         try FileManager.default.createDirectory(atPath: url.path, withIntermediateDirectories: true)
     }
 
-    /// Documents directory.
-    public static func home() -> String {
-        URL.documentsDirectory.path
+    /// Removes the file or directory at the specified Path.
+    public func unlink() throws {
+        try FileManager.default.removeItem(at: url)
     }
-    
+
+    /// Documents directory.
+    public static func home() throws -> Path {
+        try Path(url: .documentsDirectory)
+    }
+
     /// The path to the program’s current directory.
     public static func cwd() throws -> Path {
         try Path(url: .currentDirectory())
     }
     
     /// Documents/site-packges directory.
-    public static func sitePackages() throws -> String {
-        let path = home() + "/site-packages"
-        if !FileManager.default.fileExists(atPath: path) {
-            try FileManager.default.createDirectory(atPath: path, withIntermediateDirectories: true)
+    public static func sitePackages() throws -> Path {
+        let sitePackagesUrl = try home().url.appending(path: "site-packages", directoryHint: .isDirectory)
+        let path = try Path(url: sitePackagesUrl)
+
+        // Create site-packages folder if not exists.
+        if !FileManager.default.fileExists(atPath: sitePackagesUrl.path) {
+            try FileManager.default.createDirectory(
+                at: sitePackagesUrl,
+                withIntermediateDirectories: true
+            )
         }
+
         return path
     }
     

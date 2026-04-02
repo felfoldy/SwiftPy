@@ -63,10 +63,11 @@ public final class Interpreter {
         
         let builtins = py_getmodule("builtins")
         py_deldict(builtins, py_name("exit"))
-        
+
         // Change default working directory to the applications Documents directory.
-        FileManager.default.changeCurrentDirectoryPath(Path.home())
-        
+        let documentsPath = URL.documentsDirectory.path
+        FileManager.default.changeCurrentDirectoryPath(documentsPath)
+
         Interpreter.bindModules()
 
         if #available(macOS 15, iOS 18, visionOS 2, *) {
