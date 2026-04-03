@@ -102,7 +102,15 @@ extension String: PythonConvertible {
     }
 
     @inlinable public static func fromPython(_ reference: PyAPI.Reference) -> String {
-        String(cString: py_tostr(reference))
+        if py_typeof(reference) == .str {
+            return String(cString: py_tostr(reference))
+        }
+
+        if let path = Path(reference) {
+            return path.url.path
+        }
+
+        return ""
     }
 }
 

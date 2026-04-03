@@ -348,9 +348,9 @@ public extension PyAPI.Reference {
 
         let sigRet = signature.retained
         py_setdict(temp, py_name("_signature"), sigRet.reference)
-        
+
         var interface = "def \(signature):"
-        
+
         if let docstring {
             interface += "\n    \"\"\"\(docstring)\"\"\""
         } else {
@@ -376,8 +376,16 @@ public extension PyAPI.Reference {
         if py_isinstance(self, type) {
             return true
         }
-        if type == .float, canCast(to: .int) {
-            return true
+        switch type {
+        case .float:
+            if canCast(to: .int) {
+                return true
+            }
+        case .str:
+            if canCast(to: Path.pyType) {
+                return true
+            }
+        default: break
         }
         return false
     }
