@@ -39,7 +39,7 @@ extension Interpreter {
             return nil
         }
 
-        py_callbacks().pointee.importfile = { cFilename in
+        py_callbacks().pointee.importfile = { cFilename, _ in
             guard let cFilename else { return nil }
             
             let filename = String(cString: cFilename)

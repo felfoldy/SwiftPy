@@ -315,10 +315,7 @@ public extension PyAPI.Reference {
     
     @inlinable
     subscript(index: Int) -> PyAPI.Reference? {
-        PyAPI.Reference(
-            UnsafeMutableRawPointer(self)
-                .advanced(by: PyAPI.elementSize * index)
-        )
+        advanced(by: index)
     }
     
     @inlinable

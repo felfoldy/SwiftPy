@@ -35,11 +35,12 @@ public extension PythonBindable {
         let retainedSelfPointer = Unmanaged.passRetained(self)
             .toOpaque()
         userdata.storeBytes(of: retainedSelfPointer, as: UnsafeRawPointer.self)
-
+        
         // Store cache of python value.
-        let pointer = UnsafeMutableRawPointer.allocate(byteCount: PyAPI.elementSize, alignment: 8)
-        pointer.copyMemory(from: UnsafeRawPointer(reference), byteCount: PyAPI.elementSize)
-        _pythonCache.reference = OpaquePointer(pointer)
+
+        let pointer = PyAPI.Reference.allocate(capacity: 1)
+        pointer.initialize(to: reference.pointee)
+        _pythonCache.reference = pointer
     }
     
     /// Creates a new python object.
