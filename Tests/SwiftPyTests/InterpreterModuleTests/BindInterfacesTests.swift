@@ -39,7 +39,7 @@ struct BindInterfacesTests {
         """)
 
         let doc: String = try #require(
-            Interpreter.evaluate("test.__doc__")
+            PyModule.main.test?.__doc__
         )
 
         #expect(doc.contains("TestClass3"))

@@ -33,7 +33,7 @@ struct AutoCompleterTests {
     
     @Test func attributeMatches() {
         Interpreter.run("x = completer.complete('completer.c', 0)")
-        #expect(Interpreter.main["x"] == "completer.complete(")
+        #expect(PyModule.main.x == "completer.complete(")
     }
     
     @Test func complete() {

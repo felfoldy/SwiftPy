@@ -86,19 +86,6 @@ public extension PyAPI {
         py_throw(error, message)
     }
 
-    /// Calls a function with no arguments.
-    /// - Parameters:
-    ///   - function: Function to call
-    /// - Returns: Return value from the function.
-    @inlinable @discardableResult
-    @available(*, deprecated, message: "Use function.call() instead.")
-    static func call(_ function: PyAPI.Reference?) throws -> PyAPI.Reference? {
-        try Interpreter.printErrors {
-            py_call(function, 0, nil)
-        }
-        return PyAPI.returnValue
-    }
-
     static let pointerSize = Int32(MemoryLayout<UnsafeRawPointer>.size)
 }
 

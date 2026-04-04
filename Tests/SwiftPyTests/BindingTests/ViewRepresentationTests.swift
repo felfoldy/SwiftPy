@@ -33,6 +33,7 @@ struct ViewRepresentationTests {
     
     @Test
     func customView() {
+        let main = PyModule.main
         let io = TestIOStream()
         Interpreter.output = io
         
@@ -40,7 +41,7 @@ struct ViewRepresentationTests {
         _ = CustomView.pyType
         
         let customView = CustomView()
-        customView.toPython(.main.emplace("custom_view"))
+        main.custom_view = customView
 
         Interpreter.run("custom_view", mode: .single)
 

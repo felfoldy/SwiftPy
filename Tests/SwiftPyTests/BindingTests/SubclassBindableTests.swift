@@ -22,7 +22,7 @@ private class Base: PythonBindable {
 
 @MainActor
 struct SubclassBindableTests {
-    let main = Interpreter.main
+    let main = PyModule.main
     let type = Base.pyType
     
     init() {
@@ -38,7 +38,7 @@ struct SubclassBindableTests {
     }
     
     @Test func startCalled() {
-        let base = Base(main["subclass_test"])
+        let base = Base(main.subclass_test)
         Interpreter.run("subclass_test.start()")
         
         #expect(base?.startCalled == true)
@@ -49,7 +49,7 @@ struct SubclassBindableTests {
         test2 = Base()
         """)
         
-        let base = Base(main["test2"])
+        let base = Base(Interpreter.evaluate("test2"))
         Interpreter.run("""
         import gc
         
@@ -57,7 +57,7 @@ struct SubclassBindableTests {
         gc.collect()
         """)
         
-        #expect(main["test2"] == nil)
+        #expect(main.test2 == nil)
         #expect(base?._pythonCache.reference == nil)
     }
 }

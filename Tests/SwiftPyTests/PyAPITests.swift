@@ -10,26 +10,26 @@ import SwiftPy
 
 @MainActor
 struct PyAPITests {
-    @Test func setAttribute() {
-        let main = Interpreter.main
+    @Test func setAttribute() throws {
+        let main = PyModule.main
 
         Interpreter.execute("class Test: ...")
 
-        main["Test"]?.bind("__init__(self, val: str) -> None") { argc, argv in
+        main.Test?.reference.bind("__init__(self, val: str) -> None") { argc, argv in
             PyAPI.returnNone {
                 argv?.setAttribute("param", argv?[1])
             }
         }
-
+        
         Interpreter.execute("""
         x = Test('secret value')
         """)
 
-        #expect(main["x"]?["param"] == "secret value")
+        #expect(main.x?.param == "secret value")
         
-        main["x"]?.deleteAttribute("param")
-        
-        #expect(main["x"]?["param"] == nil)
+        main.x?.param = nil
+                
+        #expect(main.x?.param == nil)
     }
     
     @Test func referenceCall() throws {
@@ -38,12 +38,7 @@ struct PyAPITests {
             return a + b
         """)
         
-        let addFunction = Interpreter.main["add"]
-        let a = 10.retained
-        let b = 20.retained
-        let sum = try addFunction?.call([a.reference, b.reference])?.retained
-        
-        #expect(sum?.reference == 30)
+        try #expect(PyModule.main.add?(10, 20) == 30)
     }
     
     @Test func referenceCallThrows() throws {
@@ -52,11 +47,8 @@ struct PyAPITests {
             raise ValueError('incorrect')
         """)
         
-        let addFunction = Interpreter.main["referenceCallThrows"]
-        
-        do {
-            try addFunction?.call()
-            throw PythonError.AssertionError("Should not reach here")
-        } catch {}
+        #expect(throws: PythonError.self) {
+            try PyModule.main.referenceCallThrows?()
+        }
     }
 }

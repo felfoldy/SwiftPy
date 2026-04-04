@@ -113,83 +113,79 @@ extension TestClass: PythonBindable {
 
 @MainActor
 struct PythonConvertibleClassTests {
-    let main = Interpreter.main
+    let main = PyModule.main
     let type = TestClass.pyType
     
-    @Test func returnCachedFromToPython() throws {        
-        Interpreter.run("import gc")
-
+    @Test func returnCachedFromToPython() throws {
         let obj = TestClass(number: 12)
         
         #expect(obj._pythonCache.reference == nil)
         
-        obj.toPython(main.emplace("test3"))
+        main.test3 = obj
         
         Interpreter.run("test3.number")
         #expect(obj._pythonCache.reference != nil)
         
         // Uses cache.
-        obj.toPython(main.emplace("test4"))
+        main.test4 = obj
                 
         Interpreter.run("del test3")
-        Interpreter.run("gc.collect()")
+        try PyModule("gc")?.collect?()
         #expect(obj._pythonCache.reference != nil)
         
         Interpreter.run("del test4")
-        Interpreter.run("gc.collect()")
+        try PyModule("gc")?.collect?()
         #expect(obj._pythonCache.reference == nil)
     }
     
     @Test func classAttribute() {
-        #expect(Interpreter.evaluate("TestClass.text") == "Hello")
+        #expect(main.TestClass?.text == "Hello")
     }
     
     @Test func createFromPython() throws {
-        Interpreter.run("import gc")
         Interpreter.run("test5 = TestClass(12)")
-        
-        let obj = try #require(main["test5"])
 
-        #expect(TestClass(obj)?.number == 12)
+        #expect(main.test5?.number == 12)
     }
     
     @Test func pythonMutation() {
         let obj = TestClass(number: 32)
-        obj.toPython(main.emplace("test4"))
+        main.test4 = obj
 
-        Interpreter.run("test4.number = 'asd'")
+        main.test4?.number = "asd"
         #expect(obj.number == 32)
         
-        Interpreter.run("test4.number = 42")
+        main.test4?.number = 42
         #expect(obj.number == 42)
     }
     
-    @Test func functionBinding() {
+    @Test func functionBinding() throws {
         let obj = TestClass(number: 32)
-        obj.toPython(main.emplace("test5"))
-        
-        Interpreter.run("test5.set_number(10)")
+        main.test5 = obj
+        try main.test5?.set_number?(10)
         #expect(obj.number == 10)
         
-        Interpreter.run("test5.set_number(None)")
+        try main.test5?.set_number?(nil)
         #expect(obj.number == nil)
     }
     
-    @Test func getNumber() {
+    @Test func getNumber() throws {
         let obj = TestClass(number: 32)
-        obj.toPython(main.emplace("test6"))
+        main.test6 = obj
         
-        #expect(Interpreter.evaluate("test6.get_number()") == 32)
+        try #expect(main.test6?.get_number?() == 32)
     }
 
-    @Test func repr() {
+    @Test func repr() throws {
         let obj = TestClass(number: 32)
-        obj.toPython(main.emplace("test7"))
-        #expect(Interpreter.evaluate("test7.__repr__()") == obj.description)
+        main.test7 = obj
+        try #expect(main.test7?.__repr__?() == obj.description)
     }
     
     @Test func staticFunc() throws {
-        let obj: TestClass = try #require(Interpreter.evaluate("TestClass.static_func(10)"))
+        let obj: TestClass = try #require(
+            try main.TestClass?.static_func?(10)
+        )
         #expect(obj.number == 10)
     }
     
@@ -198,7 +194,6 @@ struct PythonConvertibleClassTests {
         test9 = await TestClass.async_create()
         """)
 
-        let result = try #require(TestClass(.main["test9"]))
-        #expect(result.number == 10)
+        #expect(main.test9?.number == 10)
     }
 }

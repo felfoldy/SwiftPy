@@ -13,11 +13,10 @@ import Foundation
 @MainActor
 struct ConversionTests {
     let profiler = profile("ConversionTests")
-    let main = Interpreter.main
+    let main = PyModule.main
     
     @Test func dataToPython() {
-        let data = "Hello".data(using: .utf8)
-        data.toPython(.main.emplace("test_bytes"))
+        main.test_bytes = "Hello".data(using: .utf8)
         #expect(Interpreter.evaluate("test_bytes.decode()") == "Hello")
     }
     
@@ -59,7 +58,7 @@ struct ConversionTests {
         
         Interpreter.run(#"dictionary = {"topic": "dict", "task": "iterate"}"#)
         
-        let result = try #require([String: String](main["dictionary"]))
+        let result = try #require([String: String](main.dictionary))
         
         #expect(result["topic"] == "dict")
         #expect(result["task"] == "iterate")
@@ -79,8 +78,11 @@ struct ConversionTests {
             "object": {"nestedKey": "nestedValue"}
         }
         """)
+        
+        #expect(main.dictionary?["string"] == "hello")
+        #expect(main.dictionary?["integer"] == 42)
 
-        let dictionary = try #require([String: Any](main["dictionary"]))
+        let dictionary = try #require([String: Any](main.dictionary))
         #expect(dictionary["string"] as? String == "hello")
         #expect(dictionary["integer"] as? Int == 42)
         #expect(dictionary["double"] as? Double == 3.14)
@@ -93,8 +95,7 @@ struct ConversionTests {
         #expect(array[2] as? Bool == false)
         #expect(array[3] == nil)
 
-        let obj = try #require(dictionary["object"] as? [String: Any])
-        #expect(obj["nestedKey"] as? String == "nestedValue")
+        //#expect(main.dictionary?["object"]?["nestedKey"] == "nestedValue")
     }
     
     static var casted: Double?

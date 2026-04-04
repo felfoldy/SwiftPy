@@ -49,14 +49,14 @@ class TestClassWithProperties: PythonBindable {
 
 @MainActor
 struct ScriptableTests {
-    let main = Interpreter.main
+    let main = PyModule.main
     let type = TestClassWithProperties.pyType
     
     @Test func dtor() {
         Interpreter.run("import gc")
         
         let testClass = TestClassWithProperties()
-        testClass.toPython(main.emplace("tc1"))
+        main.tc1 = testClass
         #expect(testClass._pythonCache.reference != nil)
         
         Interpreter.run("del tc1")
@@ -66,14 +66,15 @@ struct ScriptableTests {
     
     @Test func bindIntProperty() {
         let testClass = TestClassWithProperties()
-        testClass.toPython(main.emplace("tc2"))
+
+        main.tc2 = testClass
         
         #expect(Interpreter.evaluate("tc2.int_property") == 12)
     }
     
     @Test func bindFloatProperty() {
         let testClass = TestClassWithProperties()
-        testClass.toPython(main.emplace("tc5"))
+        main.tc5 = testClass
         
         #expect(Interpreter.evaluate("tc5.float_property") == Float(3.14))
 
@@ -83,7 +84,7 @@ struct ScriptableTests {
 
     @Test func bindStringProperty() {
         let testClass = TestClassWithProperties()
-        testClass.toPython(main.emplace("tc3"))
+        main.tc3 = testClass
         Interpreter.run("tc3.content = 'new content'")
         
         #expect(Interpreter.evaluate("tc3.content") == "new content")
@@ -91,38 +92,40 @@ struct ScriptableTests {
     
     @Test func functionCall() {
         let testClass = TestClassWithProperties()
-        testClass.toPython(main.emplace("tc4"))
+
+        main.tc4 = testClass
+
         Interpreter.run("tc4.change_content('changed')")
         
         #expect(Interpreter.evaluate("tc4.get_content()") == "changed")
     }
     
-    @Test func staticFuncTests() async {
-        Interpreter.main.setAttribute("TestClass2", TestClassWithProperties.pyType.object)
+    @Test func staticFuncTests() async throws {
+        main.TestClass2 = TestClassWithProperties.pyType.object
         Interpreter.run("TestClass2.log('asd')")
         
         Interpreter.run("tc5 = TestClass2.create()")
-        #expect(main["tc5"]?.isType(TestClassWithProperties.self) == true)
+        #expect(TestClassWithProperties(main.tc5) != nil)
 
         Interpreter.run("""
         tc6 = TestClass2.map('map')
         content = tc6.content
         """)
         
-        #expect(main["content"] == "map")
+        #expect(main.content == "map")
 
         Interpreter.run("""
         tc6 = TestClass2.map(None)
         content = tc6.content
         """)
         
-        #expect(main["content"] == "")
+        #expect(main.content == "")
         
         await Interpreter.asyncRun("""
         tc7 = await TestClass2.async_create()
         """)
         
-        #expect(main["tc7"]?.isType(TestClassWithProperties.self) == true)
+        #expect(TestClassWithProperties(main.tc7) != nil)
     }
     
     @Test func returningArgumentedFunction() async {
@@ -134,7 +137,7 @@ struct ScriptableTests {
         number2 = await tc8.fetch()
         """)
         
-        #expect(main["number"] == 4)
-        #expect(main["number2"] == 0)
+        #expect(main.number == 4)
+        #expect(main.number2 == 0)
     }
 }

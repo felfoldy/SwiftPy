@@ -36,12 +36,14 @@ extension PyArgumentTests_SUT: HasSlots {
 
 @MainActor
 struct PyArgumentsTests {
-    @Test func argumentsInit() {
-        Interpreter.main.setAttribute("PyArgumentTests_SUT", PyArgumentTests_SUT.pyType.object)
+    @Test func argumentsInit() throws {
+        let main = PyModule.main
         
+        main.PyArgumentTests_SUT = PyArgumentTests_SUT.pyType.object
+                
         Interpreter.run("argumentsInit_result = PyArgumentTests_SUT(12, 'slot')")
-        
-        #expect(Interpreter.evaluate("argumentsInit_result.a") == 12)
-        #expect(Interpreter.evaluate("argumentsInit_result.slot_bind") == "slot")
+
+        #expect(main.argumentsInit_result?.a == 12)
+        #expect(main.argumentsInit_result?.slot_bind == "slot")
     }
 }
