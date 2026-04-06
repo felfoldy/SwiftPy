@@ -127,6 +127,10 @@ public class PyModule: PyObject {
         super.init(module)
     }
     
+    public override init?(_ reference: PyAPI.Reference?) {
+        super.init(reference)
+    }
+    
     public override subscript(dynamicMember dynamicMember: String) -> PyObject? {
         get {
             PyObject(reference[dynamicMember])
@@ -134,6 +138,21 @@ public class PyModule: PyObject {
         set {
             super[dynamicMember: dynamicMember] = newValue
         }
+    }
+
+    @discardableResult
+    public func `class`(_ type: PythonBindable.Type) -> PyModule {
+        let type = type.pyType
+        py_setdict(reference, py_name(type.name), type.object)
+        return self
+    }
+
+    public func classes(_ types: PythonBindable.Type...) {
+        for type in types { `class`(type) }
+    }
+    
+    public func def(_ signature: String, docstring: String? = nil, function: PyAPI.CFunction) {
+        reference.bind(signature, function: function)
     }
 }
 

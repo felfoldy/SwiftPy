@@ -51,7 +51,12 @@ public final class Interpreter {
     static var lastFailure: String?
     
     static var moduleBuilders: [String: (PyAPI.Reference?) -> Void] = [:]
-    
+
+    var moduleBuilders: [String: (PyAPI.Reference?) -> Void] {
+        get { Interpreter.moduleBuilders }
+        set { Interpreter.moduleBuilders = newValue }
+    }
+
     let profiler = SignpostProfiler("Python")
 
     init() {

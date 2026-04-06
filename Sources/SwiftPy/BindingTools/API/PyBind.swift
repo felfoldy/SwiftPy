@@ -27,26 +27,41 @@ public enum PyBind {
     /// This exposes `MySwiftClass` to Python and runs `my_module.py` if found in the app bundle.
     public static func module(_ name: String, _ types: [PythonBindable.Type], block: @escaping (PyAPI.Reference?) -> Void = { _ in }) {
         Interpreter.moduleBuilders[name] = { module in
+            guard let module = PyModule(module) else { return }
             // Set types.
             for type in types {
                 let pyType = type.pyType
-                module?.setAttribute(pyType.name, pyType.object)
+                module[dynamicMember: pyType.name] = pyType.object
             }
 
             // Load source.
             if let content = Interpreter.importFromBundle(name: name + ".py") {
                 try? Interpreter.printErrors {
-                    py_exec(content, name, EXEC_MODE, module)
+                    py_exec(content, name, EXEC_MODE, module.reference)
                 }
             }
 
-            block(module)
+            block(module.reference)
             
             // Add module.__doc__.
-            let interpreter = Interpreter.shared.module("interpreter")
-            let bind_interfaces = interpreter?["bind_interfaces"]
+            try? PyModule("interpreter")?.bind_interfaces?(module.reference)
+        }
+    }
+    
+    public static func module(_ name: String, block: @escaping (PyModule) -> Void) {
+        Interpreter.shared.moduleBuilders[name] = { module in
+            guard let module = PyModule(module) else { return }
             
-            _ = try? bind_interfaces?.call([module])
+            block(module)
+
+            if let content = Interpreter.importFromBundle(name: name + ".py") {
+                try? Interpreter.printErrors {
+                    py_exec(content, name, EXEC_MODE, module.reference)
+                }
+            }
+
+            // Add module.__doc__.
+            try? PyModule("interpreter")?.bind_interfaces?(module.reference)
         }
     }
     

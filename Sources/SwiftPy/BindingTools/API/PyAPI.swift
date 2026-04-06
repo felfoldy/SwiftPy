@@ -334,7 +334,6 @@ public extension PyAPI.Reference {
         py_setdict(temp, py_name("_signature"), sigRet.reference)
 
         var interface = "def \(signature):"
-
         if let docstring {
             interface += "\n    \"\"\"\(docstring)\"\"\""
         } else {
