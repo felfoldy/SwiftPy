@@ -128,7 +128,7 @@ class ModelContainer: PythonBindable {
     }
     
     func fetch(_ type: object) throws -> object? {
-        let typeName = py_totype(type).name
+        let typeName = py.totype(type).name
         let modelsRef = try context.fetch(.models(name: typeName)).retained
         guard let makeModels = try type.attribute("_makemodels") else {
             throw PythonError.ValueError("Type does not support fetching models")

@@ -13,6 +13,7 @@ import pocketpy
 public class PyObject {
     public let reference: PyAPI.Reference
 
+    @inlinable
     public init?(_ reference: PyAPI.Reference?) {
         guard let reference else { return nil }
         self.reference = reference
@@ -114,6 +115,7 @@ public class TempPyObject: PyObject {
         super.init(temp)
     }
     
+    @inlinable
     public init?<Value: PythonConvertible>(_ value: Value) {
         let temp = py.pushtmp()
         value.toPython(temp)

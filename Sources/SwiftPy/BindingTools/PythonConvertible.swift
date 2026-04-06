@@ -34,6 +34,7 @@ public extension PythonConvertible {
     /// Writes a `PythonObject` to a register at the specific index.
     /// - Parameter index: index
     /// - Returns: Reference to the register.
+    @available(*, deprecated, message: "Remove from macro")
     @inlinable func toRegister(_ index: Int32) -> PyAPI.Reference? {
         let register = py_getreg(index)
         toPython(register)
@@ -61,36 +62,40 @@ public extension PythonConvertible {
 extension Bool: PythonConvertible {
     public static let pyType = PyType.bool
     
-    @inlinable public func toPython(_ reference: PyAPI.Reference) {
-        py_newbool(reference, self)
+    @inlinable
+    public func toPython(_ reference: PyAPI.Reference) {
+        py.newbool(reference, value: self)
     }
     
-    @inlinable public static func fromPython(_ reference: PyAPI.Reference) -> Bool {
-        py_tobool(reference)
+    @inlinable
+    public static func fromPython(_ reference: PyAPI.Reference) -> Bool {
+        py.tobool(reference)
     }
 }
 
 extension Int: PythonConvertible {
     public static let pyType = PyType.int
 
-    @inlinable public func toPython(_ reference: PyAPI.Reference) {
-        py_newint(reference, py_i64(self))
+    @inlinable
+    public func toPython(_ reference: PyAPI.Reference) {
+        py.newint(reference, value: self)
     }
 
-    @inlinable public static func fromPython(_ reference: PyAPI.Reference) -> Int {
-        Int(py_toint(reference))
+    @inlinable
+    public static func fromPython(_ reference: PyAPI.Reference) -> Int {
+        py.toint(reference)
     }
 }
 
 extension Int64: PythonConvertible {
     public static let pyType = PyType.int
-    
+
     @inlinable public func toPython(_ reference: PyAPI.Reference) {
-        py_newint(reference, self)
+        py.newint(reference, value: Int(self))
     }
-    
+
     @inlinable public static func fromPython(_ reference: PyAPI.Reference) -> Int64 {
-        py_toint(reference)
+        Int64(py.toint(reference))
     }
 }
 
@@ -98,12 +103,12 @@ extension String: PythonConvertible {
     public static let pyType = PyType.str
 
     @inlinable public func toPython(_ reference: PyAPI.Reference) {
-        py_newstr(reference, self)
+        py.newstr(reference, value: self)
     }
 
     @inlinable public static func fromPython(_ reference: PyAPI.Reference) -> String {
         if py.typeof(reference) == .str {
-            return String(cString: py_tostr(reference))
+            return py.tostr(reference)
         }
 
         if let path = Path(reference) {
@@ -117,49 +122,42 @@ extension String: PythonConvertible {
 extension Double: PythonConvertible {
     public static let pyType = PyType.float
 
-    @inlinable public func toPython(_ reference: PyAPI.Reference) {
-        py_newfloat(reference, self)
+    @inlinable
+    public func toPython(_ reference: PyAPI.Reference) {
+        py.newfloat(reference, value: self)
     }
 
     @inlinable
     public static func fromPython(_ reference: PyAPI.Reference) -> Double {
-        var out: py_f64 = 0
-        try? Interpreter.printErrors {
-            py_castfloat(reference, &out)
-        }
-        return out
+        py.castfloat(reference)
     }
 }
 
 extension Float: PythonConvertible {
     public static let pyType = PyType.float
 
-    @inlinable public func toPython(_ reference: PyAPI.Reference) {
-        py_newfloat(reference, Double(self))
+    @inlinable
+    public func toPython(_ reference: PyAPI.Reference) {
+        py.newfloat(reference, value: Double(self))
     }
 
-    @inlinable public static func fromPython(_ reference: PyAPI.Reference) -> Float {
-        Float(Double.fromPython(reference))
+    @inlinable
+    public static func fromPython(_ reference: PyAPI.Reference) -> Float {
+        Float(py.castfloat(reference))
     }
 }
 
 extension Data: PythonConvertible {
-    public static var pyType: PyType { .bytes }
-    
+    public static let pyType = PyType.bytes
+
     public func toPython(_ reference: PyAPI.Reference) {
         let count = self.count
-        guard let bytes: UnsafeMutablePointer<UInt8> = py_newbytes(reference, Int32(count)) else {
-            return
-        }
-        let buffer = UnsafeMutableRawBufferPointer(start: bytes, count: count)
-        copyBytes(to: buffer)
+        let bytes = py.newbytes(reference, n: count)
+        copyBytes(to: bytes)
     }
-    
+
     public static func fromPython(_ reference: PyAPI.Reference) -> Data {
-        var size: Int32 = 0
-        let bytes = py_tobytes(reference, &size)
-        guard let bytes else { return Data() }
-        return Data(bytes: bytes, count: Int(size))
+        py.tobytes(reference)
     }
 }
 
@@ -171,7 +169,7 @@ extension Optional: PythonConvertible where Wrapped: PythonConvertible {
         if let wrappedValue = self {
             wrappedValue.toPython(reference)
         } else {
-            py_newnone(reference)
+            py.newnone(reference)
         }
     }
 
@@ -186,13 +184,16 @@ extension Array: PythonConvertible {
     public static var pyType: PyType { .list }
     
     public func toPython(_ reference: PyAPI.Reference) {
-        py_newlist(reference)
+        py.newlist(reference)
         for value in self {
             guard let value = value as? PythonConvertible else {
                 log.error("\(value) is not convertible to Python")
                 continue
             }
-            py_list_append(reference, value.retained.reference)
+            py.list.append(
+                reference,
+                value: value.retained.reference
+            )
         }
     }
 
@@ -232,19 +233,19 @@ extension Dictionary: PythonConvertible where Key: PythonConvertible {
     public static var pyType: PyType { .dict }
 
     public func toPython(_ reference: PyAPI.Reference) {
-        py_newdict(reference)
+        py.newdict(reference)
         for (key, value) in self {
             guard let value = value as? PythonConvertible else {
                 log.error("\(value) is not convertible to Python")
                 continue
             }
  
-            let keyStack = key.retained
-            let valueStack = value.retained
+            let keyStack = TempPyObject(key)
+            let valueStack = TempPyObject(value)
             _ = py.dict.setitem(
                 reference,
-                key: keyStack.reference,
-                value: valueStack.reference
+                key: keyStack?.reference,
+                value: valueStack?.reference
             )
         }
     }
@@ -256,12 +257,12 @@ extension Dictionary: PythonConvertible where Key: PythonConvertible {
             let items = try reference.attribute("items")?.call()?.retained
             
             try items?.iterate { item in
-                let keyRef = py_tuple_getitem(item.reference, 0)
+                let keyRef = py.tuple.getitem(item.reference, i: 0)
                 guard let key = Key(keyRef) else {
                     throw ConversionError.key
                 }
                 
-                let valueRef = py_tuple_getitem(item.reference, 1)
+                let valueRef = py.tuple.getitem(item.reference, i: 1)
                 
                 if let Convertible = Value.self as? PythonConvertible.Type,
                    let value = Convertible.init(valueRef) {

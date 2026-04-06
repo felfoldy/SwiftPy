@@ -63,9 +63,6 @@ public final class Interpreter {
         setCallbacks()
         
         log.info("pocketpy [\(PK_VERSION)] initialized")
-        
-        let builtins = py_getmodule("builtins")
-        py_deldict(builtins, py_name("exit"))
 
         // Change default working directory to the applications Documents directory.
         let documentsPath = URL.documentsDirectory.path
@@ -77,23 +74,20 @@ public final class Interpreter {
             hookStoragesModule()
         }
     }
-
-    deinit {
-        py_finalize()
-    }
     
     func execute(_ code: String, filename: String, mode: CompileMode = .execution) throws {
         try Interpreter.printErrors {
-            py_compile(code, filename, mode.pyMode, false)
+            py.compile(source: code, filename: filename, mode: mode)
         }
-        
-        let code = PyAPI.returnValue.retained
+
+        let code = TempPyObject(PyAPI.returnValue)
         
         try Interpreter.printErrors {
             let function: PyAPI.Reference? = mode == .evaluation ? .functions.eval : .functions.exec
 
             profiler.begin()
-            let isExecuted = py_call(function, 1, code.reference)
+            // TODO: Store low level C function instead.
+            let isExecuted = function?.pointee._cfunc(1, code?.reference) ?? true
             profiler.end()
 
             Interpreter.output.executionTime(profiler.executionTime)
@@ -123,11 +117,11 @@ public final class Interpreter {
     
     @inlinable
     static func printErrors(_ call: () -> Bool) throws {
-        let p0 = py_peek(0)
+        let p0 = py.peek()
         if call() { return }
         Interpreter.isFailed = true
-        py_printexc()
-        py_clearexc(p0)
+        py.printexc()
+        py.clearexc(p0)
         if let lastFailure {
             throw PythonError.RuntimeError(lastFailure)
         }
@@ -135,20 +129,20 @@ public final class Interpreter {
     
     @inlinable
     static func ignoreErrors(_ call: () -> Bool) -> Bool {
-        let p0 = py_peek(0)
+        let p0 = py.peek()
         if call() { return true }
-        py_clearexc(p0)
+        py.clearexc(p0)
         return false
     }
     
     @inlinable
     static func printItemError(_ call: @autoclosure () -> Int32) throws -> Bool {
-        let p0 = py_peek(0)
+        let p0 = py.peek()
         let result = call()
         if result != -1 { return result == 1 }
         Interpreter.isFailed = true
-        py_printexc()
-        py_clearexc(p0)
+        py.printexc()
+        py.clearexc(p0)
         if let lastFailure {
             throw PythonError.RuntimeError(lastFailure)
         }

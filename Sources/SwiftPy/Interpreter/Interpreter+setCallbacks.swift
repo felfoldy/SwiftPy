@@ -31,7 +31,7 @@ extension Interpreter {
             let name = String(cString: cName)
             
             if let lib = Interpreter.moduleBuilders[name] {
-                let module = py_newmodule(name)
+                let module = py.newmodule(name)
                 lib(module)
                 return module
             }
@@ -51,7 +51,7 @@ extension Interpreter {
         }
         
         py.callbacks.displayhook = { obj in
-            if py_istype(obj, .None) { return true }
+            if py.istype(obj, type: .None) { return true }
             
             if let view = obj?.view {
                 Interpreter.output.view(view)
@@ -60,7 +60,7 @@ extension Interpreter {
 
             do {
                 try Interpreter.printErrors {
-                    py_repr(obj)
+                    py.repr(obj)
                 }
                 
                 if let str = String(PyAPI.returnValue) {

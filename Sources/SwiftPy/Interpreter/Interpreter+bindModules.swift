@@ -20,7 +20,7 @@ extension Interpreter {
         PyBind.module("interpreter", [
             ViewRepresentation.self,
         ]) { module in
-            let builtins = py_getmodule("builtins")
+            let builtins = py.getmodule("builtins")
             builtins?["dir"]?.assign(module?["dir"])
             
             module?.bind(
@@ -60,7 +60,7 @@ extension Interpreter {
     }
     
     private static func bindOS() {
-        let os = py_getmodule("os")
+        let os = py.getmodule("os")
 
         os?.bind(
             "chdir(path: str | Path) -> None",
@@ -90,7 +90,7 @@ extension Interpreter {
     }
     
     private static func bindSys() {
-        guard let sys = py_getmodule("sys") else { return }
+        guard let sys = py.getmodule("sys") else { return }
 
         #if os(visionOS)
         let osName = "visionos"
@@ -111,7 +111,7 @@ extension Interpreter {
     }
     
     private static func bindAsync() {
-        let builtins = py_getmodule("builtins")
+        let builtins = py.getmodule("builtins")
 
         let asyncSource = """
         def async(func):

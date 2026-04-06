@@ -11,7 +11,7 @@ public enum CompileMode {
     case execution, evaluation, single
 
     @usableFromInline
-    internal var pyMode: py_CompileMode {
+    internal var pyMode: PyAPI.pyCompileMode {
         switch self {
         case .execution: return EXEC_MODE
         case .evaluation: return EVAL_MODE

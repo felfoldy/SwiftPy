@@ -12,12 +12,12 @@ public class StackReference {
     public let reference: PyAPI.Reference?
     
     init(_ convertible: PythonConvertible) {
-        reference = py_pushtmp()
+        reference = py.pushtmp()
         convertible.toPython(reference)
     }
     
     init(_ reference: PyAPI.Reference?) {
-        self.reference = py_pushtmp()
+        self.reference = py.pushtmp()
         self.reference?.assign(reference)
     }
     
@@ -28,14 +28,12 @@ public class StackReference {
         
         let iter = PyAPI.returnValue.retained
         
-        while try Interpreter.printItemError(py_next(iter.reference)) {
+        while try Interpreter.printItemError(py.next(iter.reference)) {
             try next(PyAPI.returnValue.retained)
         }
     }
 
-    deinit {
-        py_pop()
-    }
+    @MainActor deinit { py.pop() }
 }
 
 public extension PythonConvertible {

@@ -23,7 +23,11 @@ public struct PyAPI {
     /// VM callbacks.
     public typealias Callbacks = py_Callbacks
     
+    public typealias pyCompileMode = py_CompileMode
+    
     public let dict = Dict()
+    public let list = List()
+    public let tuple = Tuple()
 
     @inlinable
     public var callbacks: Callbacks {
@@ -34,6 +38,20 @@ public struct PyAPI {
     @inlinable
     init() {
         py_initialize()
+
+        // Remove exit:
+        let builtins = py_getmodule("builtins")
+        py_deldict(builtins, py_name("exit"))
+    }
+    
+    @inlinable
+    public func getmodule(_ name: String) -> PyAPI.Reference? {
+        py_getmodule(name)
+    }
+    
+    @inlinable
+    public func newmodule(_ path: String) -> PyAPI.Reference {
+        py_newmodule(path)
     }
     
     @inlinable
@@ -45,7 +63,13 @@ public struct PyAPI {
     public func setdict(_ self: PyAPI.Reference, name: String, value: PyAPI.Reference?) {
         py_setdict(self, py_name(name), value ?? py_None())
     }
-    
+
+    // TODO: Better error handling
+    @inlinable
+    public func repr(_ value: PyAPI.Reference?) -> Bool {
+        py_repr(value)
+    }
+
     // TODO: Better error handling
     @inlinable
     public func getattr(_ self: PyAPI.Reference, name: String) -> Bool {
@@ -71,6 +95,12 @@ public struct PyAPI {
         py_next(self)
     }
 
+    // TODO: Better error handling
+    @inlinable
+    public func compile(source: String, filename: String, mode: CompileMode) -> Bool {
+        py_compile(source, filename, mode.pyMode, false)
+    }
+    
     // TODO: Better error handling
     @inlinable
     public func exec(source: String, filename: String, mode: CompileMode, module: PyAPI.Reference?) -> Bool {
@@ -129,6 +159,21 @@ public struct PyAPI {
     @inlinable
     public func pop() {
         py_pop()
+    }
+
+    @inlinable
+    public func peek() -> PyAPI.Reference {
+        py_peek(0)
+    }
+
+    @inlinable
+    public func printexc() {
+        py_printexc()
+    }
+    
+    @inlinable
+    public func clearexc(_ unwindingPoint: PyAPI.Reference) {
+        py_clearexc(unwindingPoint)
     }
 }
 
@@ -195,6 +240,8 @@ public extension PyAPI {
     }
 }
 
+// MARK: - Native type conversions
+
 public extension PyAPI {
     struct Dict {
         // TODO: Better error handling
@@ -209,6 +256,94 @@ public extension PyAPI {
         public func setitem(_ self: PyAPI.Reference, key: PyAPI.Reference?, value: PyAPI.Reference?) -> Bool {
             py_dict_setitem(self, key, value)
         }
+    }
+    
+    struct List {
+        @inlinable
+        public func append(_ self: PyAPI.Reference, value: PyAPI.Reference?) {
+            py_list_append(self, value)
+        }
+    }
+    
+    struct Tuple {
+        @inlinable
+        public func getitem(_ self: PyAPI.Reference?, i: Int32) -> PyAPI.Reference? {
+            py_tuple_getitem(self, i)
+        }
+    }
+    
+    @inlinable
+    func newbool(_ out: PyAPI.Reference, value: Bool) {
+        py_newbool(out, value)
+    }
+    
+    @inlinable
+    func tobool(_ self: PyAPI.Reference) -> Bool {
+        py_tobool(self)
+    }
+    
+    @inlinable
+    func newint(_ out: PyAPI.Reference, value: Int) {
+        py_newint(out, py_i64(value))
+    }
+    
+    @inlinable
+    func toint(_ self: PyAPI.Reference) -> Int {
+        Int(py_toint(self))
+    }
+    
+    @inlinable
+    func newstr(_ out: PyAPI.Reference, value: String) {
+        py_newstr(out, value)
+    }
+    
+    @inlinable
+    func tostr(_ self: PyAPI.Reference) -> String {
+        String(cString: py_tostr(self))
+    }
+    
+    @inlinable
+    func newfloat(_ out: PyAPI.Reference, value: Double) {
+        py_newfloat(out, value)
+    }
+    
+    @inlinable
+    func castfloat(_ self: PyAPI.Reference) -> Double {
+        switch self.pointee.type {
+        case .int: Double(self.pointee._i64)
+        case .float: self.pointee._f64
+        default: 0
+        }
+    }
+
+    @inlinable
+    func newbytes(_ out: PyAPI.Reference, n: Int) -> UnsafeMutableRawBufferPointer {
+        let pointer = py_newbytes(out, Int32(n))
+        return UnsafeMutableRawBufferPointer(start: pointer, count: n)
+    }
+    
+    @inlinable
+    func tobytes(_ self: PyAPI.Reference) -> Data {
+        var size: Int32 = 0
+        guard let bytes = py_tobytes(self, &size) else {
+            return Data()
+        }
+        return Data(bytes: bytes, count: Int(size))
+    }
+    
+    @inlinable
+    func newnone(_ out: PyAPI.Reference) {
+        py_newnone(out)
+    }
+    
+    @inlinable
+    func newlist(_ out: PyAPI.Reference) {
+        py_newlist(out)
+    }
+    
+    @inlinable
+    func newdict(_ out: PyAPI.Reference) {
+        py_newdict(out)
     }
 }
 
