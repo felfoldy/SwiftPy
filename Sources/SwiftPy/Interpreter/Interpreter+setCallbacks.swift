@@ -11,7 +11,7 @@ import pocketpy
 extension Interpreter {
     /// Sets print output, importhook, importfile.
     func setCallbacks() {
-        py_callbacks().pointee.print = { cString in
+        py.callbacks.print = { cString in
             guard let cString else { return }
             let str = String(cString: cString)
                 .trimmingCharacters(in: .whitespacesAndNewlines)
@@ -25,8 +25,8 @@ extension Interpreter {
                 Interpreter.output.stdout(str)
             }
         }
-        
-        py_callbacks().pointee.lazyimport = { cName in
+
+        py.callbacks.lazyimport = { cName in
             guard let cName else { return nil }
             let name = String(cString: cName)
             
@@ -39,7 +39,7 @@ extension Interpreter {
             return nil
         }
 
-        py_callbacks().pointee.importfile = { cFilename, _ in
+        py.callbacks.importfile = { cFilename, _ in
             guard let cFilename else { return nil }
             
             let filename = String(cString: cFilename)
@@ -50,7 +50,7 @@ extension Interpreter {
             return nil
         }
         
-        py_callbacks().pointee.displayhook = { obj in
+        py.callbacks.displayhook = { obj in
             if py_istype(obj, .None) { return true }
             
             if let view = obj?.view {

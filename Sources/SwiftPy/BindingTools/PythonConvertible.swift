@@ -241,7 +241,11 @@ extension Dictionary: PythonConvertible where Key: PythonConvertible {
  
             let keyStack = key.retained
             let valueStack = value.retained
-            py_dict_setitem(reference, keyStack.reference, valueStack.reference)
+            _ = py.dict.setitem(
+                reference,
+                key: keyStack.reference,
+                value: valueStack.reference
+            )
         }
     }
 

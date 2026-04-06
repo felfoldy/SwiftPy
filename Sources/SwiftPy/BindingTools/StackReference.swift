@@ -23,7 +23,7 @@ public class StackReference {
     
     public func iterate(next: (StackReference) throws -> Void) throws {
         try Interpreter.printErrors {
-            py_iter(reference)
+            py.iter(reference)
         }
         
         let iter = PyAPI.returnValue.retained

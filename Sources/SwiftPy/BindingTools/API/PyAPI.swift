@@ -8,17 +8,134 @@
 import pocketpy
 import Foundation
 
+@MainActor
+public let py = PyAPI()
+
 /// Namespace for pocketpy typealias/interfaces.
 @MainActor
-public enum PyAPI {}
-
-public extension PyAPI {
+public struct PyAPI {
     /// Python function signature `(argc: Int32, argv: StackRef?) -> Bool`.
-    typealias CFunction = py_CFunction
+    public typealias CFunction = py_CFunction
 
     /// Just a type alias of an `OpaquePointer`.
-    typealias Reference = py_Ref
+    public typealias Reference = py_Ref
 
+    /// VM callbacks.
+    public typealias Callbacks = py_Callbacks
+    
+    public let dict = Dict()
+
+    @inlinable
+    public var callbacks: Callbacks {
+        get { py_callbacks().pointee }
+        nonmutating set { py_callbacks().pointee = newValue }
+    }
+
+    @inlinable
+    init() {
+        py_initialize()
+    }
+    
+    @inlinable
+    public func getdict(_ self: PyAPI.Reference, name: String) -> PyAPI.Reference? {
+        py_getdict(self, py_name(name))
+    }
+    
+    @inlinable
+    public func setdict(_ self: PyAPI.Reference, name: String, value: PyAPI.Reference?) {
+        py_setdict(self, py_name(name), value ?? py_None())
+    }
+    
+    // TODO: Better error handling
+    @inlinable
+    public func getattr(_ self: PyAPI.Reference, name: String) -> Bool {
+        py_getattr(self, py_name(name))
+    }
+    
+    // TODO: Better error handling
+    @inlinable
+    public func setattr(_ self: PyAPI.Reference, name: String, value: PyAPI.Reference?) -> Bool {
+        py_setattr(self, py_name(name), value ?? py_None())
+    }
+
+    // TODO: Better error handling
+    @inlinable
+    public func iter(_ self: PyAPI.Reference?) -> Bool {
+        py_iter(self)
+    }
+
+    // TODO: Better error handling
+    // (1: success, 0: StopIteration, -1: error)
+    @inlinable
+    public func next(_ self: PyAPI.Reference?) -> Int32 {
+        py_next(self)
+    }
+
+    // TODO: Better error handling
+    @inlinable
+    public func exec(source: String, filename: String, mode: CompileMode, module: PyAPI.Reference?) -> Bool {
+        py_exec(source, filename, mode.pyMode, module)
+    }
+
+    // TODO: Better error handling
+    // Call a callable object via pocketpy’s calling convention. You need to prepare the stack using the following format: callable, self/nil, arg1, arg2, ..., k1, v1, k2, v2, .... argc is the number of positional arguments excluding self. kwargc is the number of keyword arguments. The result will be set to py.returnValue. The stack size will be reduced by 2 + argc + kwargc * 2
+    @inlinable
+    public func vectorcall(argc: UInt16, kwargc: UInt16) -> Bool {
+        py_vectorcall(argc, kwargc)
+    }
+
+    @inlinable
+    public func callable(_ self: PyAPI.Reference) -> Bool {
+        py_callable(self)
+    }
+
+    // MARK: - Stack accessors
+    
+    @inlinable
+    public func push(_ ref: PyAPI.Reference) {
+        py_push(ref)
+    }
+
+    @inlinable
+    public func pushnil() {
+        py_pushnil()
+    }
+    
+    /// Get a temporary variable from the stack.
+    @inlinable
+    public func pushtmp() -> PyAPI.Reference {
+        py_pushtmp()
+    }
+    
+    @inlinable
+    public func pushnone() {
+        py_pushnone()
+    }
+
+    @inlinable
+    public func pop() {
+        py_pop()
+    }
+}
+
+public extension PyAPI {
+    struct Dict {
+        // TODO: Better error handling
+        // (1: found, 0: not found, -1: error)
+        @inlinable
+        public func getitem(_ self: PyAPI.Reference, key: PyAPI.Reference?) -> Int32 {
+            py_dict_getitem(self, key)
+        }
+        
+        // TODO: Better error handling
+        @inlinable
+        public func setitem(_ self: PyAPI.Reference, key: PyAPI.Reference?, value: PyAPI.Reference?) -> Bool {
+            py_dict_setitem(self, key, value)
+        }
+    }
+}
+
+public extension PyAPI {
     @inlinable
     static var returnValue: Reference {
         py_retval()
@@ -54,9 +171,10 @@ public extension PyAPI {
         }
 
         if let error = error as? StopIteration {
-            let valueRef = error.value?.retained
-            let objRef = try? PyType.StopIteration.new(valueRef?.reference)?.retained
-            return py_raise(objRef?.reference)
+            let stopIterationType = PyObject(.StopIteration)
+            let stopIteration: PyAPI.Reference? = try? stopIterationType?(error.value)
+
+            return py_raise(stopIteration)
         }
 
         return py_throw(.RuntimeError, error.localizedDescription)
@@ -114,6 +232,11 @@ public extension Interpreter {
     static let main = PyAPI.Reference.modules.main
 }
 
+// MARK: - PyType
+
+/// `Int16`
+public typealias PyType = py_Type
+
 // MARK: - Modules
 
 @MainActor
@@ -168,29 +291,29 @@ public extension PyAPI.Reference {
     /// - Returns: Return value of the function.
     @inlinable @discardableResult
     func call(self obj: PyAPI.Reference? = nil, _ args: [PyAPI.Reference?] = []) throws -> PyAPI.Reference? {
-        guard py_callable(self) else {
+        guard py.callable(self) else {
             throw PythonError.AssertionError("Object is not callable")
         }
         
         try Interpreter.printErrors {
-            py_push(self)
+            py.push(self)
 
             if let obj {
-                py_pushtmp().assign(obj)
+                py.pushtmp().assign(obj)
             } else {
-                py_pushnil()
+                py.pushnil()
             }
 
             var argc: UInt16 = 0
             for arg in args {
                 if let arg {
-                    py_pushtmp().assign(arg)
+                    py.pushtmp().assign(arg)
                 } else {
-                    py_pushnone()
+                    py.pushnone()
                 }
                 argc += 1
             }
-            return py_vectorcall(argc, 0)
+            return py.vectorcall(argc: argc, kwargc: 0)
         }
 
         return PyAPI.returnValue
@@ -198,8 +321,8 @@ public extension PyAPI.Reference {
 
     /// Copies the given value into the reference memory.
     @inlinable func assign(_ newValue: PyAPI.Reference?) {
-        guard let pointer = UnsafeRawPointer(newValue) else { return }
-        UnsafeMutableRawPointer(self).copyMemory(from: pointer, byteCount: PyAPI.elementSize)
+        guard let newValue else { return }
+        pointee = newValue.pointee
     }
     
     /// Retrieves the attribute with the given name and passes it as a temporary reference.
@@ -220,7 +343,7 @@ public extension PyAPI.Reference {
     @inlinable
     func attribute(_ name: String) throws -> PyAPI.Reference? {
         try Interpreter.printErrors {
-            py_getattr(self, py_name(name))
+            py.getattr(self, name: name)
         }
         return PyAPI.returnValue
     }
@@ -228,7 +351,7 @@ public extension PyAPI.Reference {
     @inlinable
     func attributeOrNil(_ name: String) -> PyAPI.Reference? {
         let hasError = Interpreter.ignoreErrors {
-            py_getattr(self, py_name(name))
+            py.getattr(self, name: name)
         }
         return !hasError ? nil : PyAPI.returnValue
     }
@@ -244,7 +367,7 @@ public extension PyAPI.Reference {
     var view: ViewRepresentation? {
         let p0 = py_peek(0)
         
-        if !py_getattr(self, py_name("__view__")) {
+        if !py.getattr(self, name: "__view__") {
             py_clearexc(p0)
             return nil
         }
@@ -265,7 +388,7 @@ public extension PyAPI.Reference {
 
     @inlinable func setAttribute(_ name: String, _ value: PyAPI.Reference?) {
         try? Interpreter.printErrors {
-            py_setattr(self, py_name(name), value)
+            py.setattr(self, name: name, value: value)
         }
     }
     
@@ -284,20 +407,13 @@ public extension PyAPI.Reference {
         return register
     }
     
-    /// Adds the types to the module.
-    /// - Parameter types: types to add.
-    @inlinable func insertTypes(_ types: PyType...) {
-        for type in types {
-            py_setattr(self, py_name(type.name), type.object)
-        }
-    }
-    
     @inlinable func emplace(_ name: String) -> PyAPI.Reference {
         py_emplacedict(self, py_name(name))
     }
 
-    @inlinable subscript(name: String) -> PyAPI.Reference? {
-        py_getdict(self, py_name(name))
+    @inlinable
+    subscript(name: String) -> PyAPI.Reference? {
+        py.getdict(self, name: name)
     }
     
     @inlinable
@@ -325,13 +441,13 @@ public extension PyAPI.Reference {
     
     @inlinable
     func bind(_ signature: String, docstring: String? = nil, function: PyAPI.CFunction) {
-        let temp = py_pushtmp()
+        let temp = py.pushtmp()
         
         let doc = docstring?.withCString(strdup)
         let name = py_newfunction(temp, signature, function, doc, -1)
 
-        let sigRet = signature.retained
-        py_setdict(temp, py_name("_signature"), sigRet.reference)
+        let sigRet = TempPyObject(signature)
+        py.setdict(temp, name: "_signature", value: sigRet?.reference)
 
         var interface = "def \(signature):"
         if let docstring {
@@ -340,10 +456,14 @@ public extension PyAPI.Reference {
             interface += " ..."
         }
         let interfaceRet = interface.retained
-        py_setdict(temp, py_name("_interface"), interfaceRet.reference)
-        
+        py.setdict(
+            temp,
+            name: "_interface",
+            value: interfaceRet.reference
+        )
+
         py_setdict(self, name, temp)
-        py_pop()
+        py.pop()
     }
 
     @inlinable func isType<T: PythonConvertible>(_ type: T.Type) -> Bool {

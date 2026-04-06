@@ -17,6 +17,10 @@ public class PyObject {
         guard let reference else { return nil }
         self.reference = reference
     }
+    
+    public convenience init?(_ type: PyType) {
+        self.init(type.object)
+    }
 
     /// Lookup for the attribute of the python object.
     public subscript(dynamicMember dynamicMember: String) -> PyObject? {
@@ -29,7 +33,7 @@ public class PyObject {
         }
         set {
             _ = Interpreter.ignoreErrors {
-                py_setattr(reference, py_name(dynamicMember), newValue?.reference ?? py_None())
+                py.setattr(reference, name: dynamicMember, value: newValue?.reference)
             }
         }
     }
@@ -45,7 +49,7 @@ public class PyObject {
         get {
             let keyObject = TempPyObject(key)
             let result = try? Interpreter.printItemError(
-                py_dict_getitem(reference, keyObject?.reference)
+                py.dict.getitem(reference, key: keyObject?.reference)
             )
             guard result == true else { return nil }
             return TempPyObject(PyAPI.returnValue)
@@ -53,16 +57,14 @@ public class PyObject {
         set {
             let keyObject = TempPyObject(key)
             _ = Interpreter.ignoreErrors {
-                py_dict_setitem(reference, keyObject?.reference, newValue?.reference ?? py_None())
+                py.dict.setitem(reference, key: keyObject?.reference, value: newValue?.reference)
             }
         }
     }
 
     /// Gets the item from a dictionary by a key and convert the value to a swift type.
     public subscript<Key: PythonConvertible, Value: PythonConvertible>(_ key: Key) -> Value? {
-        get {
-            Value(self[key]?.reference)
-        }
+        get { Value(self[key]?.reference) }
         set { self[key] = TempPyObject(newValue) }
     }
     
@@ -77,26 +79,26 @@ public class PyObject {
     }
     
     private func call(_ args: [PythonConvertible?]) throws {
-        if !py_callable(reference) {
+        if !py.callable(reference) {
             throw PythonError.AssertionError("Object is not callable")
         }
 
         try Interpreter.printErrors {
-            py_push(reference)
+            py.push(reference)
             
-            py_pushnil() // Self object.
+            py.pushnil() // Self object.
             
             var argc: UInt16 = 0
             for arg in args {
                 if let arg {
-                    arg.toPython(py_pushtmp())
+                    arg.toPython(py.pushtmp())
                 } else {
-                    py_pushnone()
+                    py.pushnone()
                 }
                 argc += 1
             }
 
-            return py_vectorcall(argc, 0)
+            return py.vectorcall(argc: argc, kwargc: 0)
         }
     }
 }
@@ -107,18 +109,18 @@ public class PyObject {
 public class TempPyObject: PyObject {
     public override init?(_ reference: PyAPI.Reference?) {
         guard let reference else { return nil }
-        let temp = py_pushtmp()
-        temp?.assign(reference)
+        let temp = py.pushtmp()
+        temp.assign(reference)
         super.init(temp)
     }
     
     public init?<Value: PythonConvertible>(_ value: Value) {
-        let temp = py_pushtmp()
+        let temp = py.pushtmp()
         value.toPython(temp)
         super.init(temp)
     }
 
-    deinit { py_pop() }
+    @MainActor deinit { py.pop() }
 }
 
 public class PyModule: PyObject {
@@ -143,7 +145,7 @@ public class PyModule: PyObject {
     @discardableResult
     public func `class`(_ type: PythonBindable.Type) -> PyModule {
         let type = type.pyType
-        py_setdict(reference, py_name(type.name), type.object)
+        py.setdict(reference, name: type.name, value: type.object)
         return self
     }
 

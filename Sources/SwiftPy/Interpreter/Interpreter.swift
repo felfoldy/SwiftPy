@@ -60,8 +60,6 @@ public final class Interpreter {
     let profiler = SignpostProfiler("Python")
 
     init() {
-        py_initialize()
-        
         setCallbacks()
         
         log.info("pocketpy [\(PK_VERSION)] initialized")

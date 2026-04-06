@@ -10,6 +10,7 @@ import pocketpy
 public enum CompileMode {
     case execution, evaluation, single
 
+    @usableFromInline
     internal var pyMode: py_CompileMode {
         switch self {
         case .execution: return EXEC_MODE

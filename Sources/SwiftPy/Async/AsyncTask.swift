@@ -81,7 +81,7 @@ public class AsyncTask: ViewRepresentable {
 
         let context = AsyncContext.current
         try Interpreter.printErrors {
-            py_iter(generator)
+            py.iter(generator)
         }
         arguments[Slot.iterator] = PyAPI.returnValue
 
@@ -93,7 +93,7 @@ public class AsyncTask: ViewRepresentable {
                         throw PythonError.AssertionError("Iterator is missing")
                     }
 
-                    let hasNext = try Interpreter.printItemError(py_next(iterator))
+                    let hasNext = try Interpreter.printItemError(py.next(iterator))
 
                     let stack = PyAPI.returnValue.retained
 

@@ -90,7 +90,7 @@ extension Interpreter {
     }
     
     private static func bindSys() {
-        let sys = py_getmodule("sys")
+        guard let sys = py_getmodule("sys") else { return }
 
         #if os(visionOS)
         let osName = "visionos"
@@ -103,7 +103,11 @@ extension Interpreter {
         #endif
         
         let osNameRef = osName.retained
-        py_setattr(sys, py_name("os"), osNameRef.reference)
+        _ = py.setattr(
+            sys,
+            name: "os",
+            value: osNameRef.reference
+        )
     }
     
     private static func bindAsync() {
@@ -117,6 +121,12 @@ extension Interpreter {
                 return asyncio.AsyncTask(cr)
             return coroutine
         """
-        py_exec(asyncSource, "<stdin>", CompileMode.execution.pyMode, builtins)
+        
+        _ = py.exec(
+            source: asyncSource,
+            filename: "<stdin>",
+            mode: .execution,
+            module: builtins
+        )
     }
 }

@@ -7,8 +7,6 @@
 
 import pocketpy
 
-public typealias PyType = py_Type
-
 @MainActor
 public extension PyType {
     static let None = PyType(tp_NoneType.rawValue)
@@ -52,11 +50,6 @@ public extension PyType {
     @inlinable
     var object: PyAPI.Reference? {
         py_tpobject(self)
-    }
-
-    @inlinable
-    func new(_ args: PyAPI.Reference?...) throws -> PyAPI.Reference? {
-        try object?.call(args)
     }
 
     // MARK: - Binding methods.
