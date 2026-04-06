@@ -229,7 +229,7 @@ func variableDeclarationVisitor(
         // Bind static property.
         if member.modifiers.first?.name.text == "static" {
             metadata.bindings.append(
-                "\(identifier).toPython(type.object?.emplace(\"\(metadata.identifier(identifier))\"))"
+                "PyObject(type).\(metadata.identifier(identifier)) = \(identifier)"
             )
             continue
         }

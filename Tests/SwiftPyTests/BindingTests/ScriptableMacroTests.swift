@@ -42,7 +42,7 @@ class ScriptableMacroTests: XCTestCase {
                 \(property("listProperty", python: "list_property", setter: false))
                 \(property("intProperty", python: "int_property"))
                 \(property("dictionary", python: "dictionary", setter: false))
-                text.toPython(type.object?.emplace("text"))
+                PyObject(type).text = text
                 \(newAndRepr)
                 \(interfaceBegin)
                 class TestClass:

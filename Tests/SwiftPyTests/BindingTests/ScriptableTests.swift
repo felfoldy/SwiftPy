@@ -129,7 +129,8 @@ struct ScriptableTests {
     }
     
     @Test func returningArgumentedFunction() async {
-        Interpreter.main.setAttribute("TestClass2", TestClassWithProperties.pyType.object)
+        let type = PyObject(TestClassWithProperties.pyType)
+        Interpreter.main.setAttribute("TestClass2", type.reference)
 
         await Interpreter.asyncRun("""
         tc8 = TestClass2.create()
@@ -139,5 +140,12 @@ struct ScriptableTests {
         
         #expect(main.number == 4)
         #expect(main.number2 == 0)
+    }
+    
+    @Test func staticProperty() {
+        let testClass = TestClassWithProperties()
+        main.tc3 = testClass
+        
+        #expect(main.tc3?.static_property == TestClassWithProperties.staticProperty)
     }
 }
