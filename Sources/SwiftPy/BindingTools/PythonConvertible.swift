@@ -31,16 +31,6 @@ public extension PythonConvertible {
         toPython(reference)
     }
     
-    /// Writes a `PythonObject` to a register at the specific index.
-    /// - Parameter index: index
-    /// - Returns: Reference to the register.
-    @available(*, deprecated, message: "Remove from macro")
-    @inlinable func toRegister(_ index: Int32) -> PyAPI.Reference? {
-        let register = py_getreg(index)
-        toPython(register)
-        return register
-    }
-    
     @inlinable
     static func cast(_ arg: PyAPI.Reference?, _ offset: Int = 0) throws(PythonError) -> Self {
         guard let arg = arg?[offset] else {

@@ -45,11 +45,11 @@ class ScriptableMacroTests: XCTestCase {
                 text.toPython(type.object?.emplace("text"))
                 \(newAndRepr)
                 \(interfaceBegin)
-                    class TestClass:
-                        list_property: list[str]
-                        int_property: int | None
-                        dictionary: dict[str, float]
-                        text: str
+                class TestClass:
+                    list_property: list[str]
+                    int_property: int | None
+                    dictionary: dict[str, float]
+                    text: str
                 \(interfaceEnd)
             }
         }
@@ -81,10 +81,10 @@ class ScriptableMacroTests: XCTestCase {
                 \(function("testAsync", "test_async(self) -> int"))
                 \(newAndRepr)
                 \(interfaceBegin)
-                    class TestClass:
-                        def test_method(self, arg: int | None = None, arg2: str = '1') -> None: ...
-                        def test_function(self, value: str, val2: int) -> int: ...
-                        async def test_async(self) -> int: ...
+                class TestClass:
+                    def test_method(self, arg: int | None = None, arg2: str = '1') -> None: ...
+                    def test_function(self, value: str, val2: int) -> int: ...
+                    async def test_async(self) -> int: ...
                 \(interfaceEnd)
             }
         }
@@ -108,8 +108,8 @@ class ScriptableMacroTests: XCTestCase {
         
                 \(newAndRepr)
                 \(interfaceBegin)
-                    class TestClass2:
-                        ...
+                class TestClass2:
+                    ...
                 \(interfaceEnd)
             }
         }
@@ -131,8 +131,8 @@ class ScriptableMacroTests: XCTestCase {
         
                 \(newAndRepr)
                 \(interfaceBegin)
-                    class TestClass:
-                        ...
+                class TestClass:
+                    ...
                 \(interfaceEnd)
             }
         }
@@ -159,8 +159,8 @@ class ScriptableMacroTests: XCTestCase {
                 \(property("someVariable", python: "someVariable", setter: false))
                 \(newAndRepr)
                 \(interfaceBegin)
-                    class TestClass:
-                        someVariable: int
+                class TestClass:
+                    someVariable: int
                 \(interfaceEnd)
             }
         }
@@ -194,12 +194,12 @@ class ScriptableMacroTests: XCTestCase {
                 }
                 \(newAndRepr)
                 \(interfaceBegin)
-                    class TestClass:
-                        @overload
-                        def __init__(self) -> None: ...
-                        @overload
-                        def __init__(self, number: int) -> None:
-                            \"""documents\"""
+                class TestClass:
+                    @overload
+                    def __init__(self) -> None: ...
+                    @overload
+                    def __init__(self, number: int) -> None:
+                        \"""documents\"""
                 \(interfaceEnd)
             }
         }
@@ -222,8 +222,8 @@ class ScriptableMacroTests: XCTestCase {
         
                 \(newAndRepr)
                 \(interfaceBegin)
-                    class TestClass:
-                        ...
+                class TestClass:
+                    ...
                 \(interfaceEnd)
             }
         }
@@ -256,11 +256,11 @@ class ScriptableMacroTests: XCTestCase {
                 }
                 \(newAndRepr)
                 \(interfaceBegin)
-                    class TestClass:
-                        @staticmethod
-                        def test_function() -> int: ...
-                        @staticmethod
-                        async def async_function() -> int: ...
+                class TestClass:
+                    @staticmethod
+                    def test_function() -> int: ...
+                    @staticmethod
+                    async def async_function() -> int: ...
                 \(interfaceEnd)
             }
         }
@@ -290,8 +290,8 @@ class ScriptableMacroTests: XCTestCase {
         
                 \(newAndRepr)
                 \(interfaceBegin)
-                    class TestClass:
-                        ...
+                class TestClass:
+                    ...
                 \(interfaceEnd)
             }
         }
@@ -328,17 +328,17 @@ class ScriptableMacroTests: XCTestCase {
                     }
                     \(newAndRepr)
                     \(interfaceBegin)
-                        class TestClass:
-                            \"""Test description.
+                    class TestClass:
+                        \"""Test description.
             
-                            Attributes:
-                                number: A number.
-                            \"""
+                        Attributes:
+                            number: A number.
+                        \"""
             
-                            number: int
+                        number: int
             
-                            def do_something(self) -> int:
-                                \"""Do something.\"""
+                        def do_something(self) -> int:
+                            \"""Do something.\"""
                     \(interfaceEnd)
                 }
             }
@@ -396,18 +396,6 @@ private var newAndRepr: String {
     """
 }
 
-private var interfaceBegin: String {
-    [
-        #"type.object?.setAttribute("_interface","#,
-        "            #\"\"\"",
-    ].joined(separator: "\n")
-}
+private let interfaceBegin: String = #"PyObject(type)._interface = #""""#
 
-private var interfaceEnd: String {
-    [
-        "    \"\"\"#",
-        "            .toRegister(0)",
-        "        )"
-    ]
-    .joined(separator: "\n")
-}
+private let interfaceEnd: String = "\"\"\"#"
