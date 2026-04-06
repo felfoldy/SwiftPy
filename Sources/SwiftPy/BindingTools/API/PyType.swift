@@ -44,34 +44,48 @@ public extension PyType {
 
     @inlinable
     var name: String {
-        String(cString: py_tpname(self))
+        py.tpname(self)
     }
     
     @inlinable
+    @available(*, deprecated, renamed: "PyObject.init")
     var object: PyAPI.Reference? {
-        py_tpobject(self)
+        py.tpobject(self)
     }
 
     // MARK: - Binding methods.
     
     @inlinable
     func magic(_ name: String, function: PyAPI.CFunction) {
-        py_bindmagic(self, py_name(name), function)
+        py.bindmagic(type: self, name: name, function: function)
     }
 
     @inlinable
     func property(_ name: String, getter: PyAPI.CFunction, setter: PyAPI.CFunction? = nil) {
-        py_bindproperty(self, name, getter, setter)
+        py.bindproperty(
+            type: self,
+            name: name,
+            getter: getter,
+            setter: setter
+        )
     }
-    
+
     @inlinable
     func function(_ signature: String, _ docstring: String? = nil, block: PyAPI.CFunction) {
-        py_tpobject(self).bind(signature, docstring: docstring, function: block)
+        py.tpobject(self)?.bind(
+            signature,
+            docstring: docstring,
+            function: block
+        )
     }
-    
+
     @inlinable
     func staticFunction(_ name: String, _ block: PyAPI.CFunction) {
-        py_bindstaticmethod(self, name, block)
+        py.bindstaticmethod(
+            type: self,
+            name: name,
+            function: block
+        )
     }
     
     @inlinable
@@ -79,7 +93,11 @@ public extension PyType {
                      base: PyType = .object,
                      module: PyAPI.Reference? = nil,
                      bind: (PyType) -> Void) -> PyType {
-        let type = py_newtype(name, base, module) { userdata in
+        let type = py.newtype(
+            name: name,
+            base: base,
+            module: module
+        ) { userdata in
             // Dtor callback.
             guard let pointer = userdata?.load(as: UnsafeRawPointer?.self) else {
                 return
@@ -91,7 +109,8 @@ public extension PyType {
 
             // Clear cache.
             if let bindable = (obj as? PythonBindable) {
-                UnsafeRawPointer(bindable._pythonCache.reference)?.deallocate()
+                bindable._pythonCache.reference?.deinitialize(count: 1)
+                bindable._pythonCache.reference?.deallocate()
                 bindable._pythonCache.reference = nil
             }
         }

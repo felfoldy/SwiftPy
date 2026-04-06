@@ -18,8 +18,8 @@ public class PyObject {
         self.reference = reference
     }
     
-    public convenience init?(_ type: PyType) {
-        self.init(type.object)
+    public convenience init(_ type: PyType) {
+        self.init(py.tpobject(type))!
     }
 
     /// Lookup for the attribute of the python object.
@@ -145,7 +145,7 @@ public class PyModule: PyObject {
     @discardableResult
     public func `class`(_ type: PythonBindable.Type) -> PyModule {
         let type = type.pyType
-        py.setdict(reference, name: type.name, value: type.object)
+        py.setdict(reference, name: type.name, value: py.tpobject(type))
         return self
     }
 

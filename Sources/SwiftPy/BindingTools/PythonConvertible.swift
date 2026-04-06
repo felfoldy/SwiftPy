@@ -20,8 +20,8 @@ public extension PythonConvertible {
     @inlinable
     init?(_ reference: PyAPI.Reference?) {
         guard let reference else { return nil }
-        let canCast = py_istype(reference, Self.pyType) ||
-        py_isinstance(reference, Self.pyType)
+        let canCast = py.istype(reference, type: Self.pyType) ||
+        py.isinstance(reference, type: Self.pyType)
         guard canCast else { return nil }
         self = Self.fromPython(reference)
     }
@@ -54,7 +54,7 @@ public extension PythonConvertible {
             return Self.fromPython(arg)
         }
 
-        throw PythonError.TypeError("Expected \(pyType.name) got \(py_typeof(arg).name) at position \(offset)")
+        throw PythonError.TypeError("Expected \(pyType.name) got \(py.typeof(arg).name) at position \(offset)")
     }
 }
 
@@ -102,7 +102,7 @@ extension String: PythonConvertible {
     }
 
     @inlinable public static func fromPython(_ reference: PyAPI.Reference) -> String {
-        if py_typeof(reference) == .str {
+        if py.typeof(reference) == .str {
             return String(cString: py_tostr(reference))
         }
 

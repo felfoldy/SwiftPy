@@ -83,31 +83,30 @@ extension TestClass: PythonBindable {
             PyBind.function(argc, argv, asyncCreate)
         }
 
-        text.toPython(type.object?.emplace("text"))
+        let typeObject = PyObject(type)
+
+        typeObject.text = text
         
-        type.object?.setAttribute("_interface",
-            #"""
-            class TestClass(builtins.object):
-                number: int
-                """Just a number."""
-            
-                @overload
-                def __init__(self): ...
-                @overload
-                def __init__(self, number: int): ...
-                @overload
-                def __init__(self, a: int, b: int):
-                    """Init with multiple parameters."""
-                @overload
-                def __init__(self, a: int, b: int, c: int): ...
-            
-                def set_number(self, value: int) -> None: ...
-                def get_number(self) -> int: ...
-                @staticmethod
-                def static_func(value: int) -> TestClass: ...
-            """#
-            .toRegister(0)
-        )
+        typeObject._interface = #"""
+        class TestClass(builtins.object):
+            number: int
+            """Just a number."""
+        
+            @overload
+            def __init__(self): ...
+            @overload
+            def __init__(self, number: int): ...
+            @overload
+            def __init__(self, a: int, b: int):
+                """Init with multiple parameters."""
+            @overload
+            def __init__(self, a: int, b: int, c: int): ...
+        
+            def set_number(self, value: int) -> None: ...
+            def get_number(self) -> int: ...
+            @staticmethod
+            def static_func(value: int) -> TestClass: ...
+        """#
     }
 }
 
@@ -195,5 +194,12 @@ struct PythonConvertibleClassTests {
         """)
 
         #expect(main.test9?.number == 10)
+    }
+    
+    @Test func intefaceTest() throws {
+        let testClassType = PyObject(TestClass.pyType)
+        let interface: String = try #require(testClassType._interface)
+        
+        #expect(interface.contains("TestClass(builtins.object)"))
     }
 }

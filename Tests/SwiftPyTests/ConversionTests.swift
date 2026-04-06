@@ -95,6 +95,7 @@ struct ConversionTests {
         #expect(array[2] as? Bool == false)
         #expect(array[3] == nil)
 
+        // This fails?
         //#expect(main.dictionary?["object"]?["nestedKey"] == "nestedValue")
     }
     

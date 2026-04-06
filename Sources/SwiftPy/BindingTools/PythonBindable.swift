@@ -35,24 +35,11 @@ public extension PythonBindable {
         let retainedSelfPointer = Unmanaged.passRetained(self)
             .toOpaque()
         userdata.storeBytes(of: retainedSelfPointer, as: UnsafeRawPointer.self)
-        
-        // Store cache of python value.
 
+        // Store cache of python value.
         let pointer = PyAPI.Reference.allocate(capacity: 1)
         pointer.initialize(to: reference.pointee)
         _pythonCache.reference = pointer
-    }
-    
-    /// Creates a new python object.
-    /// - Parameters:
-    ///   - reference: reference what will be initiated with a new object.
-    /// - Returns: Reference to the userdata.
-    @discardableResult
-    @inlinable
-    static func newPythonObject(_ reference: PyAPI.Reference) -> UnsafeMutableRawPointer {
-        let ud = py_newobject(reference, pyType, slotCount, PyAPI.pointerSize)
-        ud?.storeBytes(of: nil, as: UnsafeRawPointer?.self)
-        return ud!
     }
     
     @inlinable
@@ -61,8 +48,8 @@ public extension PythonBindable {
             reference.assign(cached)
             return
         }
-        
-        let userdata = Self.newPythonObject(reference)
+
+        let userdata = py.newobject(reference, type: Self.pyType, slots: Self.slotCount)
         storeInPython(reference, userdata: userdata)
     }
     
@@ -85,7 +72,7 @@ public extension PythonConvertible {
     ///   - position: position
     /// - Returns: `false`
     @inlinable static func throwTypeError(_ ref: PyAPI.Reference?, _ position: Int) -> Bool {
-        PyAPI.throw(.TypeError, "Expected \(pyType.name) got \(py_typeof(ref).name) at position \(position)")
+        PyAPI.throw(.TypeError, "Expected \(pyType.name) got \(py.typeof(ref).name) at position \(position)")
     }
 }
 
@@ -96,10 +83,12 @@ public extension PythonBindable {
 
     @inlinable
     static func __new__(_ argv: PyAPI.Reference?) -> Bool {
-        let type = py_totype(argv)
-        let ud = py_newobject(PyAPI.returnValue, type, slotCount, PyAPI.pointerSize)
-        // Clear ud so if init fails it won't try to deinit a random address.
-        ud?.storeBytes(of: nil, as: UnsafeRawPointer?.self)
+        let type = py.totype(argv)
+        py.newobject(
+            PyAPI.returnValue,
+            type: type,
+            slots: slotCount
+        )
         return true
     }
     

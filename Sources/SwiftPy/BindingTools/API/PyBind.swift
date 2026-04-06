@@ -31,7 +31,7 @@ public enum PyBind {
             // Set types.
             for type in types {
                 let pyType = type.pyType
-                module[dynamicMember: pyType.name] = pyType.object
+                module[dynamicMember: pyType.name] = py.tpobject(pyType)
             }
 
             // Load source.

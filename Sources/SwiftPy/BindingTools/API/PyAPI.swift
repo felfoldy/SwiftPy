@@ -89,6 +89,20 @@ public struct PyAPI {
         py_callable(self)
     }
 
+    @discardableResult
+    @inlinable
+    public func newobject(_ out: PyAPI.Reference, type: PyType, slots: Int32) -> UnsafeMutablePointer<UnsafeRawPointer?> {
+        let ud = py_newobject(
+            out,
+            type,
+            slots,
+            Int32(MemoryLayout<UnsafeRawPointer>.size)
+        )
+        .assumingMemoryBound(to: UnsafeRawPointer?.self)
+        ud.initialize(to: nil)
+        return ud
+    }
+
     // MARK: - Stack accessors
     
     @inlinable
@@ -115,6 +129,69 @@ public struct PyAPI {
     @inlinable
     public func pop() {
         py_pop()
+    }
+}
+
+// MARK: PyType extensions.
+
+public extension PyAPI {
+    /// Get the type of the object.
+    @inlinable
+    func typeof(_ self: PyAPI.Reference?) -> PyType {
+        py_typeof(self ?? py_None())
+    }
+
+    /// Convert a type object in python to PyType.
+    @inlinable
+    func totype(_ typeObject: PyAPI.Reference?) -> PyType {
+        py_totype(typeObject)
+    }
+    
+    @inlinable
+    func istype(_ self: PyAPI.Reference?, type: PyType) -> Bool {
+        py_istype(self, type)
+    }
+    
+    @inlinable
+    func isinstance(_ obj: PyAPI.Reference?, type: PyType) -> Bool {
+        py_isinstance(obj, type)
+    }
+
+    @inlinable
+    func newtype(
+        name: String,
+        base: PyType,
+        module: PyAPI.Reference?,
+        dtor: @convention(c) (UnsafeMutableRawPointer?) -> Void
+    ) -> PyType {
+        py_newtype(name, base, module, dtor)
+    }
+    
+    @inlinable
+    func tpname(_ type: PyType) -> String {
+        String(cString: py_tpname(type))
+    }
+    
+    @inlinable
+    func tpobject(_ type: PyType) -> PyAPI.Reference? {
+        py_tpobject(type)
+    }
+    
+    @inlinable
+    func bindproperty(type: PyType, name: String, getter: PyAPI.CFunction, setter: PyAPI.CFunction?) {
+        py_bindproperty(type, name, getter, setter)
+    }
+    
+    // TODO: Use lower level implementation with signature.
+    @inlinable
+    func bindmagic(type: PyType, name: String, function: PyAPI.CFunction) {
+        py_bindmagic(type, py_name(name), function)
+    }
+    
+    // TODO: Use lower level implementation with signature.
+    @inlinable
+    func bindstaticmethod(type: PyType, name: String, function: PyAPI.CFunction) {
+        py_bindstaticmethod(type, name, function)
     }
 }
 
@@ -172,7 +249,7 @@ public extension PyAPI {
 
         if let error = error as? StopIteration {
             let stopIterationType = PyObject(.StopIteration)
-            let stopIteration: PyAPI.Reference? = try? stopIterationType?(error.value)
+            let stopIteration: PyAPI.Reference? = try? stopIterationType(error.value)
 
             return py_raise(stopIteration)
         }
@@ -203,8 +280,6 @@ public extension PyAPI {
     static func `throw`(_ error: PyType, _ message: String?) -> Bool {
         py_throw(error, message)
     }
-
-    static let pointerSize = Int32(MemoryLayout<UnsafeRawPointer>.size)
 }
 
 public extension Interpreter {
