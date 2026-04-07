@@ -33,7 +33,7 @@ class TestClassWithProperties: PythonBindable {
     static func asyncCreate() async -> TestClass2 {
         TestClassWithProperties()
     }
-    static func map(content: String?) -> TestClass2 {
+    static func map(content: String? = nil) -> TestClass2 {
         let tc = TestClassWithProperties()
         tc.content = content ?? ""
         return tc
@@ -100,32 +100,24 @@ struct ScriptableTests {
         #expect(Interpreter.evaluate("tc4.get_content()") == "changed")
     }
     
-    @Test func staticFuncTests() async throws {
-        main.TestClass2 = TestClassWithProperties.pyType.object
+    @Test func staticmethodTests() async throws {
+        main.TestClass2 = PyObject(TestClassWithProperties.pyType)
         Interpreter.run("TestClass2.log('asd')")
         
-        Interpreter.run("tc5 = TestClass2.create()")
-        #expect(TestClassWithProperties(main.tc5) != nil)
+        Interpreter.run("staticmethodTests = TestClass2.create()")
+        #expect(TestClassWithProperties(main.staticmethodTests) != nil)
 
-        Interpreter.run("""
-        tc6 = TestClass2.map('map')
-        content = tc6.content
-        """)
-        
-        #expect(main.content == "map")
+        Interpreter.run("staticmethodTests = TestClass2.map('map')")
+        #expect(main.staticmethodTests?.content == "map")
 
-        Interpreter.run("""
-        tc6 = TestClass2.map(None)
-        content = tc6.content
-        """)
+        Interpreter.run("staticmethodTests = TestClass2.map(None)")
+        #expect(main.staticmethodTests?.content == "")
+
+        Interpreter.run("staticmethodTests = TestClass2.map(content='content')")
+        #expect(main.staticmethodTests?.content == "content")
         
-        #expect(main.content == "")
-        
-        await Interpreter.asyncRun("""
-        tc7 = await TestClass2.async_create()
-        """)
-        
-        #expect(TestClassWithProperties(main.tc7) != nil)
+        await Interpreter.asyncRun("staticmethodTestsAsync = await TestClass2.async_create()")
+        #expect(TestClassWithProperties(main.staticmethodTestsAsync) != nil)
     }
     
     @Test func returningArgumentedFunction() async {

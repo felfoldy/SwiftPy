@@ -76,10 +76,10 @@ extension TestClass: PythonBindable {
         type.function("get_number(self) -> int") {
             _bind_function($1, getNumber)
         }
-        type.staticFunction("static_func") { argc, argv in
+        type.staticmethod("static_func(value: int) -> TestClass") { argc, argv in
             PyBind.function(argc, argv, staticFunc)
         }
-        type.staticFunction("async_create") { argc, argv in
+        type.staticmethod("async_create() -> TestClass") { argc, argv in
             PyBind.function(argc, argv, asyncCreate)
         }
 
@@ -182,10 +182,10 @@ struct PythonConvertibleClassTests {
     }
     
     @Test func staticFunc() throws {
-        let obj: TestClass = try #require(
-            try main.TestClass?.static_func?(10)
-        )
-        #expect(obj.number == 10)
+        let static_func = try #require(main.TestClass?.static_func)
+        let result: TestClass = try #require(try static_func(10))
+
+        #expect(result.number == 10)
     }
     
     @Test func asyncStaticFunc() async throws {

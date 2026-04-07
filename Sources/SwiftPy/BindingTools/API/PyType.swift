@@ -19,6 +19,7 @@ public extension PyType {
     static let object = PyType(tp_object.rawValue)
     static let dict = PyType(tp_dict.rawValue)
     static let function = PyType(tp_function.rawValue)
+    static let staticmethod = PyType(tp_staticmethod.rawValue)
     static let bytes = PyType(tp_bytes.rawValue)
     static let generator = PyType(tp_generator.rawValue)
     
@@ -57,7 +58,11 @@ public extension PyType {
     
     @inlinable
     func magic(_ name: String, function: PyAPI.CFunction) {
-        py.bindmagic(type: self, name: name, function: function)
+        py.setdict(
+            py.tpobject(self)!,
+            name: name,
+            value: py.newnativefunc(function)
+        )
     }
 
     @inlinable
@@ -80,14 +85,22 @@ public extension PyType {
     }
 
     @inlinable
-    func staticFunction(_ name: String, _ block: PyAPI.CFunction) {
-        py.bindstaticmethod(
-            type: self,
-            name: name,
-            function: block
-        )
+    func staticmethod(_ signature: String, _ docstring: String? = nil, function: PyAPI.CFunction) {
+        // Create a function.
+        let funcionRef = PyAPI.Reference.allocate(capacity: 1)
+        funcionRef.initialize(to: py_TValue())
+        let name = py.newfunction(funcionRef, signature: signature, docstring: docstring, function: function)
+
+        // Create staticmethod.
+        py.push(py.tpobject(.staticmethod))
+        py.pushnil()
+        py.push(funcionRef)
+        assert(py.vectorcall(argc: 1, kwargc: 0))
+
+        // Sets staticmethod to type.
+        py_setdict(py.tpobject(self), name, PyAPI.returnValue)
     }
-    
+
     @inlinable
     static func make(_ name: String,
                      base: PyType = .object,

@@ -248,10 +248,10 @@ class ScriptableMacroTests: XCTestCase {
         
         extension TestClass: PythonBindable {
             @MainActor static let pyType: PyType = .make("TestClass", base: .object) { type in
-                type.staticFunction("test_function") { argc, argv in
+                type.staticmethod("test_function() -> int") { argc, argv in
                     PyBind.function(argc, argv, testFunction)
                 }
-                type.staticFunction("async_function") { argc, argv in
+                type.staticmethod("async_function() -> int") { argc, argv in
                     PyBind.function(argc, argv, asyncFunction)
                 }
                 \(newAndRepr)

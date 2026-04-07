@@ -316,7 +316,7 @@ func functionDeclarationVisitor(
         if isStatic {
             metadata.bindings.append(
             """
-            type.staticFunction("\(metadata.identifier(identifier))") { argc, argv in
+            type.staticmethod("\(pySignature)") { argc, argv in
                 PyBind.function(argc, argv, \(identifier))
             }
             """

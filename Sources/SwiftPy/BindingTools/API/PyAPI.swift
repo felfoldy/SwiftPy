@@ -60,7 +60,7 @@ public struct PyAPI {
     }
     
     @inlinable
-    public func setdict(_ self: PyAPI.Reference, name: String, value: PyAPI.Reference?) {
+    public func setdict(_ self: PyAPI.Reference?, name: String, value: PyAPI.Reference?) {
         py_setdict(self, py_name(name), value ?? py_None())
     }
 
@@ -136,7 +136,7 @@ public struct PyAPI {
     // MARK: - Stack accessors
     
     @inlinable
-    public func push(_ ref: PyAPI.Reference) {
+    public func push(_ ref: PyAPI.Reference?) {
         py_push(ref)
     }
 
@@ -185,7 +185,7 @@ public extension PyAPI {
     func typeof(_ self: PyAPI.Reference?) -> PyType {
         py_typeof(self ?? py_None())
     }
-
+    
     /// Convert a type object in python to PyType.
     @inlinable
     func totype(_ typeObject: PyAPI.Reference?) -> PyType {
@@ -201,7 +201,7 @@ public extension PyAPI {
     func isinstance(_ obj: PyAPI.Reference?, type: PyType) -> Bool {
         py_isinstance(obj, type)
     }
-
+    
     @inlinable
     func newtype(
         name: String,
@@ -227,16 +227,18 @@ public extension PyAPI {
         py_bindproperty(type, name, getter, setter)
     }
     
-    // TODO: Use lower level implementation with signature.
     @inlinable
-    func bindmagic(type: PyType, name: String, function: PyAPI.CFunction) {
-        py_bindmagic(type, py_name(name), function)
+    func newnativefunc(_ function: PyAPI.CFunction) -> PyAPI.Reference {
+        let out = PyAPI.Reference.allocate(capacity: 1)
+        out.initialize(to: py_TValue())
+        py_newnativefunc(out, function)
+        return out
     }
-    
-    // TODO: Use lower level implementation with signature.
+
     @inlinable
-    func bindstaticmethod(type: PyType, name: String, function: PyAPI.CFunction) {
-        py_bindstaticmethod(type, name, function)
+    func newfunction(_ out: PyAPI.Reference, signature: String, docstring: String?, function: PyAPI.CFunction) -> py_Name {
+        let docstring = docstring?.withCString(strdup)
+        return py_newfunction(out, signature, function, docstring, -1)
     }
 }
 
@@ -651,10 +653,9 @@ public extension PyAPI.Reference {
     
     @inlinable
     func bind(_ signature: String, docstring: String? = nil, function: PyAPI.CFunction) {
-        let temp = py.pushtmp()
-        
-        let doc = docstring?.withCString(strdup)
-        let name = py_newfunction(temp, signature, function, doc, -1)
+        let temp = PyAPI.Reference.allocate(capacity: 1)
+        temp.initialize(to: py_TValue())
+        let name = py.newfunction(temp, signature: signature, docstring: docstring, function: function)
 
         let sigRet = TempPyObject(signature)
         py.setdict(temp, name: "_signature", value: sigRet?.reference)
@@ -665,15 +666,14 @@ public extension PyAPI.Reference {
         } else {
             interface += " ..."
         }
-        let interfaceRet = interface.retained
+        let interfaceRet = TempPyObject(interface)
         py.setdict(
             temp,
             name: "_interface",
-            value: interfaceRet.reference
+            value: interfaceRet?.reference
         )
 
         py_setdict(self, name, temp)
-        py.pop()
     }
 
     @inlinable func isType<T: PythonConvertible>(_ type: T.Type) -> Bool {
