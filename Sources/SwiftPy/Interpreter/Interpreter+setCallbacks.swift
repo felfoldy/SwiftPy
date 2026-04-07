@@ -63,7 +63,7 @@ extension Interpreter {
                     py.repr(obj)
                 }
                 
-                if let str = String(PyAPI.returnValue) {
+                if let str = String(py.retval) {
                     Interpreter.output.stdout(str)
                 }
             } catch {}

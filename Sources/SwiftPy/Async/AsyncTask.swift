@@ -83,7 +83,7 @@ public class AsyncTask: ViewRepresentable {
         try Interpreter.printErrors {
             py.iter(generator)
         }
-        arguments[Slot.iterator] = PyAPI.returnValue
+        arguments[Slot.iterator] = py.retval
 
         let id = UUID()
         self.task = Task {
@@ -95,10 +95,10 @@ public class AsyncTask: ViewRepresentable {
 
                     let hasNext = try Interpreter.printItemError(py.next(iterator))
 
-                    let stack = PyAPI.returnValue.retained
+                    let nextObject = TempPyObject(py.retval)
 
                     if hasNext {
-                        if let task = AsyncTask(stack.reference) {
+                        if let task = AsyncTask(nextObject?.reference) {
                             Interpreter.output.view(task.representation)
                             _ = await task.task.value
 
@@ -110,7 +110,7 @@ public class AsyncTask: ViewRepresentable {
                             try await Task.sleep(nanoseconds: 1)
                         }
                     } else {
-                        let result = try? stack.reference?.attribute("value")
+                        let result = try? nextObject?.reference.attribute("value")
                         task[.result] = result
                         task.isDone = true
 

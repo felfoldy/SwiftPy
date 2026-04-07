@@ -26,10 +26,10 @@ public class StackReference {
             py.iter(reference)
         }
         
-        let iter = PyAPI.returnValue.retained
+        let iter = TempPyObject(py.retval)
         
-        while try Interpreter.printItemError(py.next(iter.reference)) {
-            try next(PyAPI.returnValue.retained)
+        while try Interpreter.printItemError(py.next(iter?.reference)) {
+            try next(py.retval.retained)
         }
     }
 

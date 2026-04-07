@@ -80,7 +80,7 @@ public final class Interpreter {
             py.compile(source: code, filename: filename, mode: mode)
         }
 
-        let code = TempPyObject(PyAPI.returnValue)
+        let code = TempPyObject(py.retval)
         
         try Interpreter.printErrors {
             let function: PyAPI.Reference? = mode == .evaluation ? .functions.eval : .functions.exec
@@ -180,8 +180,8 @@ public extension Interpreter {
     static func evaluate<Result: PythonConvertible>(_ expression: String) -> Result? {
         do {
             try shared.execute(expression, filename: "<string>", mode: .evaluation)
-            let result = PyAPI.returnValue.retained
-            return try Result.cast(result.reference)
+            let result = TempPyObject(py.retval)
+            return try Result.cast(result?.reference)
         } catch {
             return nil
         }

@@ -85,7 +85,7 @@ public extension PythonBindable {
     static func __new__(_ argv: PyAPI.Reference?) -> Bool {
         let type = py.totype(argv)
         py.newobject(
-            PyAPI.returnValue,
+            py.retval,
             type: type,
             slots: slotCount
         )

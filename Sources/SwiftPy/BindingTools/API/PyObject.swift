@@ -53,7 +53,7 @@ public class PyObject {
                 py.dict.getitem(reference, key: keyObject?.reference)
             )
             guard result == true else { return nil }
-            return TempPyObject(PyAPI.returnValue)
+            return TempPyObject(py.retval)
         }
         set {
             let keyObject = TempPyObject(key)
@@ -76,7 +76,7 @@ public class PyObject {
     @discardableResult
     public func callAsFunction<Value: PythonConvertible>(_ args: PythonConvertible?...) throws -> Value {
         try call(args)
-        return try Value.cast(PyAPI.returnValue)
+        return try Value.cast(py.retval)
     }
     
     private func call(_ args: [PythonConvertible?]) throws {

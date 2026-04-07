@@ -98,7 +98,7 @@ public extension PyType {
         assert(py.vectorcall(argc: 1, kwargc: 0))
 
         // Sets staticmethod to type.
-        py_setdict(py.tpobject(self), name, PyAPI.returnValue)
+        py_setdict(py.tpobject(self), name, py.retval)
     }
 
     @inlinable

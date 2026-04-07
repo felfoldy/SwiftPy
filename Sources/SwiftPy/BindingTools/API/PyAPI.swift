@@ -34,6 +34,11 @@ public struct PyAPI {
         get { py_callbacks().pointee }
         nonmutating set { py_callbacks().pointee = newValue }
     }
+    
+    @inlinable
+    public var retval: PyAPI.Reference {
+        py_retval()
+    }
 
     @inlinable
     init() {
@@ -350,9 +355,10 @@ public extension PyAPI {
 }
 
 public extension PyAPI {
+    @available(*, deprecated, renamed: "py.retval")
     @inlinable
     static var returnValue: Reference {
-        py_retval()
+        py.retval
     }
 
     /// Size of the value of `PyAPI.Reference`.
@@ -361,13 +367,13 @@ public extension PyAPI {
     @inlinable
     static func `return`(_ value: Any?) -> Bool {
         guard let value else {
-            py_newnone(returnValue)
+            py_newnone(py.retval)
             return true
         }
         if let pythonValue = value as? PythonConvertible {
-            pythonValue.toPython(returnValue)
+            pythonValue.toPython(py.retval)
         } else {
-            SwiftObject(value).toPython(returnValue)
+            SwiftObject(value).toPython(py.retval)
         }
         return true
     }
@@ -427,7 +433,7 @@ public extension Interpreter {
 
         let imported = try? Interpreter.printItemError(py_import(name))
         if imported == true {
-            return PyAPI.returnValue
+            return py.retval
         }
 
         return nil
@@ -528,7 +534,7 @@ public extension PyAPI.Reference {
             return py.vectorcall(argc: argc, kwargc: 0)
         }
 
-        return PyAPI.returnValue
+        return py.retval
     }
 
     /// Copies the given value into the reference memory.
@@ -537,27 +543,12 @@ public extension PyAPI.Reference {
         pointee = newValue.pointee
     }
     
-    /// Retrieves the attribute with the given name and passes it as a temporary reference.
-    /// - Parameters:
-    ///   - name: The attribute name.
-    ///   - block: Closure receiving the temporary python object.
-    /// - Throws: Errors from the Python interpreter.
-    @inlinable
-    func attribute(_ name: String, block: (PyAPI.Reference?) throws -> Void) throws {
-        try Interpreter.printErrors {
-            py_getattr(self, py_name(name))
-        }
-        try PyAPI.returnValue.temp { tmp in
-            try block(tmp)
-        }
-    }
-    
     @inlinable
     func attribute(_ name: String) throws -> PyAPI.Reference? {
         try Interpreter.printErrors {
             py.getattr(self, name: name)
         }
-        return PyAPI.returnValue
+        return py.retval
     }
     
     @inlinable
@@ -565,13 +556,7 @@ public extension PyAPI.Reference {
         let hasError = Interpreter.ignoreErrors {
             py.getattr(self, name: name)
         }
-        return !hasError ? nil : PyAPI.returnValue
-    }
-    
-    @inlinable
-    func castAttribute<Result: PythonConvertible>(_ name: String) throws -> Result {
-        let ref = try attribute(name)?.retained
-        return try Result.cast(ref?.reference)
+        return !hasError ? nil : py.retval
     }
     
     /// Returns a `ViewRepresentation` if the bounded object implements `ViewRepresentable`.
@@ -584,39 +569,13 @@ public extension PyAPI.Reference {
             return nil
         }
         
-        return ViewRepresentation(PyAPI.returnValue)
-    }
-    
-    /// Pushes `self` onto the Python stack and passes it as a temporary reference.
-    /// - Parameter block: Closure receiving the temporary `PyAPI.Reference?`.
-    /// - Throws: Errors thrown within the closure.
-    @inlinable
-    func temp(_ block: (PyAPI.Reference?) throws -> Void) throws {
-        let tmp = py_pushtmp()
-        defer { py_pop() }
-        assign(tmp)
-        try block(tmp)
+        return ViewRepresentation(py.retval)
     }
 
     @inlinable func setAttribute(_ name: String, _ value: PyAPI.Reference?) {
         try? Interpreter.printErrors {
             py.setattr(self, name: name, value: value)
         }
-    }
-    
-    @inlinable func deleteAttribute(_ name: String) {
-        try? Interpreter.printErrors {
-            py_delattr(self, py_name(name))
-        }
-    }
-    
-    /// Moves the reference to a register at the specific index.
-    /// - Parameter index: index
-    /// - Returns: Reference to the register.
-    @inlinable func toRegister(_ index: Int32) -> PyAPI.Reference? {
-        let register = py_getreg(index)
-        register?.assign(self)
-        return register
     }
     
     @inlinable func emplace(_ name: String) -> PyAPI.Reference {
@@ -676,17 +635,19 @@ public extension PyAPI.Reference {
         py_setdict(self, name, temp)
     }
 
+    @available(*, deprecated, renamed: "py.istype")
     @inlinable func isType<T: PythonConvertible>(_ type: T.Type) -> Bool {
-        py_istype(self, T.pyType)
+        py.istype(self, type: T.pyType)
     }
     
+    @available(*, deprecated, renamed: "py.isinstance")
     @inlinable func isInstance(of type: PyType) -> Bool {
-        py_isinstance(self, type)
+        py.isinstance(self, type: type)
     }
     
     @inlinable
     func canCast(to type: PyType) -> Bool {
-        if py_isinstance(self, type) {
+        if py.isinstance(self, type: type) {
             return true
         }
         switch type {
