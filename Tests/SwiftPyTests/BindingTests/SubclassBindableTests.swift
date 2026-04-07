@@ -26,7 +26,7 @@ struct SubclassBindableTests {
     let type = Base.pyType
     
     init() {
-        Interpreter.main.setAttribute("Base", Base.pyType.object)
+        main.Base = PyObject(Base.pyType)
         Interpreter.run("""
         class Subclass(Base):
             def __init__(self):

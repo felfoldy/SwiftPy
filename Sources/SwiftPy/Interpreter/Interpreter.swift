@@ -199,9 +199,4 @@ public extension Interpreter {
         let result = try? completions?.call([textStack.reference])
         return [String](result) ?? []
     }
-
-    @available(*, deprecated, renamed: "PyBind.module")
-    static func bindModule(_ name: String, _ types: [PythonBindable.Type], block: @escaping (PyAPI.Reference?) -> Void = { _ in }) {
-        PyBind.module(name, types, block: block)
-    }
 }

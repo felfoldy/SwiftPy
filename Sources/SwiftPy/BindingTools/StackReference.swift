@@ -37,11 +37,6 @@ public class StackReference {
 }
 
 public extension PythonConvertible {
-    @available(*, deprecated, renamed: "retained")
-    var toStack: StackReference {
-        StackReference(self)
-    }
-
     /// Creates a temporary reference on stack.
     var retained: StackReference {
         StackReference(self)
@@ -50,11 +45,6 @@ public extension PythonConvertible {
 
 @MainActor
 public extension PyAPI.Reference {
-    @available(*, deprecated, renamed: "retained")
-    var toStack: StackReference {
-        StackReference(self)
-    }
-
     /// Creates a temporary reference on stack.
     var retained: StackReference {
         StackReference(self)

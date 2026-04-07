@@ -39,7 +39,7 @@ struct PyArgumentsTests {
     @Test func argumentsInit() throws {
         let main = PyModule.main
         
-        main.PyArgumentTests_SUT = PyArgumentTests_SUT.pyType.object
+        main.PyArgumentTests_SUT = py.tpobject(PyArgumentTests_SUT.pyType)
                 
         Interpreter.run("argumentsInit_result = PyArgumentTests_SUT(12, 'slot')")
 

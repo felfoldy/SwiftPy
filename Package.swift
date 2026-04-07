@@ -53,8 +53,9 @@ let package = Package(
                 "./src/pocketpy.c",
                 "./src/pocketpy_extensions.c",
             ],
-            cxxSettings: [
+            cSettings: [
                 .headerSearchPath("./include"),
+                .define("PK_ENABLE_THREADS", to: "0")
             ]
         ),
         .plugin(
