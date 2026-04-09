@@ -35,7 +35,7 @@ public enum PyBind {
             }
 
             // Load source.
-            if let content = Interpreter.importFromBundle(name: name + ".py") {
+            if let content = Interpreter.importFromSource(name: name + ".py") {
                 try? Interpreter.printErrors {
                     py.exec(source: content, filename: name, mode: .execution, module: module.reference)
                 }
@@ -54,7 +54,7 @@ public enum PyBind {
             
             block(module)
 
-            if let content = Interpreter.importFromBundle(name: name + ".py") {
+            if let content = Interpreter.importFromSource(name: name + ".py") {
                 try? Interpreter.printErrors {
                     py.exec(source: content, filename: name, mode: .execution, module: module.reference)
                 }

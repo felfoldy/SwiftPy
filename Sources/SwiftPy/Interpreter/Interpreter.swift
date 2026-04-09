@@ -96,7 +96,13 @@ public final class Interpreter {
         }
     }
 
-    static func importFromBundle(name: String) -> String? {
+    static func importFromSource(name: String) -> String? {
+        // Read from current working directory...
+        if let content = try? String(contentsOf: Path.cwd().url.appending(path: name), encoding: .utf8) {
+            return content
+        }
+        
+        // Check bundles.
         for bundle in bundles {
             if let path = bundle.path(forResource: name, ofType: nil) {
                 do {
@@ -107,12 +113,28 @@ public final class Interpreter {
             }
         }
 
-        // Read from [current]/site-packages/...
-        if let sitePackage = try? String(contentsOfFile: "\(Path.sitePackages())/\(name)", encoding: .utf8) {
-            return sitePackage
-        }
         // Read from documents/site-packages/...
-        return try? String(contentsOfFile: "\(Path.cwd())/\(name)", encoding: .utf8)
+        guard let sitePackages = try? Path.sitePackages().url else {
+            return nil
+        }
+
+        // Direct child of site-packages.
+        if let content = try? String(contentsOf: sitePackages.appending(path: name), encoding: .utf8) {
+            return content
+        }
+
+        // One level deep: /site-packages/*/name
+        let contents = try? FileManager.default.contentsOfDirectory(
+            at: sitePackages,
+            includingPropertiesForKeys: [.isDirectoryKey]
+        )
+
+        for url in contents ?? [] {
+            if let content = try? String(contentsOf: url.appending(path: name), encoding: .utf8) {
+                return content
+            }
+        }
+        return nil
     }
     
     @inlinable

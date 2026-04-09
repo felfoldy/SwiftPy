@@ -116,29 +116,3 @@ private let sourceReplacements: [(String, String)] = [
         """
     )
 ]
-
-private let asyncAwaitLexerSource = """
-    // handle "async def", "not in", "is not", "yield from"
-    Token* back = &c11_vector__back(Token, &self->nexts);
-
-    if(back->type == TK_ID && back->length == 5 && strncmp(back->start, "async", 5) == 0 &&
-       type == TK_DEF) {
-        // remove previous async token
-        self->nexts.length--;
-        
-        Token deco = *back;
-        deco.type = TK_DECORATOR;
-        c11_vector__push(Token, &self->nexts, deco);
-        
-        Token id = *back;
-        id.type = TK_ID;
-        c11_vector__push(Token, &self->nexts, id);
-        
-        Token eol = *back;
-        eol.type = TK_EOL;
-        c11_vector__push(Token, &self->nexts, eol);
-        // def
-        c11_vector__push(Token, &self->nexts, token);
-        return;
-    }
-"""

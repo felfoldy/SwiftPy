@@ -43,7 +43,7 @@ extension Interpreter {
             guard let cFilename else { return nil }
             
             let filename = String(cString: cFilename)
-            if let content = Interpreter.importFromBundle(name: filename) {
+            if let content = Interpreter.importFromSource(name: filename) {
                 return strdup(content)
             }
 

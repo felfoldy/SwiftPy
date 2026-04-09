@@ -60,8 +60,8 @@ public final class Path {
     }
     
     /// Returns a Boolean value that indicates whether a file or directory exists at a specified path.
-    public static func exists(path: String) -> Bool {
-        FileManager.default.fileExists(atPath: path)
+    public func exists() -> Bool {
+        FileManager.default.fileExists(atPath: url.path)
     }
 
     func __truediv__(_ other: String) throws -> Path {
