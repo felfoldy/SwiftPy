@@ -17,6 +17,12 @@ public protocol PythonConvertible {
 }
 
 public extension PythonConvertible {
+    /// Returns the reference to the type object.
+    @inlinable
+    static var pyTypeObject: PyAPI.Reference? {
+        py.tpobject(pyType)
+    }
+
     @inlinable
     init?(_ reference: PyAPI.Reference?) {
         guard let reference else { return nil }

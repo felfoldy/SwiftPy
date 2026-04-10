@@ -47,12 +47,6 @@ public extension PyType {
     var name: String {
         py.tpname(self)
     }
-    
-    @inlinable
-    @available(*, deprecated, renamed: "PyObject.init")
-    var object: PyAPI.Reference? {
-        py.tpobject(self)
-    }
 
     // MARK: - Binding methods.
     
