@@ -7,7 +7,6 @@
 
 import Testing
 @testable import SwiftPy
-import LogTools
 
 func profile(_ name: StaticString) -> SignpostProfiler {
     let profiler = SignpostProfiler(name)

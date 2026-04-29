@@ -108,7 +108,7 @@ public final class Interpreter {
                 do {
                     return try String(contentsOfFile: path, encoding: .utf8)
                 } catch {
-                    log.error(error.localizedDescription)
+                    log.error("Loading bundle failed with: \(error)")
                 }
             }
         }

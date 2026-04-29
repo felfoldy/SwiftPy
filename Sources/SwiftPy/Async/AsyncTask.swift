@@ -167,7 +167,7 @@ extension AsyncTask {
                 try await task()
                 await context?.complete(result: Int?.none)
             } catch {
-                log.critical(error.localizedDescription)
+                log.critical("\(error.localizedDescription)")
                 context?.completion()
             }
         }

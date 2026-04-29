@@ -5,7 +5,6 @@
 //  Created by Tibor Felföldy on 2025-02-02.
 //
 
-import LogTools
 import OSLog
 import Foundation
 

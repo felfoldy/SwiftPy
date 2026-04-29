@@ -4,7 +4,7 @@
 
 import pocketpy
 import Foundation
-import LogTools
+import OSLog
 
 let log = Logger(subsystem: "com.felfoldy.SwiftPy", category: "Interpreter")
 

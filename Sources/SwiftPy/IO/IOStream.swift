@@ -20,15 +20,15 @@ public extension IOStream {
 
 struct DefaultIOStream: IOStream {
     func input(_ str: String) {
-        log.debug(str)
+        log.debug("\(str)")
     }
 
     func stdout(_ str: String) {
-        log.info(str)
+        log.info("\(str)")
     }
 
     func stderr(_ str: String) {
-        log.critical(str)
+        log.critical("\(str)")
     }
 
     func executionTime(_ time: UInt64) {}

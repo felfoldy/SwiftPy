@@ -183,7 +183,7 @@ extension Array: PythonConvertible {
         py.newlist(reference)
         for value in self {
             guard let value = value as? PythonConvertible else {
-                log.error("\(value) is not convertible to Python")
+                log.error("\(String(describing: value)) is not convertible to Python")
                 continue
             }
             py.list.append(
@@ -232,7 +232,7 @@ extension Dictionary: PythonConvertible where Key: PythonConvertible {
         py.newdict(reference)
         for (key, value) in self {
             guard let value = value as? PythonConvertible else {
-                log.error("\(value) is not convertible to Python")
+                log.error("\(String(describing: value)) is not convertible to Python")
                 continue
             }
  
@@ -274,7 +274,7 @@ extension Dictionary: PythonConvertible where Key: PythonConvertible {
                 throw ConversionError.value
             }
         } catch {
-            log.error(error.localizedDescription)
+            log.error("\(error.localizedDescription)")
         }
         return dict
     }

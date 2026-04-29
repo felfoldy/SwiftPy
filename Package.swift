@@ -11,14 +11,11 @@ let package = Package(
             name: "SwiftPy",
             targets: [
                 "SwiftPy",
-                // TODO: Remove when the lib will be complete.
-                "pocketpy",
             ]
         ),
     ],
     dependencies: [
         .package(url: "https://github.com/swiftlang/swift-syntax.git", from: "601.0.0"),
-        .package(url: "https://github.com/felfoldy/LogTools.git", from: "1.1.0"),
     ],
     targets: [
         .target(
@@ -26,7 +23,6 @@ let package = Package(
             dependencies: [
                 "pocketpy",
                 "SwiftPyMacros",
-                "LogTools"
             ],
             resources: [
                 .process("Resources")
