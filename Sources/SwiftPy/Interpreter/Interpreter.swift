@@ -58,6 +58,7 @@ public final class Interpreter {
     }
 
     let profiler = SignpostProfiler("Python")
+    private let relays = OutputRelays()
 
     init() {
         setCallbacks()
