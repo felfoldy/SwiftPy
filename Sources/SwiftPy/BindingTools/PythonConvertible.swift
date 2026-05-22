@@ -22,6 +22,13 @@ public extension PythonConvertible {
     static var pyTypeObject: PyAPI.Reference? {
         py.tpobject(pyType)
     }
+    
+    @inlinable
+    static func deinitialize(userdata: UnsafeMutableRawPointer?) {
+        userdata?
+            .assumingMemoryBound(to: Self.self)
+            .deinitialize(count: 1)
+    }
 
     @inlinable
     init?(_ reference: PyAPI.Reference?) {

@@ -19,14 +19,14 @@ class CustomView: ViewRepresentable {
 @MainActor
 struct ViewRepresentationTests {
     class TestIOStream: IOStream {
-        var view: ViewRepresentation?
+        var view: AnyView?
         
         func input(_ str: String) {}
         func stdout(_ str: String) {}
         func stderr(_ str: String) {}
         func executionTime(_ time: UInt64) {}
         
-        func view(_ view: ViewRepresentation) {
+        func view(_ view: AnyView) {
             self.view = view
         }
     }
@@ -37,7 +37,7 @@ struct ViewRepresentationTests {
         let io = TestIOStream()
         Interpreter.output = io
         
-        _ = ViewRepresentation.pyType
+        _ = AnyView.pyType
         _ = CustomView.pyType
         
         let customView = CustomView()

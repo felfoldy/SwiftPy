@@ -33,8 +33,8 @@ public protocol ViewRepresentable {
 }
 
 public extension ViewRepresentable {
-    var representation: ViewRepresentation {
-        ViewRepresentation { view }
+    var representation: AnyView {
+        AnyView(view)
     }
 }
 
@@ -68,33 +68,25 @@ public extension ViewRepresentable where Content: RepresentationContent, Content
     }
 }
 
-/// A type ereased wrapper for a SwiftUI view to store in python.
-///
-/// See also:
-/// - ``ViewRepresentable``
-@Scriptable
-public final class ViewRepresentation {
-    @usableFromInline
-    internal let anyView: AnyView
-
-    private init(view: AnyView) {
-        anyView = view
-    }
-}
-
-public extension ViewRepresentation {
-    convenience init<Content: View>(@ViewBuilder content: () -> Content) {
-        self.init(view: AnyView(content()))
+extension AnyView: PythonConvertible {
+    public func toPython(_ reference: PyAPI.Reference) {
+        py.newobject(self, out: reference, slots: 0)
     }
 
-    @inlinable
-    var view: AnyView { anyView }
+    public static func fromPython(_ reference: PyAPI.Reference) -> AnyView {
+        reference.toUserdata()
+    }
+
+    public static let pyType: PyType = {
+        py.newtype(name: "AnyView", base: .object, module: .main) { pointer in
+            deinitialize(userdata: pointer)
+        }
+    }()
 }
 
 #Preview {
-    ViewRepresentation {
+    AnyView {
         Text("View")
     }
-    .view
     .padding()
 }

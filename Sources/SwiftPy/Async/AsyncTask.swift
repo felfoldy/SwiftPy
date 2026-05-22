@@ -40,7 +40,7 @@ public class AsyncTask: ViewRepresentable {
     typealias object = PyAPI.Reference
     
     public var isDone: Bool = false
-    public var viewRepresentation: ViewRepresentation?
+    public var viewRepresentation: AnyView?
 
     internal let task: Task<Void, Never>
     internal static var tasks = [UUID: AsyncTask]()
@@ -155,7 +155,7 @@ extension AsyncTask: HasSlots {
 }
 
 extension AsyncTask {
-    public var view: some View { viewRepresentation?.view }
+    public var view: some View { viewRepresentation }
 }
 
 extension AsyncTask {

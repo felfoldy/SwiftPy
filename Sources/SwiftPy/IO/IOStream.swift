@@ -5,17 +5,19 @@
 //  Created by Tibor Felföldy on 2025-01-28.
 //
 
+import SwiftUI
+
 @MainActor
 public protocol IOStream {
     func input(_ str: String)
     func stdout(_ str: String)
     func stderr(_ str: String)
-    func view(_ view: ViewRepresentation)
+    func view(_ view: AnyView)
     func executionTime(_ time: UInt64)
 }
 
 public extension IOStream {
-    func view(_ view: ViewRepresentation) {}
+    func view(_ view: AnyView) {}
 }
 
 struct DefaultIOStream: IOStream {

@@ -9,6 +9,7 @@ import pocketpy
 import Foundation
 #if canImport(UIKit)
 import UIKit
+import SwiftUI
 #endif
 
 extension Interpreter {
@@ -17,9 +18,7 @@ extension Interpreter {
         bindOS()
         bindSys()
         
-        PyBind.module("interpreter", [
-            ViewRepresentation.self,
-        ]) { module in
+        PyBind.module("interpreter", []) { module in
             let builtins = py.getmodule("builtins")
             builtins?["dir"]?.assign(module?["dir"])
             

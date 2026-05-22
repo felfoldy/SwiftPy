@@ -7,6 +7,7 @@
 
 import pocketpy
 import Foundation
+import SwiftUI
 
 @MainActor
 public let py = PyAPI()
@@ -136,6 +137,13 @@ public struct PyAPI {
         .assumingMemoryBound(to: UnsafeRawPointer?.self)
         ud.initialize(to: nil)
         return ud
+    }
+
+    @inlinable
+    public func newobject<T: PythonConvertible>(_ value: T, out: PyAPI.Reference, slots: Int32) {
+        let ud = py_newobject(out, T.pyType, slots, Int32(MemoryLayout<T>.size))
+            .assumingMemoryBound(to: T.self)
+        ud.initialize(to: value)
     }
 
     // MARK: - Stack accessors
@@ -492,6 +500,11 @@ public extension PyAPI.Reference {
     @inlinable var userdata: UnsafeMutableRawPointer {
         py_touserdata(self)
     }
+
+    @inlinable
+    func toUserdata<T: PythonConvertible>(as type: T.Type = T.self) -> T {
+        py_touserdata(self).assumingMemoryBound(to: T.self).pointee
+    }
     
     @inlinable var isNil: Bool {
         py_istype(self, 0)
@@ -561,15 +574,15 @@ public extension PyAPI.Reference {
     
     /// Returns a `ViewRepresentation` if the bounded object implements `ViewRepresentable`.
     @inlinable
-    var view: ViewRepresentation? {
+    var view: AnyView? {
         let p0 = py_peek(0)
-        
+
         if !py.getattr(self, name: "__view__") {
             py_clearexc(p0)
             return nil
         }
         
-        return ViewRepresentation(py.retval)
+        return AnyView(py.retval)
     }
 
     @inlinable func setAttribute(_ name: String, _ value: PyAPI.Reference?) {
