@@ -7,7 +7,32 @@
 
 import pocketpy
 
-
+@MainActor
+public final class PyCache {
+    private var cacheID: Int32 = 0
+    private var freeSlots: [Int32] = []
+    private lazy var objectCache: PyRef = {
+        PyModule("interpreter")!._swift_object_cache!
+    }()
+    
+    /// Created as a singleton in `py.cache`
+    init() {}
+    
+    public func add(_ value: PyRef) -> Int32 {
+        guard let slot = freeSlots.popLast() else {
+            py.list.append(objectCache, value: value)
+            defer { cacheID += 1 }
+            return cacheID
+        }
+        py.list.setitem(objectCache, i: slot, value: value)
+        return slot
+    }
+    
+    public func remove(at index: Int32) {
+        py.list.setitem(objectCache, i: index, value: py_None())
+        freeSlots.append(index)
+    }
+}
 
 /// Wrapper to a `PyObject`.
 @MainActor
@@ -15,14 +40,33 @@ import pocketpy
 public class PyObject {
     public let reference: PyAPI.Reference
 
+    @usableFromInline
+    let cacheID: Int32?
+
     @inlinable
     public init?(_ reference: PyAPI.Reference?) {
         guard let reference else { return nil }
         self.reference = reference
+        cacheID = nil
+    }
+    
+    @inlinable
+    public init(owning borrowed: PyRef) {
+        reference = .allocate(capacity: 1)
+        reference.initialize(to: borrowed.pointee)
+        self.cacheID = Interpreter.cache.add(borrowed)
     }
     
     public convenience init(_ type: PyType) {
         self.init(py.tpobject(type))!
+    }
+    
+    @MainActor deinit {
+        if let cacheID {
+            Interpreter.cache.remove(at: cacheID)
+            reference.deinitialize(count: 1)
+            reference.deallocate()
+        }
     }
 
     /// Lookup for the attribute of the python object.

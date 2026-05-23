@@ -34,7 +34,7 @@ public struct PyAPI {
     public let dict = Dict()
     public let list = List()
     public let tuple = Tuple()
-
+    
     @inlinable
     public var callbacks: Callbacks {
         get { py_callbacks().pointee }
@@ -339,6 +339,11 @@ public extension PyAPI {
         public func append(_ self: PyAPI.Reference, value: PyAPI.Reference?) {
             py_list_append(self, value)
         }
+
+        @inlinable
+        public func setitem(_ self: PyRef, i: Int32, value: PyRef?) {
+            py_list_setitem(self, i, value)
+        }
     }
     
     struct Tuple {
@@ -481,33 +486,12 @@ public extension Interpreter {
 
         return nil
     }
-
-    /// `__main__` module.
-    static let main = PyAPI.Reference.modules.main
 }
 
 // MARK: - PyType
 
 /// `Int16`
 public typealias PyType = py_Type
-
-// MARK: - Modules
-
-@MainActor
-public extension PyAPI.Reference {
-    static let main = Interpreter.main
-
-    @MainActor
-    struct Modules {
-        /// `__main__` module.
-        let main = Interpreter.shared.module("__main__")!
-
-        /// `builtins` module.
-        let builtins = Interpreter.shared.module("builtins")!
-    }
-
-    @MainActor static let modules = Modules()
-}
 
 // MARK: - Functions
 

@@ -19,16 +19,16 @@ struct AutoCompleterTests {
     @Test func returnTabOnEmptyString() {
         Interpreter.run("x = completer.complete('', 0)")
 
-        #expect(Interpreter.main["x"] == "\t")
+        #expect(PyModule.main.x == "\t")
     }
     
     @Test()
     func globalMatches() {
         Interpreter.run("x = completer.complete('pri', 0)")
-        #expect(Interpreter.main["x"] == "print(")
+        #expect(PyModule.main.x == "print(")
         
         Interpreter.run("x = completer.complete('str', 0)")
-        #expect(Interpreter.main["x"] == "str(")
+        #expect(PyModule.main.x == "str(")
     }
     
     @Test func attributeMatches() {

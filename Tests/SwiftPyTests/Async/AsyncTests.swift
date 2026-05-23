@@ -17,7 +17,7 @@ func profile(_ name: StaticString) -> SignpostProfiler {
 @Suite("Async tests", .serialized)
 @MainActor
 struct AsyncTests {
-    let main = Interpreter.main
+    let main = PyModule.main
     let profiler = profile("AsyncTests")
     
     @Test func codeToRun() {
@@ -48,24 +48,24 @@ struct AsyncTests {
     @Test func asyncRun() async {
         profiler.event("AsyncTests.asyncRun")
         
-        main.bind("async_func() -> AsyncTask") { argc, argv in
+        main.def("async_func() -> AsyncTask") { argc, argv in
             PyBind.function(argc, argv) {
                 AsyncTask {}
             }
         }
-        
+
         await Interpreter.asyncRun("""
         await async_func()
         finished = True
         """)
         
-        #expect(main["finished"] == true)
+        #expect(main.finished == true)
     }
     
     @Test func asyncRunWithResult() async {
         profiler.event("AsyncTest.asyncRunWithResult")
 
-        main.bind("asyncRunWithResult() -> AsyncTask") { _, _ in
+        main.def("asyncRunWithResult() -> AsyncTask") { _, _ in
             PyAPI.return { AsyncTask { 42 } }
         }
 
@@ -73,13 +73,13 @@ struct AsyncTests {
         asyncRunWithResult_result = await asyncRunWithResult()
         """)
 
-        #expect(main["asyncRunWithResult_result"] == 42)
+        #expect(main.asyncRunWithResult_result == 42)
     }
     
     @Test func chainingAsyncRun() async {
         profiler.event("AsyncTests.chainingAsyncRun")
         
-        main.bind("async_func() -> AsyncTask") { _, _ in
+        main.def("async_func() -> AsyncTask") { _, _ in
             PyAPI.return { AsyncTask { 42 } }
         }
         
@@ -91,11 +91,11 @@ struct AsyncTests {
         new_result = result + 3
         """)
         
-        #expect(main["new_result"] == 45)
+        #expect(main.new_result == 45)
     }
     
     @Test func asyncWithoutAwait() async {
-        main.bind("async_func() -> AsyncTask") { _, _ in
+        main.def("async_func() -> AsyncTask") { _, _ in
             PyAPI.return { AsyncTask { 42 } }
         }
         
@@ -103,14 +103,14 @@ struct AsyncTests {
         result = async_func()
         """)
         
-        #expect(AsyncTask(.main["result"]) != nil)
+        #expect(AsyncTask(main.result) != nil)
     }
     
     static var asyncTaskIterator_task: AsyncTask!
     
     @Test("AsyncTask iterator.")
     func asyncTaskIterator() async {
-        main.bind("async_func() -> AsyncTask") { _, _ in
+        main.def("async_func() -> AsyncTask") { _, _ in
             PyAPI.return {
                 AsyncTests.asyncTaskIterator_task = AsyncTask { 1 }
                 return AsyncTests.asyncTaskIterator_task
@@ -157,11 +157,11 @@ struct AsyncTests {
     
     @Test
     func chainAsyncTasks() async throws {
-        Interpreter.main.bind("chainAsyncTasks_task1() -> AsyncTask") { _,_ in
+        main.def("chainAsyncTasks_task1() -> AsyncTask") { _,_ in
             PyAPI.return { AsyncTask { 3 } }
         }
         
-        Interpreter.main.bind("chainAsyncTasks_task2() -> AsyncTask") { _,_ in
+        main.def("chainAsyncTasks_task2() -> AsyncTask") { _,_ in
             PyAPI.return { AsyncTask { 4 } }
         }
         
@@ -195,6 +195,6 @@ struct AsyncTests {
         
         await Interpreter.asyncRun("await childFailing_parent()")
         
-        #expect(Interpreter.main["childFailing_result"] == 0)
+        #expect(main.childFailing_result == 0)
     }
 }

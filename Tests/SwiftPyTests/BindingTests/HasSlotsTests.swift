@@ -24,7 +24,7 @@ struct HasSlotsTests {
     @Test
     func registersSlots() {
         let player = Player()
-        PyObject(.main)?.player = player
+        PyModule.main.player = player
         
         player[.health] = 10
         

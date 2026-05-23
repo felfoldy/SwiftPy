@@ -22,7 +22,7 @@ struct ConversionTests {
     
     @Test func floatCastFromInt() throws {
         Interpreter.run("floatCastFromInt = 3")
-        let number = try Float.cast(.main["floatCastFromInt"])
+        let number = try Float.cast(PyModule.main.floatCastFromInt)
         #expect(number == 3.0)
     }
     
@@ -37,9 +37,9 @@ struct ConversionTests {
         let array: [String] = ["Hello", "World"]
         
         Interpreter.execute("x = []")
-        array.toPython(Interpreter.main["x"])
+        PyModule.main.x = array
         
-        #expect(Interpreter.main["x"] == ["Hello", "World"])
+        #expect(PyModule.main.x == ["Hello", "World"])
     }
     
     @Test func dictionaryToPython() {
@@ -47,8 +47,8 @@ struct ConversionTests {
 
         let dictionary: [String: Any] = ["Hello": 1, "World": Int64(2)]
         
-        dictionary.toPython(.main.emplace("dictionary"))
-
+        PyModule.main.dictionary = dictionary
+        
         #expect(Interpreter.evaluate(#"dictionary["Hello"]"#) == 1)
         #expect(Interpreter.evaluate(#"dictionary["World"]"#) == 2)
     }
@@ -104,7 +104,7 @@ struct ConversionTests {
     @Test func castFloatFromInt() {
         profiler.event("ConversionTests.castFloatFromInt")
         
-        Interpreter.main.bind("will_cast(x: float) -> None") { argc, argv in
+        PyModule.main.def("will_cast(x: float) -> None") { argc, argv in
             PyBind.function(argc, argv) { (x: Double) in
                 ConversionTests.casted = x
             }

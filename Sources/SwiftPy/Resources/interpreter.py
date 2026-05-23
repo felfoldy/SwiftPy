@@ -1,5 +1,7 @@
 from rlcompleter import Completer
 
+_swift_object_cache = []
+
 def completions(text: str) -> list[str]:
     completer = Completer()
 
