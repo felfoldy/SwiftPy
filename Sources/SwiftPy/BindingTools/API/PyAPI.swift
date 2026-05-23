@@ -12,6 +12,9 @@ import SwiftUI
 @MainActor
 public let py = PyAPI()
 
+public typealias PyRef = PyAPI.Reference
+public typealias PyValue = PyAPI.Value
+
 /// Namespace for pocketpy typealias/interfaces.
 @MainActor
 public struct PyAPI {
@@ -20,6 +23,8 @@ public struct PyAPI {
 
     /// Just a type alias of an `OpaquePointer`.
     public typealias Reference = py_Ref
+
+    public typealias Value = py_TValue
 
     /// VM callbacks.
     public typealias Callbacks = py_Callbacks
@@ -74,21 +79,20 @@ public struct PyAPI {
     @inlinable
     public static func convertRetval(
         _ call: () -> Bool
-    ) throws(InterpreterError) -> PyAPI.Reference {
+    ) throws(PythonError) -> PyAPI.Reference {
         let p0 = py.peek()
         if call() {
             return py.retval
         }
 
+        let ok = py_matchexc(.BaseException)
+        precondition(ok)
         if !Interpreter.silenceErrors {
-            Interpreter.isFailed = true
-            py.printexc()
+            Interpreter.output.stderr(String(cString: py_formatexc()))
         }
         py.clearexc(p0)
-        if let failure = Interpreter.lastFailure {
-            throw .runtimeFailure(failure)
-        }
-        throw .silencedError
+
+        throw try PythonError.cast(py.retval)
     }
 
     @discardableResult
@@ -96,7 +100,7 @@ public struct PyAPI {
     public static func convertRetval(
         _ value: PyAPI.Reference?,
         _ call: (PyAPI.Reference) -> Bool
-    ) throws(InterpreterError) -> PyAPI.Reference {
+    ) throws(PythonError) -> PyAPI.Reference {
         let tmp = py.pushtmp()
         tmp.assign(value)
         defer { py.pop() }
@@ -106,34 +110,30 @@ public struct PyAPI {
     }
 
     @inlinable
-    public func repr(_ value: PyAPI.Reference?) throws(InterpreterError) -> String {
+    public func repr(_ value: PyAPI.Reference?) throws(PythonError) -> String {
         let result = try PyAPI.convertRetval(value) { tmp in
             py_repr(tmp)
         }
 
-        guard let str = String(result) else {
-            throw .runtimeFailure("Cannot convert repr to string: \(result)")
-        }
-
-        return str
+        return try String.cast(result)
     }
 
     @inlinable
-    public func getattr(_ self: PyAPI.Reference, name: String) throws(InterpreterError) -> PyAPI.Reference {
+    public func getattr(_ self: PyAPI.Reference, name: String) throws(PythonError) -> PyAPI.Reference {
         try PyAPI.convertRetval(self) { tmp in
             py_getattr(tmp, py_name(name))
         }
     }
 
     @inlinable
-    public func setattr(_ self: PyAPI.Reference, name: String, value: PyAPI.Reference?) throws(InterpreterError) {
+    public func setattr(_ self: PyAPI.Reference, name: String, value: PyAPI.Reference?) throws(PythonError) {
         try PyAPI.convertRetval(self) { tmp in
             py_setattr(tmp, py_name(name), value ?? py_None())
         }
     }
 
     @inlinable
-    public func iter(_ self: PyAPI.Reference?) throws(InterpreterError) -> PyAPI.Reference {
+    public func iter(_ self: PyAPI.Reference?) throws(PythonError) -> PyAPI.Reference {
         try PyAPI.convertRetval(self) { tmp in
             py_iter(tmp)
         }
@@ -147,14 +147,14 @@ public struct PyAPI {
     }
 
     @inlinable
-    public func compile(source: String, filename: String, mode: CompileMode) throws(InterpreterError) -> PyAPI.Reference {
+    public func compile(source: String, filename: String, mode: CompileMode) throws(PythonError) -> PyAPI.Reference {
         try PyAPI.convertRetval {
             py_compile(source, filename, mode.pyMode, false)
         }
     }
     
     @inlinable
-    public func exec(source: String, filename: String, mode: CompileMode, module: PyAPI.Reference?) throws(InterpreterError) -> PyAPI.Reference {
+    public func exec(source: String, filename: String, mode: CompileMode, module: PyAPI.Reference?) throws(PythonError) -> PyAPI.Reference {
         try PyAPI.convertRetval {
             py_exec(source, filename, mode.pyMode, module)
         }
@@ -162,7 +162,7 @@ public struct PyAPI {
 
     @discardableResult
     @inlinable
-    public func call(_ function: PyAPI.Reference, args: PythonConvertible?...) throws(InterpreterError) -> PyAPI.Reference {
+    public func call(_ function: PyAPI.Reference, args: PythonConvertible?...) throws(PythonError) -> PyAPI.Reference {
         try PyAPI.convertRetval(function) { function in
             py.push(function)
             py.pushnil()
@@ -327,7 +327,7 @@ public extension PyAPI {
         }
         
         @inlinable
-        public func setitem(_ self: PyAPI.Reference, key: PyAPI.Reference?, value: PyAPI.Reference?) throws(InterpreterError) -> PyAPI.Reference {
+        public func setitem(_ self: PyAPI.Reference, key: PyAPI.Reference?, value: PyAPI.Reference?) throws(PythonError) -> PyAPI.Reference {
             try PyAPI.convertRetval(self) { temp in
                 py_dict_setitem(self, key, value)
             }
@@ -345,6 +345,11 @@ public extension PyAPI {
         @inlinable
         public func getitem(_ self: PyAPI.Reference?, i: Int32) -> PyAPI.Reference? {
             py_tuple_getitem(self, i)
+        }
+
+        @inlinable
+        public func len(_ self: PyAPI.Reference?) -> Int32 {
+            py_tuple_len(self)
         }
     }
     
@@ -651,46 +656,54 @@ public extension PyAPI.Reference {
 
 @MainActor
 public enum PythonError: LocalizedError {
-    case SyntaxError(String)
-    case RecursionError(String)
-    case OSError(String)
-    case NotImplementedError(String)
-    case TypeError(String)
-    case IndexError(String)
-    case ValueError(String)
-    case RuntimeError(String)
-    case ZeroDivisionError(String)
-    case NameError(String)
-    case UnboundLocalError(String)
-    case AttributeError(String)
-    case ImportError(String)
-    case AssertionError(String)
-    case KeyError(String)
+    case SyntaxError(PythonConvertible)
+    case RecursionError(PythonConvertible)
+    case OSError(PythonConvertible)
+    case NotImplementedError(PythonConvertible)
+    case TypeError(PythonConvertible)
+    case IndexError(PythonConvertible)
+    case ValueError(PythonConvertible)
+    case RuntimeError(PythonConvertible)
+    case ZeroDivisionError(PythonConvertible)
+    case NameError(PythonConvertible)
+    case UnboundLocalError(PythonConvertible)
+    case AttributeError(PythonConvertible)
+    case ImportError(PythonConvertible)
+    case AssertionError(PythonConvertible)
+    case KeyError(PythonConvertible)
+    case StopIteration(PythonConvertible)
+    case BaseException(PythonConvertible)
     
     static func argCountError(_ got: Int32, expected: Int) -> PythonError {
         .TypeError("expected \(expected) arguments, got \(got)")
     }
-
-    public var description: String? {
+    
+    public var value: PythonConvertible {
         switch self {
-        case let .SyntaxError(msg): msg
-        case let .RecursionError(msg): msg
-        case let .OSError(msg): msg
-        case let .NotImplementedError(msg): msg
-        case let .TypeError(msg): msg
-        case let .IndexError(msg): msg
-        case let .ValueError(msg): msg
-        case let .RuntimeError(msg): msg
-        case let .ZeroDivisionError(msg): msg
-        case let .NameError(msg): msg
-        case let .UnboundLocalError(msg): msg
-        case let .AttributeError(msg): msg
-        case let .ImportError(msg): msg
-        case let .AssertionError(msg): msg
-        case let .KeyError(msg): msg
+        case let .SyntaxError(value): value
+        case let .RecursionError(value): value
+        case let .OSError(value): value
+        case let .NotImplementedError(value): value
+        case let .TypeError(value): value
+        case let .IndexError(value): value
+        case let .ValueError(value): value
+        case let .RuntimeError(value): value
+        case let .ZeroDivisionError(value): value
+        case let .NameError(value): value
+        case let .UnboundLocalError(value): value
+        case let .AttributeError(value): value
+        case let .ImportError(value): value
+        case let .AssertionError(value): value
+        case let .KeyError(value): value
+        case let .StopIteration(value): value
+        case let .BaseException(value): value
         }
     }
-    
+
+    public var description: String? {
+        String(describing: value)
+    }
+
     @MainActor
     @inlinable
     public var type: PyType {
@@ -710,6 +723,61 @@ public enum PythonError: LocalizedError {
         case .ImportError: .ImportError
         case .AssertionError: .AssertionError
         case .KeyError: .KeyError
+        case .StopIteration: .StopIteration
+        case .BaseException: .BaseException
+        }
+    }
+
+    public static let pyType = PyType.BaseException
+}
+
+extension PythonError: PythonConvertible {
+    public func toPython(_ reference: PyAPI.Reference) {
+        let error: PyAPI.Reference = try! PyObject(type)(description)
+        reference.assign(error)
+    }
+    
+    public static func fromPython(_ reference: PyAPI.Reference) -> PythonError {
+        let type = py.typeof(reference)
+        let args = Interpreter.silenceErrors {
+            try py.getattr(reference, name: "args")
+        }
+
+        var ref: PyAPI.Reference? = py_None()
+        if let args, py.tuple.len(args) > 0 {
+            ref = py.tuple.getitem(args, i: 0)
+        }
+
+        let value: PythonConvertible = if let str = String(ref) {
+            str
+        } else {
+            ref
+        }
+
+        return switch type {
+        case .SyntaxError: .SyntaxError(value)
+
+        case .OSError: .OSError(value)
+
+        case .NotImplementedError: .NotImplementedError(value)
+        case .RecursionError: .RecursionError(value)
+        case .RuntimeError: .RuntimeError(value)
+
+        case .TypeError: .TypeError(value)
+        case .IndexError: .IndexError(value)
+        case .ValueError: .ValueError(value)
+        case .ZeroDivisionError: .ZeroDivisionError(value)
+
+        case .UnboundLocalError: .UnboundLocalError(value)
+        case .NameError: .NameError(value)
+
+        case .AttributeError: .AttributeError(value)
+        case .ImportError: .ImportError(value)
+        case .AssertionError: .AssertionError(value)
+        case .KeyError: .KeyError(value)
+
+        case .StopIteration: .StopIteration(value)
+        default: .BaseException(value)
         }
     }
 }
