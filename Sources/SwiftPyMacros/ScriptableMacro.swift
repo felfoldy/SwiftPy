@@ -11,9 +11,15 @@ import SwiftSyntaxBuilder
 import Foundation
 
 public struct ScriptableMacro: MemberMacro {
-    public static func expansion(of node: AttributeSyntax, providingMembersOf declaration: some DeclGroupSyntax, conformingTo protocols: [TypeSyntax], in context: some MacroExpansionContext) throws -> [DeclSyntax] {
+    public static func expansion(
+        of node: AttributeSyntax,
+        providingMembersOf declaration: some DeclGroupSyntax,
+        conformingTo protocols: [TypeSyntax],
+        in context: some MacroExpansionContext
+    ) throws -> [DeclSyntax] {
         let classDecl = declaration.as(ClassDeclSyntax.self)
-        let visibility = classDecl?.modifiers.map(\.name.text).map { $0 + " " }.first { $0.contains("public") } ?? ""
+        let visibility = classDecl?.modifiers.publicVisibility ?? ""
+
         return [
             // Add cache.
             "\(raw: visibility)var _pythonCache = PythonBindingCache()",
@@ -32,32 +38,29 @@ extension ScriptableMacro: ExtensionMacro {
         guard let classDecl = declaration.as(ClassDeclSyntax.self) else {
             throw MacroExpansionErrorMessage("'@Scriptable' can only be applied to a 'class'")
         }
-        
-        let confirmance: String = {
-            let hasConfirmance = classDecl.inheritanceClause?.inheritedTypes
-                .compactMap { $0.type.as(IdentifierTypeSyntax.self) }
-                .map(\.name.text)
-                .contains("PythonBindable") ?? false
-            
-            if hasConfirmance {
-                return ""
-            }
-            
-            return ": PythonBindable"
-        }()
-        
+
+        let conformance = classDecl.inherits(from: "PythonBindable")
+            ? ""
+            : ": PythonBindable"
+
         let className = classDecl.name.text
         let members = declaration.memberBlock.members.map(\.decl)
-        
-        var classMeta = node.classDefinitions(className: className)
-        classMeta.visibility = classDecl.modifiers.map(\.name.text).map { $0 + " " }.first { $0.contains("public") } ?? ""
 
-        initDeclarationVisitor(members: members, metadata: &classMeta)
-        variableDeclarationVisitor(members: members, metadata: &classMeta, context: context)
-        functionDeclarationVisitor(members: members, metadata: &classMeta, context: context)
-        
+        var classMeta = node.classDefinitions(className: className)
+        classMeta.visibility = classDecl.modifiers.publicVisibility
+
+        let extractors: [MemberExtractor] = [
+            InitializerExtractor(),
+            VariableExtractor(context: context),
+            FunctionExtractor(context: context)
+        ]
+
+        for extractor in extractors {
+            extractor.extract(from: members, metadata: &classMeta)
+        }
+
         return try [
-            ExtensionDeclSyntax("extension \(raw: className)\(raw: confirmance)") {
+            ExtensionDeclSyntax("extension \(raw: className)\(raw: conformance)") {
             """
             @MainActor \(raw: classMeta.visibility)static let pyType: PyType = .make(\(raw: classMeta.typeMakeArgs)) { type in
             \(raw: classMeta.bindings.joined(separator: "\n"))
@@ -72,21 +75,23 @@ extension ScriptableMacro: ExtensionMacro {
     }
 }
 
+// MARK: - Metadata
+
 struct ClassMetadata {
     var convertsToSnakeCase: Bool = true
-    
+
     var visibility: String = ""
     var className: String
     var name: String
     var base: String
     var classDoc: String?
-    
+
     var bindings: [String] = []
-    
+
     var initSyntax: [String] = []
     var variableSyntax: [String] = []
     var functionSyntax: [String] = []
-    
+
     var variableDocs: [String] = []
 
     var typeMakeArgs: String {
@@ -97,9 +102,11 @@ struct ClassMetadata {
         if base == ".object" {
             return "class \(name):"
         }
+
         if base.starts(with: ".") {
             return "class \(name)(\(base.dropFirst())):"
         }
+
         return "class \(name)(\(base)):"
     }
 }
@@ -107,149 +114,182 @@ struct ClassMetadata {
 extension AttributeSyntax {
     func classDefinitions(className: String) -> ClassMetadata {
         let docstring = description.docstring
-        
+
         guard let arguments = arguments?.as(LabeledExprListSyntax.self) else {
-            return ClassMetadata(className: className, name: className, base: ".object", classDoc: docstring)
+            return ClassMetadata(
+                className: className,
+                name: className,
+                base: ".object",
+                classDoc: docstring
+            )
         }
-        
+
         var name = className
         var base = ".object"
         var convertsToSnakeCase = true
-        
+
         for argument in arguments {
             if let clsName = argument.expression.as(StringLiteralExprSyntax.self)?.segments.description {
                 name = clsName
             }
-            
+
             if argument.label?.text == "base" {
                 base = argument.expression.description
             }
-            
+
             if argument.label?.text == "convertsToSnakeCase" {
                 convertsToSnakeCase = argument.expression.description != "false"
             }
         }
-        
-        return ClassMetadata(convertsToSnakeCase: convertsToSnakeCase, className: className, name: name, base: base, classDoc: docstring)
-    }
-}
 
-// MARK: - init extraction
-
-func initDeclarationVisitor(members: [DeclSyntax], metadata: inout ClassMetadata) {
-    guard let initMembers = InitializerDeclSyntax.from(members) else {
-        return
-    }
-    
-    var bindingSyntax: [String] = []
-    
-    for initMember in initMembers {
-        let paramters = initMember.signature.parameterClause.parameters
-        
-        let names = paramters
-            .map { $0.firstName.text + ":" }
-            .joined()
-        
-        bindingSyntax.append(
-            "\(metadata.className).init(\(names))"
-                .replacingOccurrences(of: "()", with: "")
+        return ClassMetadata(
+            convertsToSnakeCase: convertsToSnakeCase,
+            className: className,
+            name: name,
+            base: base,
+            classDoc: docstring
         )
-
-        let argsSyntax = paramters.map { parameter in
-            let name = parameter.secondName ?? parameter.firstName
-            let type = parameter.type.description.pyType
-            return ", \(name): \(type)"
-        }.joined()
-
-        metadata.initSyntax.append("@overload")
-        let initSyntax = "def __init__(self\(argsSyntax)) -> None:"
-        if let docstring = initMember.description.docstring {
-            metadata.initSyntax.append(initSyntax)
-            metadata.initSyntax.append(.tab + docstring.inPythonTrippleQuotes)
-            metadata.initSyntax.append("")
-        } else {
-            metadata.initSyntax.append(initSyntax + " ...")
-        }
     }
-    
-    let bindings = bindingSyntax.map {
-        "__init__(argc, argv, \($0)) ||"
-    }
-    .joined(separator: "\n")
-    
-    metadata.bindings.append(
-    """
-    type.magic("__init__") { argc, argv in
-    \(bindings)
-    PyAPI.throw(.TypeError, "Invalid arguments")
-    }
-    """
-    )
 }
 
-// MARK: - Property
+// MARK: - Member Extractors
 
-func variableDeclarationVisitor(
-    members: [DeclSyntax],
-    metadata: inout ClassMetadata,
-    context: some MacroExpansionContext
-) {
-    guard let propertyMembers = VariableDeclSyntax.from(members) else {
-        return
+protocol MemberExtractor {
+    func extract(from members: [DeclSyntax], metadata: inout ClassMetadata)
+}
+
+struct InitializerExtractor: MemberExtractor {
+    func extract(from members: [DeclSyntax], metadata: inout ClassMetadata) {
+        let initializers = members
+            .compactMap { $0.as(InitializerDeclSyntax.self) }
+            .filter(\.modifiers.isVisibleForPython)
+
+        guard !initializers.isEmpty else {
+            return
+        }
+
+        var bindingSyntax: [String] = []
+
+        for initializer in initializers {
+            let parameters = initializer.signature.parameterClause.parameters
+
+            let names = parameters
+                .map { $0.firstName.text + ":" }
+                .joined()
+
+            bindingSyntax.append(
+                "\(metadata.className).init(\(names))"
+                    .replacingOccurrences(of: "()", with: "")
+            )
+
+            let argsSyntax = parameters.map { parameter in
+                let name = parameter.secondName ?? parameter.firstName
+                let type = parameter.type.description.pyType
+                return ", \(name): \(type)"
+            }
+            .joined()
+
+            metadata.initSyntax.append("@overload")
+
+            let initSyntax = "def __init__(self\(argsSyntax)) -> None:"
+
+            if let docstring = initializer.description.docstring {
+                metadata.initSyntax.append(initSyntax)
+                metadata.initSyntax.append(.tab + docstring.inPythonTrippleQuotes)
+                metadata.initSyntax.append("")
+            } else {
+                metadata.initSyntax.append(initSyntax + " ...")
+            }
+        }
+
+        let bindings = bindingSyntax.map {
+            "__init__(argc, argv, \($0)) ||"
+        }
+        .joined(separator: "\n")
+
+        metadata.bindings.append(
+        """
+        type.magic("__init__") { argc, argv in
+        \(bindings)
+        PyAPI.throw(.TypeError, "Invalid arguments")
+        }
+        """
+        )
     }
-    
-    for member in propertyMembers {
-        // var or let
-        let specifier = member.bindingSpecifier.text
+}
 
-        guard let binding = member.bindings.first else {
-            context.warning(member, "Unable to read binding")
-            continue
+struct VariableExtractor: MemberExtractor {
+    let context: any MacroExpansionContext
+
+    func extract(from members: [DeclSyntax], metadata: inout ClassMetadata) {
+        let variables = members
+            .compactMap { $0.as(VariableDeclSyntax.self) }
+            .filter(\.modifiers.isVisibleForPython)
+
+        for variable in variables {
+            extract(variable, metadata: &metadata)
         }
-        
-        guard let pattern = binding.pattern.as(IdentifierPatternSyntax.self)
-        else {
-            context.warning(member, "Unable to read pattern")
-            continue
+    }
+
+    private func extract(
+        _ variable: VariableDeclSyntax,
+        metadata: inout ClassMetadata
+    ) {
+        let specifier = variable.bindingSpecifier.text
+
+        guard let binding = variable.bindings.first else {
+            context.warning(variable, "Unable to read binding")
+            return
         }
-        
+
+        guard let pattern = binding.pattern.as(IdentifierPatternSyntax.self) else {
+            context.warning(variable, "Unable to read pattern")
+            return
+        }
+
         let identifier = pattern.identifier.text
-        
-        // Just ignore view of ViewRepresentable.
-        if identifier == "view" { continue }
-        
-        if let docstring = member.description.docstring {
-            metadata.variableDocs.append("\(metadata.identifier(identifier)): \(docstring)")
+
+        // Ignore ViewRepresentable.view.
+        if identifier == "view" {
+            return
+        }
+
+        let pythonIdentifier = metadata.identifier(identifier)
+
+        if let docstring = variable.description.docstring {
+            metadata.variableDocs.append("\(pythonIdentifier): \(docstring)")
         }
 
         if let annotation = binding.typeAnnotation?.type.description {
-            metadata.variableSyntax.append("\(metadata.identifier(identifier)): \(annotation.pyType)")
+            metadata.variableSyntax.append("\(pythonIdentifier): \(annotation.pyType)")
         }
 
         // Bind static property.
-        if member.modifiers.first?.name.text == "static" {
+        if variable.modifiers.isStatic {
             metadata.bindings.append(
-                "PyObject(type).\(metadata.identifier(identifier)) = \(identifier)"
+                "PyObject(type).\(pythonIdentifier) = \(identifier)"
             )
-            continue
+            return
         }
 
         let setter: String = {
-            if specifier != "var" { return "nil" }
-            
+            if specifier != "var" {
+                return "nil"
+            }
+
             // { computed }
             if let accessors = binding.accessorBlock?.accessors,
                accessors.is(CodeBlockItemListSyntax.self) {
                 return "nil"
             }
-            
+
             return "{ _bind_setter(\\.\(identifier), $1) }"
         }()
-        
+
         metadata.bindings.append(
         """
         type.property(
-            "\(metadata.identifier(identifier))",
+            "\(pythonIdentifier)",
             getter: { _bind_getter(\\.\(identifier), $1) },
             setter: \(setter)
         )
@@ -258,52 +298,44 @@ func variableDeclarationVisitor(
     }
 }
 
-func functionDeclarationVisitor(
-    members: [DeclSyntax],
-    metadata: inout ClassMetadata,
-    context: some MacroExpansionContext
-) {
-    guard let functionMembers = FunctionDeclSyntax.from(members) else {
-        return
-    }
-    
-    for function in functionMembers {
-        let identifier = function.name.text
-        
-        let isStatic = function.modifiers
-            .map(\.name.text)
-            .contains("static")
-        
-        let signature = function.signature
-        
-        let paramsString: String = {
-            var parameters: [String] = isStatic ? [] : ["self"]
-            
-            parameters += signature.parameterClause.parameters
-                .map { param in
-                    let name = param.secondName ?? param.firstName
-                    let type = param.type.description.pyType
-                    let defaultExpression = param.defaultValue?.description.pyLiteralExpression ?? ""
-                    return "\(name): \(type)\(defaultExpression)"
-                }
-            
-            return parameters.joined(separator: ", ")
-        }()
+struct FunctionExtractor: MemberExtractor {
+    let context: any MacroExpansionContext
 
-        let returnType: String = {
-            if let returnType = signature.returnClause?.type {
-                return returnType.description.pyType
-            }
-            return "None"
-        }()
-        
-        let pySignature = "\(metadata.identifier(identifier))(\(paramsString)) -> \(returnType)"
-        
+    func extract(from members: [DeclSyntax], metadata: inout ClassMetadata) {
+        let functions = members
+            .compactMap { $0.as(FunctionDeclSyntax.self) }
+            .filter(\.modifiers.isVisibleForPython)
+
+        for function in functions {
+            extract(function, metadata: &metadata)
+        }
+    }
+
+    private func extract(
+        _ function: FunctionDeclSyntax,
+        metadata: inout ClassMetadata
+    ) {
+        let identifier = function.name.text
+        let isStatic = function.modifiers.isStatic
+        let signature = function.signature
+
+        let paramsString = makeParameterList(
+            from: signature,
+            isStatic: isStatic
+        )
+
+        let returnType = signature.returnClause?.type.description.pyType ?? "None"
+        let pythonIdentifier = metadata.identifier(identifier)
+        let pySignature = "\(pythonIdentifier)(\(paramsString)) -> \(returnType)"
+
         if isStatic {
             metadata.functionSyntax.append("@staticmethod")
         }
+
         let isAsync = signature.effectSpecifiers?.asyncSpecifier != nil
-        let functionSyntax = isAsync ? "async def \(pySignature):" : "def \(pySignature):"
+        let functionSyntax = isAsync
+            ? "async def \(pySignature):"
+            : "def \(pySignature):"
 
         if let docstring = function.description.docstring {
             metadata.functionSyntax.append(functionSyntax)
@@ -312,7 +344,7 @@ func functionDeclarationVisitor(
         } else {
             metadata.functionSyntax.append(functionSyntax + " ...")
         }
-        
+
         if isStatic {
             metadata.bindings.append(
             """
@@ -331,130 +363,181 @@ func functionDeclarationVisitor(
             )
         }
     }
+
+    private func makeParameterList(
+        from signature: FunctionSignatureSyntax,
+        isStatic: Bool
+    ) -> String {
+        var parameters: [String] = isStatic ? [] : ["self"]
+
+        parameters += signature.parameterClause.parameters.map { parameter in
+            let name = parameter.secondName ?? parameter.firstName
+            let type = parameter.type.description.pyType
+            let defaultExpression = parameter.defaultValue?.description.pyLiteralExpression ?? ""
+
+            return "\(name): \(type)\(defaultExpression)"
+        }
+
+        return parameters.joined(separator: ", ")
+    }
 }
 
+// MARK: - Interface
+
 func buildInterface(_ metadata: ClassMetadata) -> String {
-    var rows = ["#\"\"\"",
-                metadata.interfaceHeader]
-    
+    var rows = [
+        "#\"\"\"",
+        metadata.interfaceHeader
+    ]
+
     if let classDoc = metadata.classDoc {
         var docRows = [classDoc]
-        
+
         if !metadata.variableDocs.isEmpty {
             docRows.append("")
             docRows.append(.tab + "Attributes:")
-            
+
             for variableDoc in metadata.variableDocs {
                 docRows.append(.tab + .tab + variableDoc)
             }
         }
-        
-        let docstring = .tab + docRows.joined(separator: "\n")
+
+        let docstring = .tab + docRows
+            .joined(separator: "\n")
             .inPythonTrippleQuotes
+
         rows.append(docstring)
         rows.append("")
     }
-    
-    // Variables.
+
     if !metadata.variableSyntax.isEmpty {
         for variableSyntax in metadata.variableSyntax {
             rows.append(.tab + variableSyntax)
         }
+
         rows.append("")
     }
 
-    // Inits.
     if !metadata.initSyntax.isEmpty {
         for initSyntax in metadata.initSyntax {
             rows.append(.tab + initSyntax)
         }
+
         rows.append("")
     }
-    
+
     if !metadata.functionSyntax.isEmpty {
-        for funcSyntax in metadata.functionSyntax {
-            rows.append(.tab + funcSyntax)
+        for functionSyntax in metadata.functionSyntax {
+            rows.append(.tab + functionSyntax)
         }
+
         rows.append("")
     }
 
     if rows.count == 2 {
         rows.append(.tab + "...")
     }
-    
+
     let content = rows.joined(separator: "\n").trim
     return content + "\n\"\"\"#"
 }
 
-protocol Mappable: DeclSyntaxProtocol {
-    var modifiers: DeclModifierListSyntax { get }
-}
-
-extension Mappable {
-    static func from(_ members: [DeclSyntax]) -> [Self]? {
-        let members = members
-            .compactMap { $0.as(Self.self) }
-            .filter(\.modifiers.isNotInternal)
-        if members.isEmpty { return nil }
-        return members
-    }
-}
-
-extension InitializerDeclSyntax: Mappable {}
-extension VariableDeclSyntax: Mappable {}
-extension FunctionDeclSyntax: Mappable {}
-
-// MARK: - Extensions
+// MARK: - ClassMetadata Helpers
 
 extension ClassMetadata {
     func identifier(_ attribute: String) -> String {
-        guard convertsToSnakeCase else { return attribute }
-        // converts to snakeCase
+        guard convertsToSnakeCase else {
+            return attribute
+        }
+
+        // Converts to snake_case.
         var text = attribute
         var result = [String(text.removeFirst().lowercased())]
+
         for character in text {
             if character.isUppercase {
                 result.append("_")
             }
+
             result.append(character.lowercased())
         }
+
         return result.joined()
     }
 }
+
+// MARK: - Syntax Helpers
+
+extension ClassDeclSyntax {
+    func inherits(from typeName: String) -> Bool {
+        inheritanceClause?.inheritedTypes
+            .compactMap { $0.type.as(IdentifierTypeSyntax.self) }
+            .map(\.name.text)
+            .contains(typeName) ?? false
+    }
+}
+
+extension DeclModifierListSyntax {
+    var isVisibleForPython: Bool {
+        !contains {
+            $0.name.text == "internal" || $0.name.text == "private"
+        }
+    }
+
+    var isStatic: Bool {
+        contains {
+            $0.name.text == "static"
+        }
+    }
+
+    var publicVisibility: String {
+        map(\.name.text)
+            .map { $0 + " " }
+            .first { $0.contains("public") } ?? ""
+    }
+}
+
+// MARK: - String Helpers
 
 extension String {
     var trim: String {
         trimmingCharacters(in: .whitespacesAndNewlines)
     }
-    
+
     var pyType: String {
         let trimmed = trim
-        
+
         if trimmed.hasPrefix("[") && trimmed.hasSuffix("]") {
             let withoutBrackets = String(trimmed.dropFirst().dropLast())
+
             if withoutBrackets.contains(":") {
                 let components = withoutBrackets.components(separatedBy: ":")
                 let part1 = components[0].trim.pyType
                 let part2 = components[1].trim.pyType
                 return "dict[\(part1), \(part2)]"
             }
-            
+
             return "list[\(withoutBrackets.pyType)]"
         }
-        
+
         if trimmed.hasSuffix("?") {
             return String(trimmed.dropLast()).pyType + " | None"
         }
-        
+
         return switch trimmed {
-        case "Int": "int"
-        case "Double", "Float": "float"
-        case "String": "str"
-        case "Bool": "bool"
-        default: trimmed
+        case "Int":
+            "int"
+        case "Double", "Float":
+            "float"
+        case "String":
+            "str"
+        case "Bool":
+            "bool"
+        default:
+            trimmed
         }
     }
-    
+
     /// From "= nil" to " = None"
     var pyLiteralExpression: String {
         " " + trim
@@ -463,41 +546,48 @@ extension String {
             .replacingOccurrences(of: "true", with: "True")
             .replacingOccurrences(of: "false", with: "False")
     }
-    
+
     var docstring: String? {
         var doclines: [String] = []
+
         for var line in trim.components(separatedBy: .newlines) {
-            if line.isEmpty { continue }
+            if line.isEmpty {
+                continue
+            }
 
             line = line.trim
+
             guard line.hasPrefix("///") else {
-                if doclines.isEmpty { return nil }
+                if doclines.isEmpty {
+                    return nil
+                }
+
                 return doclines.joined(separator: "\n")
             }
+
             doclines.append(String(line.dropFirst(3)).trim)
         }
-        if doclines.isEmpty { return nil }
+
+        if doclines.isEmpty {
+            return nil
+        }
+
         return doclines.joined(separator: "\n")
     }
-    
+
     var inPythonTrippleQuotes: String {
         if components(separatedBy: .newlines).count > 1 {
             return .trippleQuotes + self + "\n" + .tab + .trippleQuotes
         }
+
         return .trippleQuotes + self + .trippleQuotes
     }
-    
+
     static let tab = "    "
     static let trippleQuotes = "\"\"\""
 }
 
-extension DeclModifierListSyntax {
-    var isNotInternal: Bool {
-        !map(\.name.text).contains {
-            $0 == "internal" || $0 == "private"
-        }
-    }
-}
+// MARK: - Diagnostics
 
 extension MacroExpansionContext {
     func warning(_ node: any SyntaxProtocol, _ message: String) {
