@@ -44,14 +44,15 @@ public class PyObject {
     let cacheID: Int32?
 
     @inlinable
-    public init?(_ reference: PyAPI.Reference?) {
+    public init?(borrowing reference: PyAPI.Reference?) {
         guard let reference else { return nil }
         self.reference = reference
         cacheID = nil
     }
     
     @inlinable
-    public init(owning borrowed: PyRef) {
+    public init?(_ borrowed: PyRef?) {
+        guard let borrowed else { return nil }
         reference = .allocate(capacity: 1)
         reference.initialize(to: borrowed.pointee)
         self.cacheID = Interpreter.cache.add(borrowed)
@@ -143,14 +144,14 @@ public class TempPyObject: PyObject {
         guard let reference else { return nil }
         let temp = py.pushtmp()
         temp.assign(reference)
-        super.init(temp)
+        super.init(borrowing: temp)
     }
     
     @inlinable
     public init?<Value: PythonConvertible>(_ value: Value) {
         let temp = py.pushtmp()
         value.toPython(temp)
-        super.init(temp)
+        super.init(borrowing: temp)
     }
 
     @MainActor deinit { py.pop() }
@@ -159,16 +160,16 @@ public class TempPyObject: PyObject {
 public class PyModule: PyObject {
     public init?(_ name: String) {
         let module = Interpreter.shared.module(name)
-        super.init(module)
+        super.init(borrowing: module)
     }
     
     public override init?(_ reference: PyAPI.Reference?) {
-        super.init(reference)
+        super.init(borrowing: reference)
     }
     
     public override subscript(dynamicMember dynamicMember: String) -> PyObject? {
         get {
-            PyObject(reference[dynamicMember])
+            PyObject(borrowing: reference[dynamicMember])
         }
         set {
             super[dynamicMember: dynamicMember] = newValue
