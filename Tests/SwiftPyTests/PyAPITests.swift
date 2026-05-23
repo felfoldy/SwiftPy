@@ -50,7 +50,7 @@ struct PyAPITests {
             raise ValueError('incorrect')
         """)
         
-        #expect(throws: PythonError.self) {
+        #expect(throws: InterpreterError.self) {
             try PyModule.main.referenceCallThrows?()
         }
     }

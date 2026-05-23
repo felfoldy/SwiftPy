@@ -70,6 +70,7 @@ public struct PyAPI {
         py_setdict(self, py_name(name), value ?? py_None())
     }
 
+    @discardableResult
     @inlinable
     public static func convertRetval(
         _ call: () -> Bool
@@ -78,6 +79,7 @@ public struct PyAPI {
         if call() {
             return py.retval
         }
+
         if !Interpreter.silenceErrors {
             Interpreter.isFailed = true
             py.printexc()
@@ -158,10 +160,23 @@ public struct PyAPI {
         }
     }
 
-    // Call a callable object via pocketpy’s calling convention. You need to prepare the stack using the following format: callable, self/nil, arg1, arg2, ..., k1, v1, k2, v2, .... argc is the number of positional arguments excluding self. kwargc is the number of keyword arguments. The result will be set to py.returnValue. The stack size will be reduced by 2 + argc + kwargc * 2
+    @discardableResult
     @inlinable
-    public func vectorcall(argc: UInt16, kwargc: UInt16) -> Bool {
-        py_vectorcall(argc, kwargc)
+    public func call(_ function: PyAPI.Reference, args: PythonConvertible?...) throws(InterpreterError) -> PyAPI.Reference {
+        try PyAPI.convertRetval(function) { function in
+            py.push(function)
+            py.pushnil()
+
+            for arg in args {
+                if let arg {
+                    arg.toPython(py.pushtmp())
+                } else {
+                    py.pushnone()
+                }
+            }
+
+            return py_vectorcall(UInt16(args.count), 0)
+        }
     }
 
     @inlinable
@@ -521,59 +536,11 @@ public extension PyAPI.Reference {
     @inlinable var isNone: Bool {
         py_istype(self, PyType.None)
     }
-    
-    /// Calls the functon with the given arguments and returns the result.
-    ///
-    /// - Parameters:
-    ///   - self: Optional self parameter.
-    ///   - args: Array of arguments.
-    /// - Returns: Return value of the function.
-    @inlinable @discardableResult
-    func call(self obj: PyAPI.Reference? = nil, _ args: [PyAPI.Reference?] = []) throws -> PyAPI.Reference? {
-        guard py.callable(self) else {
-            throw PythonError.AssertionError("Object is not callable")
-        }
-        
-        try Interpreter.printErrors {
-            py.push(self)
-
-            if let obj {
-                py.pushtmp().assign(obj)
-            } else {
-                py.pushnil()
-            }
-
-            var argc: UInt16 = 0
-            for arg in args {
-                if let arg {
-                    py.pushtmp().assign(arg)
-                } else {
-                    py.pushnone()
-                }
-                argc += 1
-            }
-            return py.vectorcall(argc: argc, kwargc: 0)
-        }
-
-        return py.retval
-    }
 
     /// Copies the given value into the reference memory.
     @inlinable func assign(_ newValue: PyAPI.Reference?) {
         guard let newValue else { return }
         pointee = newValue.pointee
-    }
-    
-    @inlinable
-    func attribute(_ name: String) throws -> PyAPI.Reference? {
-        try py.getattr(self, name: name)
-    }
-    
-    @inlinable
-    func attributeOrNil(_ name: String) -> PyAPI.Reference? {
-        Interpreter.silenceErrors = true
-        defer { Interpreter.silenceErrors = false}
-        return try? py.getattr(self, name: name)
     }
     
     /// Returns a `ViewRepresentation` if the bounded object implements `ViewRepresentable`.
@@ -682,6 +649,7 @@ public extension PyAPI.Reference {
     }
 }
 
+@MainActor
 public enum PythonError: LocalizedError {
     case SyntaxError(String)
     case RecursionError(String)

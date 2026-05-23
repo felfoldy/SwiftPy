@@ -137,18 +137,6 @@ public final class Interpreter {
     }
     
     @inlinable
-    static func printErrors(_ call: () -> Bool) throws {
-        let p0 = py.peek()
-        if call() { return }
-        Interpreter.isFailed = true
-        py.printexc()
-        py.clearexc(p0)
-        if let lastFailure {
-            throw PythonError.RuntimeError(lastFailure)
-        }
-    }
-    
-    @inlinable
     static func ignoreErrors(_ call: () -> Bool) -> Bool {
         let p0 = py.peek()
         if call() { return true }
@@ -178,6 +166,13 @@ public extension Interpreter {
     /// - Parameter code: Code to execute.
     static func execute(_ code: String, filename: String = "<string>", mode: CompileMode = .execution) {
         try? shared.execute(code, filename: filename, mode: mode)
+    }
+    
+    @discardableResult
+    static func silenceErrors<Result>(block: () throws -> Result) -> Result? {
+        silenceErrors = true
+        defer { silenceErrors = false }
+        return try? block()
     }
 
     /// Runs a code in execution mode.
@@ -213,11 +208,7 @@ public extension Interpreter {
     /// - Parameter text: Text to complete.
     /// - Returns: An array of string completions.
     static func complete(_ text: String) -> [String] {
-        let module = Interpreter.shared.module("interpreter")
-        let completions = module?["completions"]
-        let textStack = text.retained
-        
-        let result = try? completions?.call([textStack.reference])
-        return [String](result) ?? []
+        let result: [String]? = try? PyModule("interpreter")?.completions?(text)
+        return result ?? []
     }
 }

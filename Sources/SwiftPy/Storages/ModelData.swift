@@ -114,8 +114,8 @@ class ModelContainer: PythonBindable {
     
     func insert(model: object) throws {
         // TODO: Update metadata if needed.
-        let dataRef = try model.attribute("_data")?.retained
-        guard let modelData = ModelData(dataRef?.reference),
+        let data: PyAPI.Reference? = PyObject(model)?._data
+        guard let modelData = ModelData(data),
               let keys = modelData.keys,
               let name = keys.first(where: { $0.key == "__name__" })?.value else {
             throw PythonError.ValueError("Invalid model data")
@@ -129,22 +129,19 @@ class ModelContainer: PythonBindable {
     
     func fetch(_ type: object) throws -> object? {
         let typeName = py.totype(type).name
-        let modelsRef = try context.fetch(.models(name: typeName)).retained
-        guard let makeModels = try type.attribute("_makemodels") else {
-            throw PythonError.ValueError("Type does not support fetching models")
-        }
-        return try makeModels.call([modelsRef.reference])
+        let models = try context.fetch(.models(name: typeName))
+        return try PyObject(type)?._makemodels?(models)
     }
 
     func delete(model: object) throws {
-        let dataRef = try model.attribute("_data")?.retained
-        guard let modelData = ModelData(dataRef?.reference) else {
+        let data: PyAPI.Reference? = PyObject(model)?._data
+        guard let modelData = ModelData(data) else {
             throw PythonError.ValueError("Invalid model data")
         }
         context.delete(modelData)
         
         // Recreate the underlying model data for the object so it can be inserted again.
-        try model.attribute("_makedata")?.call()
+        try PyObject(model)?._makedata?()
     }
     
     static func inMemory(inMemory: Bool) {

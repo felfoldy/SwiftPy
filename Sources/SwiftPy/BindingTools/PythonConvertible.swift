@@ -257,9 +257,9 @@ extension Dictionary: PythonConvertible where Key: PythonConvertible {
         var dict = [Key: Value]()
         
         do {
-            let items = try reference.attribute("items")?.call()?.retained
-            
-            try items?.iterate { item in
+            let items: PyAPI.Reference? = try PyObject(reference)?.items?()
+
+            try items?.retained.iterate { item in
                 let keyRef = py.tuple.getitem(item.reference, i: 0)
                 guard let key = Key(keyRef) else {
                     throw ConversionError.key

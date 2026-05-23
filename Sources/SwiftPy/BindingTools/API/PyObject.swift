@@ -26,7 +26,10 @@ public class PyObject {
     /// Lookup for the attribute of the python object.
     public subscript(dynamicMember dynamicMember: String) -> PyObject? {
         get {
-            let member = reference.attributeOrNil(dynamicMember)
+            let member = Interpreter.silenceErrors {
+                try py.getattr(reference, name: dynamicMember)
+            }
+            
             if member?.isNone == true {
                 return nil
             }
@@ -76,37 +79,13 @@ public class PyObject {
     }
     
     public func callAsFunction(_ args: PythonConvertible?...) throws {
-        try call(args)
+        try py.call(reference, args: args)
     }
     
     @discardableResult
     public func callAsFunction<Value: PythonConvertible>(_ args: PythonConvertible?...) throws -> Value {
-        try call(args)
-        return try Value.cast(py.retval)
-    }
-    
-    private func call(_ args: [PythonConvertible?]) throws {
-        if !py.callable(reference) {
-            throw PythonError.AssertionError("Object is not callable")
-        }
-
-        try Interpreter.printErrors {
-            py.push(reference)
-            
-            py.pushnil() // Self object.
-            
-            var argc: UInt16 = 0
-            for arg in args {
-                if let arg {
-                    arg.toPython(py.pushtmp())
-                } else {
-                    py.pushnone()
-                }
-                argc += 1
-            }
-
-            return py.vectorcall(argc: argc, kwargc: 0)
-        }
+        let result = try py.call(reference, args: args)
+        return try Value.cast(result)
     }
 }
 

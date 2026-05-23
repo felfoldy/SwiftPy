@@ -24,6 +24,7 @@ public extension PyType {
     static let generator = PyType(tp_generator.rawValue)
     
     // Errors:
+    static let BaseException = PyType(tp_BaseException.rawValue)
     static let SyntaxError = PyType(tp_SyntaxError.rawValue)
     static let RecursionError = PyType(tp_RecursionError.rawValue)
     static let OSError = PyType(tp_OSError.rawValue)
@@ -81,20 +82,15 @@ public extension PyType {
     @inlinable
     func staticmethod(_ signature: String, _ docstring: String? = nil, function: PyAPI.CFunction) {
         // Create a function.
-        let funcionRef = PyAPI.Reference.allocate(capacity: 1)
-        funcionRef.initialize(to: py_TValue())
-        let name = py.newfunction(funcionRef, signature: signature, docstring: docstring, function: function)
+        let ref = PyAPI.Reference.allocate(capacity: 1)
+        ref.initialize(to: py_TValue())
+        let name = py.newfunction(ref, signature: signature, docstring: docstring, function: function)
 
-        // Create staticmethod.
-        py.push(py.tpobject(.staticmethod))
-        py.pushnil()
-        py.push(funcionRef)
-
-        let ok = py.vectorcall(argc: 1, kwargc: 0)
-        precondition(ok)
+        // Create staticmethod
+        let staticmethod: PyAPI.Reference = try! PyObject(.staticmethod)(ref)
 
         // Sets staticmethod to type.
-        py_setdict(py.tpobject(self), name, py.retval)
+        py_setdict(py.tpobject(self), name, staticmethod)
     }
 
     @inlinable

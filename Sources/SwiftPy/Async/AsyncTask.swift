@@ -107,7 +107,10 @@ public class AsyncTask: ViewRepresentable {
                             try await Task.sleep(nanoseconds: 1)
                         }
                     } else {
-                        let result = try? nextObject?.reference.attribute("value")
+                        var result: PyAPI.Reference?
+                        if let reference = nextObject?.reference {
+                            result = try py.getattr(reference, name: "value")
+                        }
                         task[.result] = result
                         task.isDone = true
 

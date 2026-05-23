@@ -25,7 +25,7 @@ extension Interpreter {
                 Interpreter.output.stdout(str)
             }
         }
-
+        
         py.callbacks.lazyimport = { cName in
             guard let cName else { return nil }
             let name = String(cString: cName)
