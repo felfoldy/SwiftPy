@@ -47,7 +47,6 @@ let package = Package(
             name: "pocketpy",
             sources: [
                 "./src/pocketpy.c",
-                "./src/pocketpy_extensions.c",
             ],
             cSettings: [
                 .headerSearchPath("./include"),

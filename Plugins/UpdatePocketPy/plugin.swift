@@ -17,8 +17,6 @@ struct UpdatePocketPy: CommandPlugin {
             contentsOf:  url.appending(path: "pocketpy.h"),
             encoding: .utf8
         )
-        // Insert extensions.
-        .appending(#"#include "pocketpy_extensions.h""#)
         
         var pocketpy_c = try String(
             contentsOf: url.appending(path: "pocketpy.c"),

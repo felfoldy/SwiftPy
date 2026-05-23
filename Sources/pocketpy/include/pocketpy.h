@@ -1156,4 +1156,3 @@ typedef struct py_TValue {
 #ifdef __cplusplus
 }
 #endif
-#include "pocketpy_extensions.h"

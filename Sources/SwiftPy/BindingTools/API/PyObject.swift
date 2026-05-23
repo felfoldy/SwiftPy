@@ -127,7 +127,7 @@ public class TempPyObject: PyObject {
 
 public class PyModule: PyObject {
     public init?(_ name: String) {
-        let module = Interpreter.module(name)
+        let module = Interpreter.shared.module(name)
         super.init(module)
     }
     

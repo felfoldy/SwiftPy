@@ -75,11 +75,15 @@ public struct PyAPI {
     public func repr(_ value: PyAPI.Reference?) -> Bool {
         py_repr(value)
     }
-
+    
     // TODO: Better error handling
     @inlinable
     public func getattr(_ self: PyAPI.Reference, name: String) -> Bool {
-        py_getattr(self, py_name(name))
+        let tmp = py.pushtmp()
+        tmp.assign(self)
+        defer { py.pop() }
+
+        return py_getattr(tmp, py_name(name))
     }
     
     // TODO: Better error handling
@@ -387,34 +391,10 @@ public extension PyAPI {
     }
 
     @inlinable
-    static func returnNone(_ block: () -> Void) -> Bool {
-        block()
-        return PyAPI.return(.none)
-    }
-    
-    @inlinable
-    static func captureError(error: Error) -> Bool {
-        if let error = error as? PythonError {
-            return py_throw(error.type, error.description)
-        }
-
-        if let error = error as? StopIteration {
-            let stopIterationType = PyObject(.StopIteration)
-            let stopIteration: PyAPI.Reference? = try? stopIterationType(error.value)
-
-            return py_raise(stopIteration)
-        }
-
-        return py_throw(.RuntimeError, error.localizedDescription)
-    }
-    
-    @inlinable
     static func returnOrThrow(_ block: () throws -> Void) -> Bool {
-        do {
+        returnOrThrow {
             try block()
-            return PyAPI.return(.none)
-        } catch {
-            return captureError(error: error)
+            return .none
         }
     }
 
@@ -423,13 +403,24 @@ public extension PyAPI {
         do {
             return try PyAPI.return(block())
         } catch {
-            return captureError(error: error)
+            return switch error {
+            case let error as PythonError:
+                PyAPI.throw(error.type, error.description)
+            case let error as StopIteration:
+                PyAPI.throw(.StopIteration, error.value)
+            default:
+                PyAPI.throw(.RuntimeError, error.localizedDescription)
+            }
         }
     }
 
     @inlinable
-    static func `throw`(_ error: PyType, _ message: String?) -> Bool {
-        py_throw(error, message)
+    static func `throw`(_ error: PyType, _ message: PythonConvertible?) -> Bool {
+        let tmp = py.pushtmp()
+        defer { py.pop() }
+        message?.toPython(tmp)
+        py_tpcall(error, 1, tmp)
+        return py_raise(py.retval)
     }
 }
 
@@ -447,13 +438,6 @@ public extension Interpreter {
         return nil
     }
 
-    /// Returns the module with the given name. If it can't find it, tries to import it.
-    /// - Parameter name: Module name for example: `__main__`
-    /// - Returns: Module reference.
-    @inlinable static func module(_ name: String) -> PyAPI.Reference? {
-        shared.module(name)
-    }
-    
     /// `__main__` module.
     static let main = PyAPI.Reference.modules.main
 }
@@ -576,7 +560,7 @@ public extension PyAPI.Reference {
     @inlinable
     var view: AnyView? {
         let p0 = py_peek(0)
-
+        
         if !py.getattr(self, name: "__view__") {
             py_clearexc(p0)
             return nil

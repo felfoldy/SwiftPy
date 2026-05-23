@@ -8,11 +8,6 @@
 import Testing
 import SwiftPy
 
-@MainActor
-extension PyAPI.Reference {
-    static let test = Interpreter.module("test") ?? .main
-}
-
 @Scriptable
 class TestClass3 {}
 
