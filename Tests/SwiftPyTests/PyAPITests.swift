@@ -16,7 +16,7 @@ struct PyAPITests {
         Interpreter.execute("class Test: ...")
 
         main.Test?.reference.bind("__init__(self, val: str) -> None") { argc, argv in
-            PyAPI.returnOrThrow {
+            PyAPI.`return` {
                 argv?.setAttribute("param", argv?[1])
             }
         }

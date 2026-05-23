@@ -83,10 +83,3 @@ extension AnyView: PythonConvertible {
         }
     }()
 }
-
-#Preview {
-    AnyView {
-        Text("View")
-    }
-    .padding()
-}

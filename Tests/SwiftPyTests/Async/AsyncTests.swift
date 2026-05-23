@@ -66,7 +66,7 @@ struct AsyncTests {
         profiler.event("AsyncTest.asyncRunWithResult")
 
         main.bind("asyncRunWithResult() -> AsyncTask") { _, _ in
-            PyAPI.return(AsyncTask { 42 })
+            PyAPI.return { AsyncTask { 42 } }
         }
 
         await Interpreter.asyncRun("""
@@ -80,7 +80,7 @@ struct AsyncTests {
         profiler.event("AsyncTests.chainingAsyncRun")
         
         main.bind("async_func() -> AsyncTask") { _, _ in
-            PyAPI.return(AsyncTask { 42 })
+            PyAPI.return { AsyncTask { 42 } }
         }
         
         await Interpreter.asyncRun("""
@@ -96,7 +96,7 @@ struct AsyncTests {
     
     @Test func asyncWithoutAwait() async {
         main.bind("async_func() -> AsyncTask") { _, _ in
-            PyAPI.return(AsyncTask { 42 })
+            PyAPI.return { AsyncTask { 42 } }
         }
         
         await Interpreter.asyncRun("""
@@ -111,7 +111,7 @@ struct AsyncTests {
     @Test("AsyncTask iterator.")
     func asyncTaskIterator() async {
         main.bind("async_func() -> AsyncTask") { _, _ in
-            PyAPI.returnOrThrow {
+            PyAPI.return {
                 AsyncTests.asyncTaskIterator_task = AsyncTask { 1 }
                 return AsyncTests.asyncTaskIterator_task
             }
@@ -158,11 +158,11 @@ struct AsyncTests {
     @Test
     func chainAsyncTasks() async throws {
         Interpreter.main.bind("chainAsyncTasks_task1() -> AsyncTask") { _,_ in
-            PyAPI.return(AsyncTask { 3 })
+            PyAPI.return { AsyncTask { 3 } }
         }
         
         Interpreter.main.bind("chainAsyncTasks_task2() -> AsyncTask") { _,_ in
-            PyAPI.return(AsyncTask { 4 })
+            PyAPI.return { AsyncTask { 4 } }
         }
         
         Interpreter.run("""

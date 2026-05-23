@@ -367,41 +367,23 @@ public extension PyAPI {
 }
 
 public extension PyAPI {
-    @available(*, deprecated, renamed: "py.retval")
     @inlinable
-    static var returnValue: Reference {
-        py.retval
-    }
-
-    /// Size of the value of `PyAPI.Reference`.
-    static let elementSize = 24
-
-    @inlinable
-    static func `return`(_ value: Any?) -> Bool {
-        guard let value else {
-            py_newnone(py.retval)
-            return true
-        }
-        if let pythonValue = value as? PythonConvertible {
-            pythonValue.toPython(py.retval)
-        } else {
-            SwiftObject(value).toPython(py.retval)
-        }
-        return true
-    }
-
-    @inlinable
-    static func returnOrThrow(_ block: () throws -> Void) -> Bool {
-        returnOrThrow {
-            try block()
-            return .none
-        }
-    }
-
-    @inlinable
-    static func returnOrThrow(_ block: () throws -> (any PythonConvertible)?) -> Bool {
+    static func `return`(_ block: () throws -> (Any)?) -> Bool {
         do {
-            return try PyAPI.return(block())
+            let result = try block()
+
+            guard let result else {
+                py.newnone(py.retval)
+                return true
+            }
+
+            switch result {
+            case let value as PythonConvertible:
+                value.toPython(py.retval)
+            default:
+                SwiftObject(result).toPython(py.retval)
+            }
+            return true
         } catch {
             return switch error {
             case let error as PythonError:

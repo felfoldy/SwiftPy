@@ -127,9 +127,10 @@ public enum PyBind {
         _ argv: @autoclosure () -> PyAPI.Reference?,
         _ fn: @MainActor () throws -> Void
     ) -> Bool {
-        PyAPI.returnOrThrow {
+        PyAPI.return {
             try checkArgCount(argc, expected: 0)
-            return try fn()
+            try fn()
+            return .none
         }
     }
     
@@ -140,7 +141,7 @@ public enum PyBind {
         _ argv: @autoclosure () -> PyAPI.Reference?,
         _ fn: @MainActor @escaping () async throws -> Void
     ) -> Bool {
-        PyAPI.returnOrThrow {
+        PyAPI.return {
             try checkArgCount(argc, expected: 0)
             return AsyncTask { try await fn() }
         }
@@ -153,7 +154,7 @@ public enum PyBind {
         _ argv: @autoclosure () -> PyAPI.Reference?,
         _ fn: @MainActor () throws -> (any PythonConvertible)
     ) -> Bool {
-        PyAPI.returnOrThrow { try fn() }
+        PyAPI.return { try fn() }
     }
 
     /// `() async -> Any`
@@ -163,7 +164,7 @@ public enum PyBind {
         _ argv: @autoclosure () -> PyAPI.Reference?,
         _ fn: @MainActor @escaping () async throws -> Result
     ) -> Bool where Result: Sendable {
-        PyAPI.returnOrThrow {
+        PyAPI.return {
             try checkArgCount(argc, expected: 0)
             return AsyncTask { try await fn() }
         }
@@ -176,9 +177,10 @@ public enum PyBind {
         _ argv: PyAPI.Reference?,
         _ arguments: @MainActor (repeat each Arg) throws -> Void
     ) -> Bool {
-        PyAPI.returnOrThrow {
+        PyAPI.return {
             let result = try checkArgs(argc: argc, argv: argv) as (repeat (each Arg))
-            return try arguments(repeat (each result))
+            try arguments(repeat (each result))
+            return .none
         }
     }
 
@@ -189,7 +191,7 @@ public enum PyBind {
         _ argv: PyAPI.Reference?,
         _ fn: @MainActor @escaping (repeat each Arg) async throws -> Void
     ) -> Bool {
-        PyAPI.returnOrThrow {
+        PyAPI.return {
             let arguments = try checkArgs(argc: argc, argv: argv) as (repeat (each Arg))
             return AsyncTask {
                 try await fn(repeat (each arguments))
@@ -204,7 +206,7 @@ public enum PyBind {
         _ argv: PyAPI.Reference?,
         _ arguments: @MainActor (repeat each Arg) throws -> any PythonConvertible
     ) -> Bool {
-        PyAPI.returnOrThrow {
+        PyAPI.return {
             let result = try checkArgs(argc: argc, argv: argv) as (repeat (each Arg))
             return try arguments(repeat (each result))
         }
@@ -220,7 +222,7 @@ public enum PyBind {
         _ argv: PyAPI.Reference?,
         _ fn: @MainActor @escaping (repeat each Arg) async throws -> Result
     ) -> Bool where Result: Sendable {
-        PyAPI.returnOrThrow {
+        PyAPI.return {
             let arguments = try checkArgs(argc: argc, argv: argv) as (repeat (each Arg))
             return AsyncTask {
                 try await fn(repeat (each arguments))

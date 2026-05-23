@@ -26,7 +26,7 @@ extension Interpreter {
                 "host(name: str) -> None",
                 docstring: "Hosts the remote Python interpreter on this device."
             ) { _, argv in
-                PyAPI.returnOrThrow {
+                PyAPI.return {
                     let name = try String.cast(argv)
                     let remote = RemoteIOStream(name: name)
                     Interpreter.output = MultiIOStream(streams: [Interpreter.output, remote])
@@ -65,15 +65,10 @@ extension Interpreter {
             "chdir(path: str | Path) -> None",
             docstring: "Change the current working directory to the specified path."
         ) { _, path in
-            PyAPI.returnOrThrow {
+            PyAPI.return {
                 if let path = String(path) {
                     FileManager.default.changeCurrentDirectoryPath(path)
-                    return
-                }
-
-                if let path = Path(path) {
-                    FileManager.default.changeCurrentDirectoryPath(path.url.path)
-                    return
+                    return .none
                 }
 
                 throw PythonError.AssertionError("Path must be a string.")
@@ -84,7 +79,7 @@ extension Interpreter {
             "getcwd() -> str",
             docstring: "Return a unicode string representing the current working directory."
         ) { _, _ in
-            PyAPI.return(FileManager.default.currentDirectoryPath)
+            PyAPI.return { FileManager.default.currentDirectoryPath }
         }
     }
     

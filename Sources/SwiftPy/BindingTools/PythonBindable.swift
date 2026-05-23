@@ -98,7 +98,7 @@ public extension PythonBindable {
         _ initializer: @MainActor () throws -> Self
     ) -> Bool {
         guard argc == 1 else { return false }
-        return PyAPI.returnOrThrow {
+        return PyAPI.`return` {
             try initializer().storeInPython(argv)
         }
     }
@@ -121,7 +121,7 @@ public extension PythonBindable {
             return false
         }
         
-        return PyAPI.return(.none)
+        return PyAPI.return { .none }
     }
     
     @inlinable
@@ -137,12 +137,12 @@ public extension PythonBindable {
             return false
         }
 
-        return PyAPI.return(.none)
+        return PyAPI.return { .none }
     }
     
     @inlinable
     static func __repr__(_ argv: PyAPI.Reference?) -> Bool {
-        PyAPI.returnOrThrow {
+        PyAPI.return {
             let obj = try cast(argv)
             return String(describing: obj)
         }
@@ -150,7 +150,7 @@ public extension PythonBindable {
 
     @inlinable
     static func __view__(_ argv: PyAPI.Reference?) -> Bool {
-        PyAPI.returnOrThrow {
+        PyAPI.return {
             if Self.self is (any ViewRepresentable.Type) {
                 let obj = try cast(argv) as? (any ViewRepresentable)
                 return obj?.representation
@@ -161,28 +161,28 @@ public extension PythonBindable {
     
     @inlinable
     static func _bind_getter<Value>(_ keypath: KeyPath<Self, Value>, _ argv: PyAPI.Reference?) -> Bool {
-        PyAPI.return(Self(argv)?[keyPath: keypath])
+        PyAPI.return { Self(argv)?[keyPath: keypath] }
     }
 
     @inlinable
     static func _bind_setter<Value: PythonConvertible>(_ keypath: ReferenceWritableKeyPath<Self, Value>, _ argv: PyAPI.Reference?) -> Bool {
-        PyAPI.returnOrThrow {
+        PyAPI.return {
             let base = try cast(argv)
             base[keyPath: keypath] = try Value.cast(argv, 1)
-            return
+            return .none
         }
     }
     
     @inlinable
     static func _bind_setter<Value>(_ keypath: ReferenceWritableKeyPath<Self, Value>, _ argv: PyAPI.Reference?) -> Bool {
-        PyAPI.returnOrThrow {
+        PyAPI.return {
             let anyValue = try SwiftObject.cast(argv, 1).value
             guard let value = anyValue as? Value else {
                 throw PythonError.TypeError("Expected SwiftObject[\(Value.self)] at position \(1)")
             }
             let base = try cast(argv)
             base[keyPath: keypath] = value
-            return
+            return .none
         }
     }
     
@@ -194,7 +194,7 @@ public extension PythonBindable {
         _ argv: PyAPI.Reference?,
         _ fn: (Self) -> () throws -> Void
     ) -> Bool {
-        PyAPI.returnOrThrow {
+        PyAPI.`return` {
             try fn(cast(argv))()
         }
     }
@@ -205,7 +205,7 @@ public extension PythonBindable {
         _ argv: PyAPI.Reference?,
         _ fn: @escaping (Self) -> () async throws -> Void
     ) -> Bool {
-        PyAPI.returnOrThrow {
+        PyAPI.return {
             let args = try cast(argv)
             return AsyncTask {
                 try await fn(args)()
@@ -219,7 +219,7 @@ public extension PythonBindable {
         _ argv: PyAPI.Reference?,
         _ fn: (Self) -> () throws -> any PythonConvertible
     ) -> Bool {
-        PyAPI.returnOrThrow {
+        PyAPI.return {
             try fn(cast(argv))()
         }
     }
@@ -230,7 +230,7 @@ public extension PythonBindable {
         _ argv: PyAPI.Reference?,
         _ fn: @escaping (Self) -> () async throws -> Result
     ) -> Bool where Result: Sendable {
-        PyAPI.returnOrThrow {
+        PyAPI.return {
             let args = try cast(argv)
             return AsyncTask {
                 try await fn(args)()
@@ -244,10 +244,11 @@ public extension PythonBindable {
         _ argv: PyAPI.Reference?,
         _ arguments: (Self) -> (repeat each Arg) throws -> Void
     ) -> Bool {
-        PyAPI.returnOrThrow {
+        PyAPI.return {
             let obj = try cast(argv)
             let result = try PyBind.castArgs(argv: argv, from: 1) as (repeat (each Arg))
-            return try arguments(obj)(repeat (each result))
+            try arguments(obj)(repeat (each result))
+            return .none
         }
     }
 
@@ -257,7 +258,7 @@ public extension PythonBindable {
         _ argv: PyAPI.Reference?,
         _ fn: @escaping (Self) -> (repeat each Arg) async throws -> Void
     ) -> Bool where (repeat each Arg): Sendable {
-        PyAPI.returnOrThrow {
+        PyAPI.return {
             let obj = try cast(argv)
             let args = try PyBind.castArgs(argv: argv, from: 1) as (repeat (each Arg))
 
@@ -273,7 +274,7 @@ public extension PythonBindable {
         _ argv: PyAPI.Reference?,
         _ arguments: (Self) -> (repeat each Arg) throws -> any PythonConvertible
     ) -> Bool {
-        PyAPI.returnOrThrow {
+        PyAPI.return {
             let obj = try cast(argv)
             let result = try PyBind.castArgs(argv: argv, from: 1) as (repeat (each Arg))
             return try arguments(obj)(repeat (each result))
@@ -286,7 +287,7 @@ public extension PythonBindable {
         _ argv: PyAPI.Reference?,
         _ fn: @escaping (Self) -> (repeat each Arg) async throws -> Result
     ) -> Bool where Result: Sendable, (repeat each Arg): Sendable {
-        PyAPI.returnOrThrow {
+        PyAPI.return {
             let obj = try cast(argv)
             let args = try PyBind.castArgs(argv: argv, from: 1) as (repeat (each Arg))
             
@@ -298,7 +299,7 @@ public extension PythonBindable {
 
     @inlinable
     static func __getitem__<Key: PythonConvertible>(_ argc: Int32, _ argv: PyAPI.Reference?, _ fn: (Self) -> (Key) -> any PythonConvertible) -> Bool {
-        PyAPI.returnOrThrow {
+        PyAPI.return {
             if argc != 2 {
                 throw PythonError.ValueError("Expected 2 arguments, got \(argc)")
             }
