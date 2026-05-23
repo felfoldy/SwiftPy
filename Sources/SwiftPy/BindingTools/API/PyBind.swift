@@ -36,9 +36,7 @@ public enum PyBind {
 
             // Load source.
             if let content = Interpreter.importFromSource(name: name + ".py") {
-                try? Interpreter.printErrors {
-                    py.exec(source: content, filename: name, mode: .execution, module: module.reference)
-                }
+                _ = try? py.exec(source: content, filename: name, mode: .execution, module: module.reference)
             }
 
             block(module.reference)
@@ -55,9 +53,7 @@ public enum PyBind {
             block(module)
 
             if let content = Interpreter.importFromSource(name: name + ".py") {
-                try? Interpreter.printErrors {
-                    py.exec(source: content, filename: name, mode: .execution, module: module.reference)
-                }
+                _ = try? py.exec(source: content, filename: name, mode: .execution, module: module.reference)
             }
 
             // Add module.__doc__.

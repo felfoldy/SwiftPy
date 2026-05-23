@@ -16,8 +16,11 @@ struct PyAPITests {
         Interpreter.execute("class Test: ...")
 
         main.Test?.reference.bind("__init__(self, val: str) -> None") { argc, argv in
-            PyAPI.`return` {
-                argv?.setAttribute("param", argv?[1])
+            PyAPI.return {
+                if let argv {
+                    try py.setattr(argv, name: "param", value: argv[1])
+                }
+                return .none
             }
         }
         

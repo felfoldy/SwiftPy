@@ -33,9 +33,13 @@ public class PyObject {
             return TempPyObject(member)
         }
         set {
-            _ = Interpreter.ignoreErrors {
-                py.setattr(reference, name: dynamicMember, value: newValue?.reference)
-            }
+            Interpreter.silenceErrors = true
+            defer { Interpreter.silenceErrors = false }
+            try? py.setattr(
+                reference,
+                name: dynamicMember,
+                value: newValue?.reference
+            )
         }
     }
 
@@ -57,9 +61,11 @@ public class PyObject {
         }
         set {
             let keyObject = TempPyObject(key)
-            _ = Interpreter.ignoreErrors {
-                py.dict.setitem(reference, key: keyObject?.reference, value: newValue?.reference)
-            }
+            _ = try? py.dict.setitem(
+                reference,
+                key: keyObject?.reference,
+                value: newValue?.reference
+            )
         }
     }
 

@@ -38,6 +38,8 @@ public final class Interpreter {
 
     /// Bundles to import from python scripts.
     public static var bundles = [Bundle.module]
+    
+    public static var silenceErrors = false
 
     @usableFromInline
     static let shared = Interpreter()
@@ -49,7 +51,7 @@ public final class Interpreter {
 
     @usableFromInline
     static var lastFailure: String?
-    
+
     static var moduleBuilders: [String: (PyAPI.Reference?) -> Void] = [:]
 
     var moduleBuilders: [String: (PyAPI.Reference?) -> Void] {
@@ -77,18 +79,14 @@ public final class Interpreter {
     }
     
     func execute(_ code: String, filename: String, mode: CompileMode = .execution) throws {
-        try Interpreter.printErrors {
-            py.compile(source: code, filename: filename, mode: mode)
-        }
-
-        let code = TempPyObject(py.retval)
+        let code = try py.compile(source: code, filename: filename, mode: mode)
         
-        try Interpreter.printErrors {
+        try PyAPI.convertRetval(code) { code in
             let function: PyAPI.Reference? = mode == .evaluation ? .functions.eval : .functions.exec
 
             profiler.begin()
             // TODO: Store low level C function instead.
-            let isExecuted = function?.pointee._cfunc(1, code?.reference) ?? true
+            let isExecuted = function?.pointee._cfunc(1, code) ?? true
             profiler.end()
 
             Interpreter.output.executionTime(profiler.executionTime)

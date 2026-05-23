@@ -1,18 +1,25 @@
 {
   "configurations" : [
     {
-      "id" : "C53B0A51-8676-43BE-9D23-DAD5342BF378",
-      "name" : "Configuration 1",
+      "id" : "0122AFBA-2BED-4357-AFD8-564D45A5FEBB",
+      "name" : "Test Scheme Action",
       "options" : {
 
       }
     }
   ],
   "defaultOptions" : {
-    "testTimeoutsEnabled" : true
+    "performanceAntipatternCheckerEnabled" : true
   },
   "testTargets" : [
-
+    {
+      "parallelizable" : false,
+      "target" : {
+        "containerPath" : "container:",
+        "identifier" : "SwiftPyTests",
+        "name" : "SwiftPyTests"
+      }
+    }
   ],
   "version" : 1
 }

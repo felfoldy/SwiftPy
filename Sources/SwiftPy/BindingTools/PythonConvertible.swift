@@ -245,7 +245,7 @@ extension Dictionary: PythonConvertible where Key: PythonConvertible {
  
             let keyStack = TempPyObject(key)
             let valueStack = TempPyObject(value)
-            _ = py.dict.setitem(
+            _ = try? py.dict.setitem(
                 reference,
                 key: keyStack?.reference,
                 value: valueStack?.reference

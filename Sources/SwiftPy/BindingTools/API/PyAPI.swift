@@ -70,32 +70,71 @@ public struct PyAPI {
         py_setdict(self, py_name(name), value ?? py_None())
     }
 
-    // TODO: Better error handling
     @inlinable
-    public func repr(_ value: PyAPI.Reference?) -> Bool {
-        py_repr(value)
+    public static func convertRetval(
+        _ call: () -> Bool
+    ) throws(InterpreterError) -> PyAPI.Reference {
+        let p0 = py.peek()
+        if call() {
+            return py.retval
+        }
+        if !Interpreter.silenceErrors {
+            Interpreter.isFailed = true
+            py.printexc()
+        }
+        py.clearexc(p0)
+        if let failure = Interpreter.lastFailure {
+            throw .runtimeFailure(failure)
+        }
+        throw .silencedError
     }
-    
-    // TODO: Better error handling
+
+    @discardableResult
     @inlinable
-    public func getattr(_ self: PyAPI.Reference, name: String) -> Bool {
+    public static func convertRetval(
+        _ value: PyAPI.Reference?,
+        _ call: (PyAPI.Reference) -> Bool
+    ) throws(InterpreterError) -> PyAPI.Reference {
         let tmp = py.pushtmp()
-        tmp.assign(self)
+        tmp.assign(value)
         defer { py.pop() }
-
-        return py_getattr(tmp, py_name(name))
-    }
-    
-    // TODO: Better error handling
-    @inlinable
-    public func setattr(_ self: PyAPI.Reference, name: String, value: PyAPI.Reference?) -> Bool {
-        py_setattr(self, py_name(name), value ?? py_None())
+        return try convertRetval {
+            call(tmp)
+        }
     }
 
-    // TODO: Better error handling
     @inlinable
-    public func iter(_ self: PyAPI.Reference?) -> Bool {
-        py_iter(self)
+    public func repr(_ value: PyAPI.Reference?) throws(InterpreterError) -> String {
+        let result = try PyAPI.convertRetval(value) { tmp in
+            py_repr(tmp)
+        }
+
+        guard let str = String(result) else {
+            throw .runtimeFailure("Cannot convert repr to string: \(result)")
+        }
+
+        return str
+    }
+
+    @inlinable
+    public func getattr(_ self: PyAPI.Reference, name: String) throws(InterpreterError) -> PyAPI.Reference {
+        try PyAPI.convertRetval(self) { tmp in
+            py_getattr(tmp, py_name(name))
+        }
+    }
+
+    @inlinable
+    public func setattr(_ self: PyAPI.Reference, name: String, value: PyAPI.Reference?) throws(InterpreterError) {
+        try PyAPI.convertRetval(self) { tmp in
+            py_setattr(tmp, py_name(name), value ?? py_None())
+        }
+    }
+
+    @inlinable
+    public func iter(_ self: PyAPI.Reference?) throws(InterpreterError) -> PyAPI.Reference {
+        try PyAPI.convertRetval(self) { tmp in
+            py_iter(tmp)
+        }
     }
 
     // TODO: Better error handling
@@ -105,19 +144,20 @@ public struct PyAPI {
         py_next(self)
     }
 
-    // TODO: Better error handling
     @inlinable
-    public func compile(source: String, filename: String, mode: CompileMode) -> Bool {
-        py_compile(source, filename, mode.pyMode, false)
+    public func compile(source: String, filename: String, mode: CompileMode) throws(InterpreterError) -> PyAPI.Reference {
+        try PyAPI.convertRetval {
+            py_compile(source, filename, mode.pyMode, false)
+        }
     }
     
-    // TODO: Better error handling
     @inlinable
-    public func exec(source: String, filename: String, mode: CompileMode, module: PyAPI.Reference?) -> Bool {
-        py_exec(source, filename, mode.pyMode, module)
+    public func exec(source: String, filename: String, mode: CompileMode, module: PyAPI.Reference?) throws(InterpreterError) -> PyAPI.Reference {
+        try PyAPI.convertRetval {
+            py_exec(source, filename, mode.pyMode, module)
+        }
     }
 
-    // TODO: Better error handling
     // Call a callable object via pocketpy’s calling convention. You need to prepare the stack using the following format: callable, self/nil, arg1, arg2, ..., k1, v1, k2, v2, .... argc is the number of positional arguments excluding self. kwargc is the number of keyword arguments. The result will be set to py.returnValue. The stack size will be reduced by 2 + argc + kwargc * 2
     @inlinable
     public func vectorcall(argc: UInt16, kwargc: UInt16) -> Bool {
@@ -262,6 +302,7 @@ public extension PyAPI {
 // MARK: - Native type conversions
 
 public extension PyAPI {
+    @MainActor
     struct Dict {
         // TODO: Better error handling
         // (1: found, 0: not found, -1: error)
@@ -270,10 +311,11 @@ public extension PyAPI {
             py_dict_getitem(self, key)
         }
         
-        // TODO: Better error handling
         @inlinable
-        public func setitem(_ self: PyAPI.Reference, key: PyAPI.Reference?, value: PyAPI.Reference?) -> Bool {
-            py_dict_setitem(self, key, value)
+        public func setitem(_ self: PyAPI.Reference, key: PyAPI.Reference?, value: PyAPI.Reference?) throws(InterpreterError) -> PyAPI.Reference {
+            try PyAPI.convertRetval(self) { temp in
+                py_dict_setitem(self, key, value)
+            }
         }
     }
     
@@ -524,37 +566,27 @@ public extension PyAPI.Reference {
     
     @inlinable
     func attribute(_ name: String) throws -> PyAPI.Reference? {
-        try Interpreter.printErrors {
-            py.getattr(self, name: name)
-        }
-        return py.retval
+        try py.getattr(self, name: name)
     }
     
     @inlinable
     func attributeOrNil(_ name: String) -> PyAPI.Reference? {
-        let hasError = Interpreter.ignoreErrors {
-            py.getattr(self, name: name)
-        }
-        return !hasError ? nil : py.retval
+        Interpreter.silenceErrors = true
+        defer { Interpreter.silenceErrors = false}
+        return try? py.getattr(self, name: name)
     }
     
     /// Returns a `ViewRepresentation` if the bounded object implements `ViewRepresentable`.
     @inlinable
     var view: AnyView? {
-        let p0 = py_peek(0)
-        
-        if !py.getattr(self, name: "__view__") {
-            py_clearexc(p0)
-            return nil
-        }
-        
-        return AnyView(py.retval)
+        Interpreter.silenceErrors = true
+        defer { Interpreter.silenceErrors = false }
+        let view = try? py.getattr(self, name: "__view__")
+        return AnyView(view)
     }
 
     @inlinable func setAttribute(_ name: String, _ value: PyAPI.Reference?) {
-        try? Interpreter.printErrors {
-            py.setattr(self, name: name, value: value)
-        }
+        try? py.setattr(self, name: name, value: value)
     }
     
     @inlinable func emplace(_ name: String) -> PyAPI.Reference {

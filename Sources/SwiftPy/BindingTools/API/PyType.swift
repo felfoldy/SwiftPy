@@ -89,7 +89,9 @@ public extension PyType {
         py.push(py.tpobject(.staticmethod))
         py.pushnil()
         py.push(funcionRef)
-        assert(py.vectorcall(argc: 1, kwargc: 0))
+
+        let ok = py.vectorcall(argc: 1, kwargc: 0)
+        precondition(ok)
 
         // Sets staticmethod to type.
         py_setdict(py.tpobject(self), name, py.retval)

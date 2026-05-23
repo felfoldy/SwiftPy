@@ -97,7 +97,7 @@ extension Interpreter {
         #endif
         
         let osNameRef = osName.retained
-        _ = py.setattr(
+        _ = try? py.setattr(
             sys,
             name: "os",
             value: osNameRef.reference
@@ -116,7 +116,7 @@ extension Interpreter {
             return coroutine
         """
         
-        _ = py.exec(
+        _ = try? py.exec(
             source: asyncSource,
             filename: "<stdin>",
             mode: .execution,

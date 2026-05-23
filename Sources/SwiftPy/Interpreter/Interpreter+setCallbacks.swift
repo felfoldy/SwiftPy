@@ -59,13 +59,7 @@ extension Interpreter {
             }
 
             do {
-                try Interpreter.printErrors {
-                    py.repr(obj)
-                }
-                
-                if let str = String(py.retval) {
-                    Interpreter.output.stdout(str)
-                }
+                try Interpreter.output.stdout(py.repr(obj))
             } catch {}
             return true
         }

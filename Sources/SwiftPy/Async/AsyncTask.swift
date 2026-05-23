@@ -80,10 +80,7 @@ public class AsyncTask: ViewRepresentable {
         let generator = arguments[1]
 
         let context = AsyncContext.current
-        try Interpreter.printErrors {
-            py.iter(generator)
-        }
-        arguments[Slot.iterator] = py.retval
+        arguments[Slot.iterator] = try py.iter(generator)
 
         let id = UUID()
         self.task = Task {
