@@ -35,6 +35,8 @@ public struct PyAPI {
     public let list = List()
     public let tuple = Tuple()
     
+    public let objectCache: PyRef
+    
     @inlinable
     public var callbacks: Callbacks {
         get { py_callbacks().pointee }
@@ -53,8 +55,17 @@ public struct PyAPI {
         // Remove exit:
         let builtins = py_getmodule("builtins")
         py_deldict(builtins, py_name("exit"))
+
+        // Reserve register 0 as object cache list.
+        let r0 = py_getreg(0)!
+        py_newlist(r0)
+        objectCache = r0
     }
-    
+
+    func None() -> PyRef {
+        py_None()
+    }
+
     @inlinable
     public func getmodule(_ name: String) -> PyAPI.Reference? {
         py_getmodule(name)
