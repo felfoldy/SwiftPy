@@ -24,9 +24,11 @@ public class StackReference {
     public func iterate(next: (StackReference) throws -> Void) throws {
         let iter = try py.iter(reference)
         let tmp = py.retain(iter)
-        
-        while try Interpreter.printItemError(py.next(tmp.reference)) {
-            try next(py.retval.retained)
+
+        Interpreter.silenceErrors {
+            while let nextValue = try? py.next(tmp.reference) {
+                try next(nextValue.retained)
+            }
         }
     }
 

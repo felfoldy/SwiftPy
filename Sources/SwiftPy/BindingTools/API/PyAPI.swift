@@ -149,12 +149,21 @@ public struct PyAPI {
             py_iter(tmp)
         }
     }
-
-    // TODO: Better error handling
-    // (1: success, 0: StopIteration, -1: error)
-    @inlinable
+    
     public func next(_ self: PyAPI.Reference?) -> Int32 {
         py_next(self)
+    }
+    
+    @inlinable
+    public func next(_ val: PyRef) throws(PythonError) -> PyRef {
+        let result = try PyAPI.convertRetval {
+            let result = py_next(val)
+            return result != -1
+        }
+        if let stopIteration = PythonError(result) {
+            throw stopIteration
+        }
+        return result
     }
 
     @inlinable

@@ -46,6 +46,7 @@ public final class Interpreter {
 
     var replLines = [String]()
     
+    #warning("Remove")
     @usableFromInline
     static var isFailed = false
 
@@ -147,6 +148,7 @@ public final class Interpreter {
         return false
     }
     
+    #warning("Remove")
     @inlinable
     static func printItemError(_ call: @autoclosure () -> Int32) throws -> Bool {
         let p0 = py.peek()
