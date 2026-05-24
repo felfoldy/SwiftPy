@@ -594,7 +594,7 @@ public extension PyAPI.Reference {
         temp.initialize(to: py_TValue())
         let name = py.newfunction(temp, signature: signature, docstring: docstring, function: function)
 
-        let sigRet = TempPyObject(signature)
+        let sigRet = py.retain(signature)
         py.setdict(temp, name: "_signature", value: sigRet?.reference)
 
         var interface = "def \(signature):"
@@ -603,7 +603,7 @@ public extension PyAPI.Reference {
         } else {
             interface += " ..."
         }
-        let interfaceRet = TempPyObject(interface)
+        let interfaceRet = py.retain(interface)
         py.setdict(
             temp,
             name: "_interface",

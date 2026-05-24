@@ -243,8 +243,8 @@ extension Dictionary: PythonConvertible where Key: PythonConvertible {
                 continue
             }
  
-            let keyStack = TempPyObject(key)
-            let valueStack = TempPyObject(value)
+            let keyStack = py.retain(key)
+            let valueStack = py.retain(value)
             _ = try? py.dict.setitem(
                 reference,
                 key: keyStack?.reference,
@@ -295,9 +295,11 @@ extension PyAPI.Reference: PythonConvertible {
         reference.assign(self)
     }
 
-    @inlinable
     public static func fromPython(_ reference: PyAPI.Reference) -> PyAPI.Reference {
-        reference
+        #if DEBUG
+        log.fault("Casting PyAPI.Reference is unsafe. Use PyObject instead.")
+        #endif
+        return reference
     }
 }
 

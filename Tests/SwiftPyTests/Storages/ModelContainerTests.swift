@@ -36,7 +36,7 @@ struct ModelContainerTests {
         """)
         
         // Backing data.
-        let data = try #require(ModelData(Interpreter.evaluate("sword._data")))
+        let data: ModelData = try #require(Interpreter.evaluate("sword._data"))
         #expect(data.json == #"{"name": "Sword", "quantity": 0, "description": null}"#)
         #expect(data.keys?["__name__"] == "Item")
         
@@ -55,7 +55,7 @@ struct ModelContainerTests {
         """)
 
         #expect(Interpreter.evaluate("len(items)") == 1)
-        let data = try #require(ModelData(Interpreter.evaluate("items[0]._data")))
+        let data: ModelData = try #require(Interpreter.evaluate("items[0]._data"))
         #expect(data.json == #"{"name": "Sword", "quantity": 0, "description": null}"#)
     }
     
@@ -68,7 +68,7 @@ struct ModelContainerTests {
         """)
         
         // Backing data.
-        let data = try #require(ModelData(Interpreter.evaluate("sword._data")))
+        let data: ModelData = try #require(Interpreter.evaluate("sword._data"))
         #expect(data.json == #"{"name": "Sword", "quantity": 0, "description": null}"#)
         
         Interpreter.run("""

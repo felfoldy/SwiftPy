@@ -49,7 +49,7 @@ struct SubclassBindableTests {
         test2 = Base()
         """)
         
-        let base = Base(Interpreter.evaluate("test2"))
+        let base: Base? = Interpreter.evaluate("test2")
         Interpreter.run("""
         import gc
         

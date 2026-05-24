@@ -8,7 +8,7 @@ private var freeSlots: [Int32] = []
 @dynamicMemberLookup
 public final class PyStrongRef {
     public let reference: PyRef
-    let cacheID: Int32
+    private let cacheID: Int32
     
     public init(_ reference: PyRef) {
         let copy = PyRef.allocate(capacity: 1)
@@ -26,9 +26,7 @@ public final class PyStrongRef {
     }
 
     public convenience init?(_ reference: PyRef?) {
-        guard let reference, !reference.isNone else {
-            return nil
-        }
+        guard let reference else { return nil }
         self.init(reference)
     }
 
@@ -38,11 +36,26 @@ public final class PyStrongRef {
         reference.deallocate()
         freeSlots.append(cacheID)
     }
-
-    @inlinable
-    public subscript<T>(dynamicMember keyPath: ReferenceWritableKeyPath<PyRef, T>) -> T {
-        get { reference[keyPath: keyPath] }
-        set { reference[keyPath: keyPath] = newValue }
+    
+    public subscript(dynamicMember dynamicMember: String) -> PyStrongRef? {
+        get {
+            let attribute = Interpreter.silenceErrors {
+                try py.getattr(
+                    reference,
+                    name: dynamicMember
+                )
+            }
+            return PyStrongRef(attribute)
+        }
+        set {
+            Interpreter.silenceErrors {
+                try py.setattr(
+                    reference,
+                    name: dynamicMember,
+                    value: newValue?.reference
+                )
+            }
+        }
     }
 }
 
@@ -62,5 +75,18 @@ extension PyAPI {
     @inlinable
     public func retain(_ ref: PyRef?) -> PyStrongRef? {
         PyStrongRef(ref)
+    }
+
+    @inlinable
+    public func retain(_ ref: PyRef) -> PyStrongRef {
+        PyStrongRef(ref)
+    }
+    
+    @inlinable
+    public func retain<Value: PythonConvertible>(_ value: Value) -> PyStrongRef? {
+        let tmp = py.pushtmp()
+        defer { py.pop() }
+        value.toPython(tmp)
+        return PyStrongRef(tmp)
     }
 }

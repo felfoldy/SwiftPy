@@ -199,8 +199,8 @@ public extension Interpreter {
     static func evaluate<Result: PythonConvertible>(_ expression: String) -> Result? {
         do {
             try shared.execute(expression, filename: "<string>", mode: .evaluation)
-            let result = TempPyObject(py.retval)
-            return try Result.cast(result?.reference)
+            let result = py.retain(py.retval)
+            return try Result.cast(result.reference)
         } catch {
             return nil
         }

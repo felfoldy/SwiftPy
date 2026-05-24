@@ -92,10 +92,10 @@ public class AsyncTask: ViewRepresentable {
 
                     let hasNext = try Interpreter.printItemError(py.next(iterator))
 
-                    let nextObject = TempPyObject(py.retval)
+                    let nextObject = py.retain(py.retval)
 
                     if hasNext {
-                        if let task = AsyncTask(nextObject?.reference) {
+                        if let task = AsyncTask(nextObject.reference) {
                             Interpreter.output.view(task.representation)
                             _ = await task.task.value
 
@@ -108,9 +108,9 @@ public class AsyncTask: ViewRepresentable {
                         }
                     } else {
                         var result: PyAPI.Reference?
-                        if let reference = nextObject?.reference {
-                            result = try py.getattr(reference, name: "value")
-                        }
+                        let reference = nextObject.reference
+                        result = try py.getattr(reference, name: "value")
+
                         task[.result] = result
                         task.isDone = true
 
