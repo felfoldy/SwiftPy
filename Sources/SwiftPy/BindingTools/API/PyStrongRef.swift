@@ -63,6 +63,18 @@ public final class PyStrongRef {
             }
         }
     }
+    
+    @inlinable
+    public func callAsFunction(_ args: PythonConvertible?...) throws {
+        try py.call(reference, args: args)
+    }
+    
+    @inlinable
+    @discardableResult
+    public func callAsFunction<Value: PythonConvertible>(_ args: PythonConvertible?...) throws -> Value {
+        let result = try py.call(reference, args: args)
+        return try Value.cast(result)
+    }
 }
 
 extension PyStrongRef: PythonConvertible, @MainActor CustomStringConvertible {
