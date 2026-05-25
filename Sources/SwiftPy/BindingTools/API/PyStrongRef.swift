@@ -89,6 +89,50 @@ public final class PyStrongRef {
         #endif
         return result
     }
+    
+    @discardableResult
+    public func callAsFunction<Result: PythonConvertible>(_ args: PythonConvertible?...) throws(PythonError) -> Result? {
+        let result = try py.retain(py.call(reference, args: args))
+        #if DEBUG
+        log.trace("call \(self.description) -> \(result.description)")
+        #endif
+        return try .cast(result.reference)
+    }
+    
+    // MARK: Dictionary lookup.
+    
+    /// Gets the item from a dictionary by a key.
+    public subscript<Key: PythonConvertible>(_ key: Key) -> PyStrongRef? {
+        get {
+            let keyObject = TempPyObject(key)
+            let result = try? py.dict.getitem(reference, key: keyObject?.reference)
+            return py.retain(result)
+        }
+        set {
+            let keyObject = py.retain(key)
+            _ = try? py.dict.setitem(
+                reference,
+                key: keyObject?.reference,
+                value: newValue?.reference
+            )
+        }
+    }
+    
+    /// Gets the item from a dictionary by a key and convert the value to a swift type.
+    public subscript<Key: PythonConvertible, Value: PythonConvertible>(_ key: Key) -> Value? {
+        get { Value(self[key]?.reference) }
+        set {
+            Interpreter.silenceErrors {
+                let value = py.retain(newValue)
+                let key = py.retain(key)
+                _ = try py.dict.setitem(
+                    reference,
+                    key: key?.reference,
+                    value: value?.reference
+                )
+            }
+        }
+    }
 }
 
 // MARK: - Convenience initializers.
