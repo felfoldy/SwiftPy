@@ -52,9 +52,6 @@ public final class Interpreter {
         get { Interpreter.moduleBuilders }
         set { Interpreter.moduleBuilders = newValue }
     }
-
-    @usableFromInline
-    let cache = PyCache()
     
     let profiler = SignpostProfiler("Python")
     private let relays = OutputRelays()
@@ -191,11 +188,7 @@ public extension Interpreter {
     /// - Parameter text: Text to complete.
     /// - Returns: An array of string completions.
     static func complete(_ text: String) -> [String] {
-        let result: [String]? = try? PyModule("interpreter")?.completions?(text)
+        let result: [String]? = try? py.module("interpreter")?.completions?(text)
         return result ?? []
-    }
-    
-    static var cache: PyCache {
-        Interpreter.shared.cache
     }
 }

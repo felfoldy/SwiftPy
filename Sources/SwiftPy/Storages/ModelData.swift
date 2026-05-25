@@ -112,7 +112,7 @@ class ModelContainer: PythonBindable {
         ModelContainer.containers.append(self)
     }
     
-    func insert(model: PyStrongRef) throws {
+    func insert(model: PyObject) throws {
         // TODO: Update metadata if needed.
         guard let modelData = ModelData(model._data),
               let keys = modelData.keys,
@@ -126,14 +126,14 @@ class ModelContainer: PythonBindable {
         context.insert(modelData)
     }
     
-    func fetch(_ type: PyStrongRef) throws -> PyStrongRef? {
+    func fetch(_ type: PyObject) throws -> PyObject? {
         let typeName = py.totype(type.reference).name
         let models = try context.fetch(.models(name: typeName))
         let result = try type._makemodels?(models)
         return result
     }
 
-    func delete(model: PyStrongRef) throws {
+    func delete(model: PyObject) throws {
         guard let modelData = ModelData(model._data) else {
             throw PythonError.ValueError("Invalid model data")
         }

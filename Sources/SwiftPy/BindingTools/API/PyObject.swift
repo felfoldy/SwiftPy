@@ -1,113 +1,118 @@
-//
-//  PyObject.swift
-//  SwiftPy
-//
-//  Created by Tibor Felföldy on 2026-04-04.
-//
-
-import pocketpy
+@MainActor
+private var nextID: Int32 = 0
 
 @MainActor
-public final class PyCache {
-    private var cacheID: Int32 = 0
-    private var freeSlots: [Int32] = []
-    private lazy var objectCache: PyRef = {
-        LegacyPyModule("interpreter")!._swift_object_cache!
-    }()
-    
-    /// Created as a singleton in `py.cache`
-    init() {}
-    
-    public func add(_ value: PyRef) -> Int32 {
-        guard let slot = freeSlots.popLast() else {
-            py.list.append(objectCache, value: value)
-            defer { cacheID += 1 }
-            return cacheID
-        }
-        py.list.setitem(objectCache, i: slot, value: value)
-        return slot
-    }
-    
-    public func remove(at index: Int32) {
-        py.list.setitem(objectCache, i: index, value: py_None())
-        freeSlots.append(index)
-    }
-}
+private var freeSlots: [Int32] = []
 
-/// Wrapper to a `PyObject`.
 @MainActor
 @dynamicMemberLookup
-public class PyObject {
-    public let reference: PyAPI.Reference
+public final class PyObject {
+    public let reference: PyRef
+    private let cacheID: Int32
+    
+    public init(_ reference: PyRef) {
+        let copy = PyRef.allocate(capacity: 1)
+        copy.initialize(to: reference.pointee)
 
-    @usableFromInline
-    let cacheID: Int32?
-
-    @inlinable
-    public init?(borrowing reference: PyAPI.Reference?) {
-        guard let reference else { return nil }
-        self.reference = reference
-        cacheID = nil
-    }
-    
-    @inlinable
-    public init?(_ borrowed: PyRef?) {
-        guard let borrowed else { return nil }
-        reference = .allocate(capacity: 1)
-        reference.initialize(to: borrowed.pointee)
-        self.cacheID = Interpreter.cache.add(borrowed)
-    }
-    
-    public convenience init(_ type: PyType) {
-        self.init(py.tpobject(type))!
-    }
-    
-    @MainActor deinit {
-        if let cacheID {
-            Interpreter.cache.remove(at: cacheID)
-            reference.deinitialize(count: 1)
-            reference.deallocate()
+        if let slot = freeSlots.popLast() {
+            py.list.setitem(py.objectCache, i: slot, value: copy)
+            cacheID = slot
+        } else {
+            py.list.append(py.objectCache, value: copy)
+            cacheID = nextID
+            nextID += 1
         }
+        self.reference = copy
+        #if DEBUG
+        log.trace("retain \(self.description) index: \(self.cacheID)")
+        #endif
     }
 
-    /// Lookup for the attribute of the python object.
+    @MainActor deinit {
+        #if DEBUG
+        log.trace("release \(self.description) index: \(self.cacheID)")
+        #endif
+        py.list.setitem(py.objectCache, i: cacheID, value: py.None())
+        reference.deinitialize(count: 1)
+        reference.deallocate()
+        freeSlots.append(cacheID)
+    }
+
+    // MARK: Dynamic member lookup.
+    
+    @inlinable
     public subscript(dynamicMember dynamicMember: String) -> PyObject? {
         get {
-            let member = Interpreter.silenceErrors {
+            let attribute = Interpreter.silenceErrors {
                 try py.getattr(reference, name: dynamicMember)
             }
-            
-            if member?.isNone == true {
+            if attribute?.isNone == true {
                 return nil
             }
-            return TempPyObject(member)
+            return PyObject(attribute)
         }
         set {
-            Interpreter.silenceErrors = true
-            defer { Interpreter.silenceErrors = false }
-            try? py.setattr(
-                reference,
-                name: dynamicMember,
-                value: newValue?.reference
-            )
+            Interpreter.silenceErrors {
+                try py.setattr(reference, name: dynamicMember, value: newValue?.reference)
+            }
         }
     }
 
-    /// Lookup for the attribute of the python object and converts the value to a Swift type.
+    @inlinable
     public subscript<Value: PythonConvertible>(dynamicMember dynamicMember: String) -> Value? {
-        get { Value(self[dynamicMember: dynamicMember]?.reference) }
-        set { self[dynamicMember: dynamicMember] = TempPyObject(newValue) }
+        get {
+            Interpreter.silenceErrors {
+                try .cast(
+                    py.getattr(reference, name: dynamicMember)
+                )
+            }
+        }
+        set {
+            Interpreter.silenceErrors {
+                let tmp = py.pushtmp()
+                defer { py.pop() }
+                newValue?.toPython(tmp)
+                try py.setattr(reference, name: dynamicMember, value: tmp)
+            }
+        }
     }
 
+    // MARK: Functions
+    
+    @inlinable
+    public func callAsFunction(_ args: PythonConvertible?...) throws(PythonError) {
+        try py.call(reference, args: args)
+    }
+    
+    @discardableResult
+    public func callAsFunction(_ args: PythonConvertible?...) throws(PythonError) -> PyObject? {
+        let result = try py.retain(py.call(reference, args: args))
+        #if DEBUG
+        log.trace("call \(self.description) -> \(result.description)")
+        #endif
+        return result
+    }
+    
+    @discardableResult
+    public func callAsFunction<Result: PythonConvertible>(_ args: PythonConvertible?...) throws(PythonError) -> Result? {
+        let result = try py.retain(py.call(reference, args: args))
+        #if DEBUG
+        log.trace("call \(self.description) -> \(result.description)")
+        #endif
+        return try .cast(result.reference)
+    }
+    
+    // MARK: Dictionary lookup.
+    
     /// Gets the item from a dictionary by a key.
     public subscript<Key: PythonConvertible>(_ key: Key) -> PyObject? {
         get {
-            let keyObject = TempPyObject(key)
+            let keyObject = py.retain(key)
             let result = try? py.dict.getitem(reference, key: keyObject?.reference)
-            return TempPyObject(result)
+            return py.retain(result)
         }
         set {
-            let keyObject = TempPyObject(key)
+            let keyObject = py.retain(key)
             _ = try? py.dict.setitem(
                 reference,
                 key: keyObject?.reference,
@@ -115,80 +120,86 @@ public class PyObject {
             )
         }
     }
-
+    
     /// Gets the item from a dictionary by a key and convert the value to a swift type.
     public subscript<Key: PythonConvertible, Value: PythonConvertible>(_ key: Key) -> Value? {
-        get { Value(self[key]?.reference) }
-        set { self[key] = TempPyObject(newValue) }
-    }
-    
-    public func callAsFunction(_ args: PythonConvertible?...) throws {
-        try py.call(reference, args: args)
-    }
-    
-    @discardableResult
-    public func callAsFunction<Value: PythonConvertible>(_ args: PythonConvertible?...) throws -> Value {
-        let result = try py.call(reference, args: args)
-        return try Value.cast(result)
+        get {
+            Interpreter.silenceErrors {
+                let key = py.retain(key)
+                let item =  try py.dict.getitem(reference, key: key?.reference)
+                return try .cast(item)
+            }
+        }
+        set {
+            Interpreter.silenceErrors {
+                let value = py.retain(newValue)
+                let key = py.retain(key)
+                _ = try py.dict.setitem(
+                    reference,
+                    key: key?.reference,
+                    value: value?.reference
+                )
+            }
+        }
     }
 }
 
-/// Creates a temporary reference on the stack.
-///
-/// Do not store it, should be deinited at the end of the scope.
-public class TempPyObject: PyObject {
-    public override init?(_ reference: PyAPI.Reference?) {
+// MARK: - Convenience initializers.
+
+public extension PyObject {
+    convenience init?(_ reference: PyRef?) {
         guard let reference else { return nil }
-        let temp = py.pushtmp()
-        temp.assign(reference)
-        super.init(borrowing: temp)
+        self.init(reference)
+    }
+    
+    convenience init(_ type: PyType) {
+        self.init(py.tpobject(type))!
+    }
+}
+
+// MARK: - PyObject + PythonConvertible
+
+extension PyObject: PythonConvertible, @MainActor CustomStringConvertible {
+    public var description: String {
+        "<\(reference.pointee.type.name) at \(reference)>"
+    }
+    
+    public func toPython(_ reference: PyAPI.Reference) {
+        log.trace("toPython: \(self.description)")
+        reference.assign(self.reference)
+    }
+    
+    public static func fromPython(_ reference: PyAPI.Reference) -> PyObject {
+        let ref = PyObject(reference)
+        log.trace("fromPython: \(ref.description)")
+        return ref
+    }
+    
+    public static let pyType = PyType.object
+}
+
+extension PyAPI {
+    @inlinable
+    public func retain(_ ref: PyRef?) -> PyObject? {
+        PyObject(ref)
+    }
+
+    @inlinable
+    public func retain(_ ref: PyRef) -> PyObject {
+        PyObject(ref)
     }
     
     @inlinable
-    public init?<Value: PythonConvertible>(_ value: Value) {
-        let temp = py.pushtmp()
-        value.toPython(temp)
-        super.init(borrowing: temp)
-    }
-
-    @MainActor deinit { py.pop() }
-}
-
-public class LegacyPyModule: PyObject {
-    public init?(_ name: String) {
-        let module = Interpreter.shared.module(name)
-        super.init(borrowing: module)
-    }
-    
-    public override init?(_ reference: PyAPI.Reference?) {
-        super.init(borrowing: reference)
-    }
-    
-    public override subscript(dynamicMember dynamicMember: String) -> PyObject? {
-        get {
-            PyObject(borrowing: reference[dynamicMember])
-        }
-        set {
-            super[dynamicMember: dynamicMember] = newValue
-        }
-    }
-
-    @discardableResult
-    public func `class`(_ type: PythonBindable.Type) -> LegacyPyModule {
-        let type = type.pyType
-        py.setdict(reference, name: type.name, value: py.tpobject(type))
-        return self
-    }
-
-    public func classes(_ types: PythonBindable.Type...) {
-        for type in types { `class`(type) }
-    }
-    
-    public func def(_ signature: String, docstring: String? = nil, function: PyAPI.CFunction) {
-        reference.bind(signature, function: function)
+    public func retain<Value: PythonConvertible>(_ value: Value) -> PyObject? {
+        let tmp = py.pushtmp()
+        defer { py.pop() }
+        value.toPython(tmp)
+        return PyObject(tmp)
     }
 }
 
-public extension LegacyPyModule {
-    static let main = LegacyPyModule("__main__")!
+extension PythonConvertible {
+    init?(_ ref: PyObject?) {
+        self.init(ref?.reference)
+    }
 }

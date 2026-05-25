@@ -263,7 +263,7 @@ extension Dictionary: PythonConvertible where Key: PythonConvertible {
         
         do {
             let strong = py.retain(reference)
-            guard let items: PyStrongRef = try strong.items?() else {
+            guard let items: PyObject = try strong.items?() else {
                 return dict
             }
 

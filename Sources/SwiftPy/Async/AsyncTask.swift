@@ -43,8 +43,8 @@ public class AsyncTask: ViewRepresentable {
     internal let task: Task<Void, Never>
     internal static var tasks = [UUID: AsyncTask]()
     
-    internal var iterator: PyStrongRef?
-    internal var result: PyStrongRef?
+    internal var iterator: PyObject?
+    internal var result: PyObject?
 
     private init(task: @escaping () async -> Void) {
         let id = UUID()

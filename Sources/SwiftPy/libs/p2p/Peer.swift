@@ -14,7 +14,7 @@ import pocketpy
 @MainActor
 public class Peer: NSObject {
     /// Callback handler. Set a Callable[[bytes], None] function.
-    var onMessage: PyStrongRef?
+    var onMessage: PyObject?
 
     private let id: MCPeerID
     private let advertiser: MCNearbyServiceAdvertiser

@@ -18,12 +18,12 @@ public struct PyModule {
     }
     
     @inlinable
-    public subscript(dynamicMember dynamicMember: String) -> PyStrongRef? {
+    public subscript(dynamicMember dynamicMember: String) -> PyObject? {
         get {
             let attribute = Interpreter.silenceErrors {
                 try py.getattr(reference, name: dynamicMember)
             }
-            return PyStrongRef(attribute)
+            return PyObject(attribute)
         }
         nonmutating set {
             Interpreter.silenceErrors {
@@ -50,9 +50,20 @@ public struct PyModule {
             }
         }
     }
-    
+
     public func def(_ signature: String, docstring: String? = nil, function: PyAPI.CFunction) {
         reference.bind(signature, function: function)
+    }
+
+    public func classes(_ types: PythonBindable.Type...) {
+        for type in types { `class`(type) }
+    }
+
+    @discardableResult
+    public func `class`(_ type: PythonBindable.Type) -> PyModule {
+        let type = type.pyType
+        py.setdict(reference, name: type.name, value: py.tpobject(type))
+        return self
     }
 }
 
