@@ -101,7 +101,7 @@ struct ScriptableTests {
     }
     
     @Test func staticmethodTests() async throws {
-        main.TestClass2 = PyObject(TestClassWithProperties.pyType)
+        main.TestClass2 = PyStrongRef(TestClassWithProperties.pyType)
         Interpreter.run("TestClass2.log('asd')")
         
         Interpreter.run("staticmethodTests = TestClass2.create()")
@@ -121,7 +121,7 @@ struct ScriptableTests {
     }
     
     @Test func returningArgumentedFunction() async {
-        let type = PyObject(TestClassWithProperties.pyType)
+        let type = PyStrongRef(TestClassWithProperties.pyType)
         PyModule.main.TestClass2 = type.reference
 
         await Interpreter.asyncRun("""

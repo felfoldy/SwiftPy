@@ -373,6 +373,11 @@ public extension PyAPI {
         public func setitem(_ self: PyRef, i: Int32, value: PyRef?) {
             py_list_setitem(self, i, value)
         }
+        
+        @inlinable
+        public func getitem(_ self: PyRef, i: Int32) -> PyRef {
+            py_list_getitem(self, i)
+        }
     }
     
     struct Tuple {
@@ -476,6 +481,7 @@ public extension PyAPI {
             switch result {
             case let value as PythonConvertible:
                 value.toPython(py.retval)
+
             default:
                 SwiftObject(result).toPython(py.retval)
             }
@@ -738,8 +744,9 @@ public enum PythonError: LocalizedError {
 }
 
 extension PythonError: PythonConvertible {
+    // TODO: test
     public func toPython(_ reference: PyAPI.Reference) {
-        let error: PyAPI.Reference = try! PyObject(type)(description)
+        let error = try! py.call(py.tpobject(type)!, args: description)
         reference.assign(error)
     }
     

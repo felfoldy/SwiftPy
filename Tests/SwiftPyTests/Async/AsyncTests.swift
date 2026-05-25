@@ -103,7 +103,7 @@ struct AsyncTests {
         result = async_func()
         """)
         
-        #expect(AsyncTask(main.result) != nil)
+        #expect(AsyncTask(main.result?.reference) != nil)
     }
     
     static var asyncTaskIterator_task: AsyncTask!

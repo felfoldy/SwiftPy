@@ -41,7 +41,7 @@ struct ModelContainerTests {
         #expect(data.keys?["__name__"] == "Item")
         
         // Is inserted?
-        let container = ModelContainer(PyModule.main.container)
+        let container = ModelContainer.init(PyModule.main.container?.reference)
         let models = try container?.context.fetch(FetchDescriptor<ModelData>())
         #expect(models == [data])
     }
@@ -52,6 +52,9 @@ struct ModelContainerTests {
         container = ModelContainer('fetch_testing')
         container.insert(Item(name='Sword'))
         items = container.fetch(Item)
+        print(items)
+        print(items[0])
+        print(len(items))
         """)
 
         #expect(Interpreter.evaluate("len(items)") == 1)

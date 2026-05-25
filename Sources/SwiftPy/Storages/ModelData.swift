@@ -112,10 +112,9 @@ class ModelContainer: PythonBindable {
         ModelContainer.containers.append(self)
     }
     
-    func insert(model: object) throws {
+    func insert(model: PyStrongRef) throws {
         // TODO: Update metadata if needed.
-        let data: PyAPI.Reference? = PyObject(model)?._data
-        guard let modelData = ModelData(data),
+        guard let modelData = ModelData(model._data),
               let keys = modelData.keys,
               let name = keys.first(where: { $0.key == "__name__" })?.value else {
             throw PythonError.ValueError("Invalid model data")
@@ -127,21 +126,21 @@ class ModelContainer: PythonBindable {
         context.insert(modelData)
     }
     
-    func fetch(_ type: object) throws -> object? {
-        let typeName = py.totype(type).name
+    func fetch(_ type: PyStrongRef) throws -> PyStrongRef? {
+        let typeName = py.totype(type.reference).name
         let models = try context.fetch(.models(name: typeName))
-        return try PyObject(type)?._makemodels?(models)
+        let result = try type._makemodels?(models)
+        return result
     }
 
-    func delete(model: object) throws {
-        let data: PyAPI.Reference? = PyObject(model)?._data
-        guard let modelData = ModelData(data) else {
+    func delete(model: PyStrongRef) throws {
+        guard let modelData = ModelData(model._data) else {
             throw PythonError.ValueError("Invalid model data")
         }
         context.delete(modelData)
         
         // Recreate the underlying model data for the object so it can be inserted again.
-        try PyObject(model)?._makedata?()
+        try model._makedata?()
     }
     
     static func inMemory(inMemory: Bool) {

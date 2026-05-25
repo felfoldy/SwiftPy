@@ -26,7 +26,7 @@ struct SubclassBindableTests {
     let type = Base.pyType
     
     init() {
-        main.Base = PyObject(Base.pyType)
+        main.Base = PyStrongRef(Base.pyType)
         Interpreter.run("""
         class Subclass(Base):
             def __init__(self):

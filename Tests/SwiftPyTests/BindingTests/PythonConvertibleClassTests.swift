@@ -83,7 +83,7 @@ extension TestClass: PythonBindable {
             PyBind.function(argc, argv, asyncCreate)
         }
 
-        let typeObject = PyObject(type)
+        let typeObject = PyStrongRef(type)
 
         typeObject.text = text
         
@@ -197,7 +197,7 @@ struct PythonConvertibleClassTests {
     }
     
     @Test func intefaceTest() throws {
-        let testClassType = PyObject(TestClass.pyType)
+        let testClassType = PyStrongRef(TestClass.pyType)
         let interface: String = try #require(testClassType._interface)
         
         #expect(interface.contains("TestClass(builtins.object)"))

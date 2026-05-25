@@ -24,70 +24,102 @@ public final class PyStrongRef {
         }
         self.reference = copy
         #if DEBUG
-        log.trace("retain \(self.description) at: \(self.cacheID)")
+        log.trace("retain \(self.description) index: \(self.cacheID)")
         #endif
-    }
-
-    public convenience init?(_ reference: PyRef?) {
-        guard let reference else { return nil }
-        self.init(reference)
     }
 
     @MainActor deinit {
         #if DEBUG
-        log.trace("release \(self.description) at: \(self.cacheID)")
+        log.trace("release \(self.description) index: \(self.cacheID)")
         #endif
         py.list.setitem(py.objectCache, i: cacheID, value: py.None())
         reference.deinitialize(count: 1)
         reference.deallocate()
         freeSlots.append(cacheID)
     }
+
+    // MARK: Dynamic member lookup.
     
+    @inlinable
     public subscript(dynamicMember dynamicMember: String) -> PyStrongRef? {
         get {
             let attribute = Interpreter.silenceErrors {
-                try py.getattr(
-                    reference,
-                    name: dynamicMember
-                )
+                try py.getattr(reference, name: dynamicMember)
             }
             return PyStrongRef(attribute)
         }
         set {
             Interpreter.silenceErrors {
-                try py.setattr(
-                    reference,
-                    name: dynamicMember,
-                    value: newValue?.reference
-                )
+                try py.setattr(reference, name: dynamicMember, value: newValue?.reference)
             }
         }
     }
+
+    @inlinable
+    public subscript<Value: PythonConvertible>(dynamicMember dynamicMember: String) -> Value? {
+        get {
+            Interpreter.silenceErrors {
+                try .cast(
+                    py.getattr(reference, name: dynamicMember)
+                )
+            }
+        }
+        set {
+            Interpreter.silenceErrors {
+                let tmp = py.pushtmp()
+                defer { py.pop() }
+                newValue?.toPython(tmp)
+                try py.setattr(reference, name: dynamicMember, value: tmp)
+            }
+        }
+    }
+
+    // MARK: Functions
     
     @inlinable
-    public func callAsFunction(_ args: PythonConvertible?...) throws {
+    public func callAsFunction(_ args: PythonConvertible?...) throws(PythonError) {
         try py.call(reference, args: args)
     }
     
-    @inlinable
     @discardableResult
-    public func callAsFunction<Value: PythonConvertible>(_ args: PythonConvertible?...) throws -> Value {
-        let result = try py.call(reference, args: args)
-        return try Value.cast(result)
+    public func callAsFunction(_ args: PythonConvertible?...) throws(PythonError) -> PyStrongRef? {
+        let result = try py.retain(py.call(reference, args: args))
+        #if DEBUG
+        log.trace("call \(self.description) -> \(result.description)")
+        #endif
+        return result
     }
 }
 
+// MARK: - Convenience initializers.
+
+public extension PyStrongRef {
+    convenience init?(_ reference: PyRef?) {
+        guard let reference else { return nil }
+        self.init(reference)
+    }
+    
+    convenience init(_ type: PyType) {
+        self.init(py.tpobject(type))!
+    }
+}
+
+// MARK: - PyStrongRef + PythonConvertible
+
 extension PyStrongRef: PythonConvertible, @MainActor CustomStringConvertible {
     public var description: String {
-        try! py.repr(reference)
+        "<\(reference.pointee.type.name) at \(reference)>"
     }
     
     public func toPython(_ reference: PyAPI.Reference) {
+        log.trace("toPython: \(self.description)")
         reference.assign(self.reference)
     }
     
     public static func fromPython(_ reference: PyAPI.Reference) -> PyStrongRef {
-        PyStrongRef(reference)
+        let ref = PyStrongRef(reference)
+        log.trace("fromPython: \(ref.description)")
+        return ref
     }
     
     public static let pyType = PyType.object
@@ -110,5 +142,11 @@ extension PyAPI {
         defer { py.pop() }
         value.toPython(tmp)
         return PyStrongRef(tmp)
+    }
+}
+
+extension PythonConvertible {
+    init?(_ ref: PyStrongRef?) {
+        self.init(ref?.reference)
     }
 }

@@ -87,7 +87,7 @@ public extension PyType {
         let name = py.newfunction(ref, signature: signature, docstring: docstring, function: function)
 
         // Create staticmethod
-        let staticmethod: PyAPI.Reference = try! PyObject(.staticmethod)(ref)
+        let staticmethod: PyAPI.Reference = try! py.call(py.tpobject(.staticmethod)!, args: ref)
 
         // Sets staticmethod to type.
         py_setdict(py.tpobject(self), name, staticmethod)

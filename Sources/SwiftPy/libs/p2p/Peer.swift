@@ -8,15 +8,13 @@
 import MultipeerConnectivity
 import pocketpy
 
+// TODO: test
 /// An object represents a peer in a multipeer session.
 @Scriptable
 @MainActor
 public class Peer: NSObject {
     /// Callback handler. Set a Callable[[bytes], None] function.
-    var onMessage: object? {
-        get { self[.onMessage] }
-        set { self[.onMessage] = newValue }
-    }
+    var onMessage: PyStrongRef?
 
     private let id: MCPeerID
     private let advertiser: MCNearbyServiceAdvertiser
@@ -62,11 +60,7 @@ public class Peer: NSObject {
     }
 }
 
-extension Peer: HasSlots {
-    public enum Slot: Int32, CaseIterable {
-        case onMessage
-    }
-
+extension Peer {
     public func messageReceived(handler: @escaping (Data) -> Void) {
         onMessageHandler = handler
     }
@@ -109,7 +103,7 @@ extension Peer: MCSessionDelegate {
     
     nonisolated public func session(_ session: MCSession, didReceive data: Data, fromPeer peerID: MCPeerID) {
         Task { @MainActor [self] in
-            try? PyObject(self[.onMessage])?(data)
+            try? onMessage?(data)
             onMessageHandler?(data)
         }
     }

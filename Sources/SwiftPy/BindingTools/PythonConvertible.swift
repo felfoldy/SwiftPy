@@ -262,9 +262,12 @@ extension Dictionary: PythonConvertible where Key: PythonConvertible {
         var dict = [Key: Value]()
         
         do {
-            let items: PyAPI.Reference? = try PyObject(reference)?.items?()
+            let strong = py.retain(reference)
+            guard let items: PyStrongRef = try strong.items?() else {
+                return dict
+            }
 
-            let iter = try py.retain(py.iter(items))
+            let iter = try py.retain(py.iter(items.reference))
             
             while let item = try? py.next(iter.reference) {
                 let keyRef = py.tuple.getitem(item, i: 0)
