@@ -37,17 +37,14 @@ extension Interpreter {
 @MainActor
 @Scriptable
 public class AsyncTask: ViewRepresentable {
-    typealias object = PyAPI.Reference
-    
     public var isDone: Bool = false
     public var viewRepresentation: AnyView?
 
     internal let task: Task<Void, Never>
     internal static var tasks = [UUID: AsyncTask]()
-
-    internal weak var underlying: AsyncTask?
-
-    var result: object? { self[.result] }
+    
+    internal var iterator: PyStrongRef?
+    internal var result: PyStrongRef?
 
     private init(task: @escaping () async -> Void) {
         let id = UUID()
@@ -66,7 +63,7 @@ public class AsyncTask: ViewRepresentable {
         
         self.task = Task {
             let result = await task()
-            AsyncTask.tasks[id]?[.result] = result
+            AsyncTask.tasks[id]?.result = py.retain(result)
             AsyncTask.tasks[id]?.isDone = true
             AsyncTask.tasks[id] = nil
         }
@@ -80,40 +77,34 @@ public class AsyncTask: ViewRepresentable {
         let generator = arguments[1]
 
         let context = AsyncContext.current
-        arguments[Slot.iterator] = try py.iter(generator)
+        iterator = try py.retain(py.iter(generator))
 
         let id = UUID()
         self.task = Task {
             do {
                 while let task = AsyncTask.tasks[id], task.isDone == false {
-                    guard let iterator = task[.iterator] else {
+                    guard let iterator = task.iterator else {
                         throw PythonError.AssertionError("Iterator is missing")
                     }
+                    
+                    do {
+                        let next = try py.next(iterator.reference)
 
-                    let hasNext = try Interpreter.printItemError(py.next(iterator))
-
-                    let nextObject = py.retain(py.retval)
-
-                    if hasNext {
-                        if let task = AsyncTask(nextObject.reference) {
+                        // Fix a loop if any child task fails.
+                        if let task = AsyncTask(next) {
                             Interpreter.output.view(task.representation)
                             _ = await task.task.value
-
-                            // Fix a loop if any child task fails.
+                            
                             if AsyncContext.current == nil {
                                 task.isDone = true
                             }
                         } else {
                             try await Task.sleep(nanoseconds: 1)
                         }
-                    } else {
-                        var result: PyAPI.Reference?
-                        let reference = nextObject.reference
-                        result = try py.getattr(reference, name: "value")
 
-                        task[.result] = result
+                    } catch let PythonError.StopIteration(result) {
+                        task.result = py.retain(result)
                         task.isDone = true
-
                         await context?.complete(result: result)
                     }
                 }
@@ -131,9 +122,9 @@ public class AsyncTask: ViewRepresentable {
         self
     }
     
-    func __next__() throws -> AsyncTask {
+    func __next__() throws(PythonError) -> AsyncTask {
         if isDone {
-            throw StopIteration(value: self[.result])
+            throw .StopIteration(result?.reference)
         }
         return self
     }
@@ -144,13 +135,6 @@ public class AsyncTask: ViewRepresentable {
 
     public func cancel() {
         task.cancel()
-    }
-}
-
-extension AsyncTask: HasSlots {
-    public enum Slot: Int32, CaseIterable {
-        case result
-        case iterator
     }
 }
 

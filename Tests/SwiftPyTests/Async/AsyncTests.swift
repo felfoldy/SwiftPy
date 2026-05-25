@@ -135,7 +135,7 @@ struct AsyncTests {
         #expect(Interpreter.evaluate("iterate()") == Int?.none)
         
         AsyncTests.asyncTaskIterator_task.isDone = true
-        AsyncTests.asyncTaskIterator_task[.result] = 2
+        AsyncTests.asyncTaskIterator_task.result = py.retain(2)
 
         #expect(Interpreter.evaluate("iterate()") == 2)
     }

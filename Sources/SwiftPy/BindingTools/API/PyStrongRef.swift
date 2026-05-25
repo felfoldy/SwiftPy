@@ -23,6 +23,9 @@ public final class PyStrongRef {
             nextID += 1
         }
         self.reference = copy
+        #if DEBUG
+        log.trace("retain \(self.description) at: \(self.cacheID)")
+        #endif
     }
 
     public convenience init?(_ reference: PyRef?) {
@@ -31,6 +34,9 @@ public final class PyStrongRef {
     }
 
     @MainActor deinit {
+        #if DEBUG
+        log.trace("release \(self.description) at: \(self.cacheID)")
+        #endif
         py.list.setitem(py.objectCache, i: cacheID, value: py.None())
         reference.deinitialize(count: 1)
         reference.deallocate()
@@ -59,7 +65,11 @@ public final class PyStrongRef {
     }
 }
 
-extension PyStrongRef: PythonConvertible {
+extension PyStrongRef: PythonConvertible, @MainActor CustomStringConvertible {
+    public var description: String {
+        try! py.repr(reference)
+    }
+    
     public func toPython(_ reference: PyAPI.Reference) {
         reference.assign(self.reference)
     }

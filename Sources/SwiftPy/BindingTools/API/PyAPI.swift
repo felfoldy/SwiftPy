@@ -150,10 +150,6 @@ public struct PyAPI {
         }
     }
     
-    public func next(_ self: PyAPI.Reference?) -> Int32 {
-        py_next(self)
-    }
-    
     @inlinable
     public func next(_ val: PyRef) throws(PythonError) -> PyRef {
         let result = try PyAPI.convertRetval {
@@ -474,9 +470,7 @@ public extension PyAPI {
         } catch {
             return switch error {
             case let error as PythonError:
-                PyAPI.throw(error.type, error.description)
-            case let error as StopIteration:
-                PyAPI.throw(.StopIteration, error.value)
+                PyAPI.throw(error.type, error.value)
             default:
                 PyAPI.throw(.RuntimeError, error.localizedDescription)
             }
