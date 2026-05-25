@@ -21,12 +21,12 @@ public extension PythonBindable where Self: HasSlots {
     @inlinable
     subscript(slot: Slot) -> PyAPI.Reference? {
         get {
-            let temp = self.retained
-            return temp.reference?[slot: slot.rawValue]
+            let obj = py.retain(self)
+            return obj?.reference[slot: slot.rawValue]
         }
         set {
-            let temp = self.retained
-            temp.reference?[slot: slot.rawValue] = newValue
+            let temp = py.retain(self)
+            temp?.reference[slot: slot.rawValue] = newValue
         }
     }
     
@@ -34,7 +34,7 @@ public extension PythonBindable where Self: HasSlots {
     subscript<T: PythonConvertible>(slot: Slot) -> T? {
         get { T(self[slot]) }
         set {
-            let tempValue = newValue?.retained
+            let tempValue = py.retain(newValue)
             self[slot] = tempValue?.reference
         }
     }

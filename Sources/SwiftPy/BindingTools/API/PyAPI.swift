@@ -161,7 +161,7 @@ public struct PyAPI {
     
     @inlinable
     public func next(_ val: PyRef) throws(PythonError) -> PyRef {
-        let result = try PyAPI.convertRetval {
+        let result = try PyAPI.convertRetval(val) { val in
             let result = py_next(val)
             return result != -1
         }

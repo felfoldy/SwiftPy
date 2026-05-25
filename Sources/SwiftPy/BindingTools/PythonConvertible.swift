@@ -193,9 +193,12 @@ extension Array: PythonConvertible {
                 log.error("\(String(describing: value)) is not convertible to Python")
                 continue
             }
+            let tmp = py.pushtmp()
+            defer { py.pop() }
+            value.toPython(tmp)
             py.list.append(
                 reference,
-                value: value.retained.reference
+                value: tmp
             )
         }
     }
@@ -203,20 +206,22 @@ extension Array: PythonConvertible {
     public static func fromPython(_ reference: PyAPI.Reference) -> [Element] {
         var items: [Element] = []
         
-        let array = reference.retained
+        guard let iter = try? py.retain(py.iter(reference)) else {
+            return items
+        }
         
-        try? array.iterate { item in
+        while let item = try? py.next(iter.reference) {
             if Element.self == Any?.self {
-                items.append(item.reference?.asAny as! Element)
-                return
+                items.append(item.asAny as! Element)
+                continue
             }
             
             guard let type = Element.self as? PythonConvertible.Type else {
                 log.error("\(Element.self) is not convertible to Python")
-                return
+                continue
             }
             
-            let item = type.init(item.reference)
+            let item = type.init(item)
             if let item = item as? Element {
                 items.append(item)
             }
@@ -259,23 +264,25 @@ extension Dictionary: PythonConvertible where Key: PythonConvertible {
         do {
             let items: PyAPI.Reference? = try PyObject(reference)?.items?()
 
-            try items?.retained.iterate { item in
-                let keyRef = py.tuple.getitem(item.reference, i: 0)
+            let iter = try py.retain(py.iter(items))
+            
+            while let item = try? py.next(iter.reference) {
+                let keyRef = py.tuple.getitem(item, i: 0)
                 guard let key = Key(keyRef) else {
                     throw ConversionError.key
                 }
                 
-                let valueRef = py.tuple.getitem(item.reference, i: 1)
+                let valueRef = py.tuple.getitem(item, i: 1)
                 
                 if let Convertible = Value.self as? PythonConvertible.Type,
                    let value = Convertible.init(valueRef) {
                     dict[key] = value as? Value
-                    return
+                    continue
                 }
                 
                 if Value.self == Any.self {
                     dict[key] = valueRef?.asAny as? Value
-                    return
+                    continue
                 }
                 
                 throw ConversionError.value

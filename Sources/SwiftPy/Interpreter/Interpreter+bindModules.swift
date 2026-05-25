@@ -95,12 +95,12 @@ extension Interpreter {
         #else
         let osName = "unknown"
         #endif
-        
-        let osNameRef = osName.retained
+
+        let osNameRef = py.retain(osName)
         _ = try? py.setattr(
             sys,
             name: "os",
-            value: osNameRef.reference
+            value: osNameRef?.reference
         )
     }
     
