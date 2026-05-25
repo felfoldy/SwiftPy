@@ -16,14 +16,7 @@ extension Interpreter {
             let str = String(cString: cString)
                 .trimmingCharacters(in: .whitespacesAndNewlines)
             if str.isEmpty { return }
-            
-            if Interpreter.isFailed {
-                Interpreter.output.stderr(str)
-                Interpreter.isFailed = false
-                Interpreter.lastFailure = str
-            } else {
-                Interpreter.output.stdout(str)
-            }
+            Interpreter.output.stdout(str)
         }
         
         py.callbacks.lazyimport = { cName in

@@ -103,11 +103,8 @@ public class PyObject {
     public subscript<Key: PythonConvertible>(_ key: Key) -> PyObject? {
         get {
             let keyObject = TempPyObject(key)
-            let result = try? Interpreter.printItemError(
-                py.dict.getitem(reference, key: keyObject?.reference)
-            )
-            guard result == true else { return nil }
-            return TempPyObject(py.retval)
+            let result = try? py.dict.getitem(reference, key: keyObject?.reference)
+            return TempPyObject(result)
         }
         set {
             let keyObject = TempPyObject(key)

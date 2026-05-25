@@ -77,6 +77,15 @@ public struct PyAPI {
     }
     
     @inlinable
+    public func `import`(_ name: String) throws -> PyAPI.Reference? {
+        let result = py_import(name)
+        let retval = try PyAPI.convertRetval {
+            result != -1
+        }
+        return result == 1 ? retval : nil
+    }
+    
+    @inlinable
     public func getdict(_ self: PyAPI.Reference, name: String) -> PyAPI.Reference? {
         py_getdict(self, py_name(name))
     }
@@ -338,8 +347,12 @@ public extension PyAPI {
         // TODO: Better error handling
         // (1: found, 0: not found, -1: error)
         @inlinable
-        public func getitem(_ self: PyAPI.Reference, key: PyAPI.Reference?) -> Int32 {
-            py_dict_getitem(self, key)
+        public func getitem(_ self: PyAPI.Reference, key: PyAPI.Reference?) throws -> PyAPI.Reference? {
+            let result = py_dict_getitem(self, key)
+            let retval = try PyAPI.convertRetval {
+                result != -1
+            }
+            return result == 1 ? retval : nil
         }
         
         @inlinable
@@ -493,12 +506,7 @@ public extension Interpreter {
             return module
         }
 
-        let imported = try? Interpreter.printItemError(py_import(name))
-        if imported == true {
-            return py.retval
-        }
-
-        return nil
+        return try? py.import(name)
     }
 }
 

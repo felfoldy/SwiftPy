@@ -45,13 +45,6 @@ public final class Interpreter {
     static let shared = Interpreter()
 
     var replLines = [String]()
-    
-    #warning("Remove")
-    @usableFromInline
-    static var isFailed = false
-
-    @usableFromInline
-    static var lastFailure: String?
 
     static var moduleBuilders: [String: (PyAPI.Reference?) -> Void] = [:]
 
@@ -145,21 +138,6 @@ public final class Interpreter {
         let p0 = py.peek()
         if call() { return true }
         py.clearexc(p0)
-        return false
-    }
-    
-    #warning("Remove")
-    @inlinable
-    static func printItemError(_ call: @autoclosure () -> Int32) throws -> Bool {
-        let p0 = py.peek()
-        let result = call()
-        if result != -1 { return result == 1 }
-        Interpreter.isFailed = true
-        py.printexc()
-        py.clearexc(p0)
-        if let lastFailure {
-            throw PythonError.RuntimeError(lastFailure)
-        }
         return false
     }
 }
