@@ -85,7 +85,7 @@ struct AsyncContext {
     
     func complete<Result: PythonConvertible>(result: Result?) async {
         if let resultName {
-            PyModule.main[dynamicMember: resultName] = result
+            py.main[dynamicMember: resultName] = result
         }
 
         if let continuationCode {

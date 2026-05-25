@@ -12,7 +12,7 @@ public final class PyCache {
     private var cacheID: Int32 = 0
     private var freeSlots: [Int32] = []
     private lazy var objectCache: PyRef = {
-        PyModule("interpreter")!._swift_object_cache!
+        LegacyPyModule("interpreter")!._swift_object_cache!
     }()
     
     /// Created as a singleton in `py.cache`
@@ -154,7 +154,7 @@ public class TempPyObject: PyObject {
     @MainActor deinit { py.pop() }
 }
 
-public class PyModule: PyObject {
+public class LegacyPyModule: PyObject {
     public init?(_ name: String) {
         let module = Interpreter.shared.module(name)
         super.init(borrowing: module)
@@ -174,7 +174,7 @@ public class PyModule: PyObject {
     }
 
     @discardableResult
-    public func `class`(_ type: PythonBindable.Type) -> PyModule {
+    public func `class`(_ type: PythonBindable.Type) -> LegacyPyModule {
         let type = type.pyType
         py.setdict(reference, name: type.name, value: py.tpobject(type))
         return self
@@ -189,6 +189,6 @@ public class PyModule: PyObject {
     }
 }
 
-public extension PyModule {
-    static let main = PyModule("__main__")!
+public extension LegacyPyModule {
+    static let main = LegacyPyModule("__main__")!
 }

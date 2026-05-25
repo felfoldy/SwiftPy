@@ -42,7 +42,7 @@ public enum PyBind {
             block(module.reference)
             
             // Add module.__doc__.
-            try? PyModule("interpreter")?.bind_interfaces?(module.reference)
+            _ = try? PyModule("interpreter")?.bind_interfaces?(module.reference)
         }
     }
     
@@ -57,7 +57,7 @@ public enum PyBind {
             }
 
             // Add module.__doc__.
-            try? PyModule("interpreter")?.bind_interfaces?(module.reference)
+            _ = try? PyModule("interpreter")?.bind_interfaces?(module.reference)
         }
     }
     

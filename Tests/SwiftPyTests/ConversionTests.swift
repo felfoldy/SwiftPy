@@ -13,16 +13,15 @@ import Foundation
 @MainActor
 struct ConversionTests {
     let profiler = profile("ConversionTests")
-    let main = PyModule.main
     
     @Test func dataToPython() {
-        main.test_bytes = "Hello".data(using: .utf8)
+        py.main.test_bytes = "Hello".data(using: .utf8)
         #expect(Interpreter.evaluate("test_bytes.decode()") == "Hello")
     }
     
     @Test func floatCastFromInt() throws {
         Interpreter.run("floatCastFromInt = 3")
-        let number = try Float.cast(PyModule.main.floatCastFromInt)
+        let number = try Float.cast(py.main.floatCastFromInt)
         #expect(number == 3.0)
     }
     
@@ -37,9 +36,9 @@ struct ConversionTests {
         let array: [String] = ["Hello", "World"]
         
         Interpreter.execute("x = []")
-        PyModule.main.x = array
+        py.main.x = array
         
-        #expect(PyModule.main.x == ["Hello", "World"])
+        #expect(py.main.x == ["Hello", "World"])
     }
     
     @Test func dictionaryToPython() {
@@ -47,7 +46,7 @@ struct ConversionTests {
 
         let dictionary: [String: Any] = ["Hello": 1, "World": Int64(2)]
         
-        PyModule.main.dictionary = dictionary
+        py.main.dictionary = dictionary
         
         #expect(Interpreter.evaluate(#"dictionary["Hello"]"#) == 1)
         #expect(Interpreter.evaluate(#"dictionary["World"]"#) == 2)
@@ -58,7 +57,7 @@ struct ConversionTests {
         
         Interpreter.run(#"dictionary = {"topic": "dict", "task": "iterate"}"#)
         
-        let result = try #require([String: String](main.dictionary))
+        let result = try #require([String: String](py.main.dictionary))
         
         #expect(result["topic"] == "dict")
         #expect(result["task"] == "iterate")
@@ -79,10 +78,10 @@ struct ConversionTests {
         }
         """)
         
-        #expect(main.dictionary?["string"] == "hello")
-        #expect(main.dictionary?["integer"] == 42)
+        #expect(py.main.dictionary?["string"] == "hello")
+        #expect(py.main.dictionary?["integer"] == 42)
 
-        let dictionary = try #require([String: Any](main.dictionary))
+        let dictionary = try #require([String: Any](py.main.dictionary))
         #expect(dictionary["string"] as? String == "hello")
         #expect(dictionary["integer"] as? Int == 42)
         #expect(dictionary["double"] as? Double == 3.14)
@@ -104,7 +103,7 @@ struct ConversionTests {
     @Test func castFloatFromInt() {
         profiler.event("ConversionTests.castFloatFromInt")
         
-        PyModule.main.def("will_cast(x: float) -> None") { argc, argv in
+        py.main.def("will_cast(x: float) -> None") { argc, argv in
             PyBind.function(argc, argv) { (x: Double) in
                 ConversionTests.casted = x
             }

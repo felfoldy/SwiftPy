@@ -41,7 +41,7 @@ struct ModelContainerTests {
         #expect(data.keys?["__name__"] == "Item")
         
         // Is inserted?
-        let container = ModelContainer.init(PyModule.main.container?.reference)
+        let container: SwiftPy.ModelContainer? = py.main.container
         let models = try container?.context.fetch(FetchDescriptor<ModelData>())
         #expect(models == [data])
     }

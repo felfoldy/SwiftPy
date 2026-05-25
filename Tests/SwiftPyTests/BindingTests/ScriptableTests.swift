@@ -49,7 +49,7 @@ class TestClassWithProperties: PythonBindable {
 
 @MainActor
 struct ScriptableTests {
-    let main = PyModule.main
+    let main = py.main
     let type = TestClassWithProperties.pyType
     
     @Test func dtor() {
@@ -122,7 +122,7 @@ struct ScriptableTests {
     
     @Test func returningArgumentedFunction() async {
         let type = PyStrongRef(TestClassWithProperties.pyType)
-        PyModule.main.TestClass2 = type.reference
+        py.main.TestClass2 = type.reference
 
         await Interpreter.asyncRun("""
         tc8 = TestClass2.create()

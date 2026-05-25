@@ -112,7 +112,7 @@ extension TestClass: PythonBindable {
 
 @MainActor
 struct PythonConvertibleClassTests {
-    let main = PyModule.main
+    let main = py.main
     let type = TestClass.pyType
     
     @Test func returnCachedFromToPython() throws {

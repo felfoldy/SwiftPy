@@ -11,11 +11,13 @@ import SwiftPy
 @MainActor
 struct PyAPITests {
     @Test func setAttribute() throws {
-        let main = PyModule.main
+        let main = py.main
 
         Interpreter.execute("class Test: ...")
 
-        main.Test?.reference.bind("__init__(self, val: str) -> None") { argc, argv in
+        let Test = main.Test
+
+        Test?.reference.bind("__init__(self, val: str) -> None") { argc, argv in
             PyAPI.return {
                 if let argv {
                     try py.setattr(argv, name: "param", value: argv[1])
@@ -41,7 +43,7 @@ struct PyAPITests {
             return a + b
         """)
         
-        try #expect(PyModule.main.add?(10, 20) == 30)
+        try #expect(py.main.add?(10, 20) == 30)
     }
     
     @Test func referenceCallThrows() throws {
@@ -51,7 +53,7 @@ struct PyAPITests {
         """)
         
         #expect(throws: PythonError.self) {
-            try PyModule.main.referenceCallThrows?()
+            try py.main.referenceCallThrows?()
         }
     }
 }

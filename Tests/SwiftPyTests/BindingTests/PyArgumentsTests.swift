@@ -37,7 +37,7 @@ extension PyArgumentTests_SUT: HasSlots {
 @MainActor
 struct PyArgumentsTests {
     @Test func argumentsInit() throws {
-        let main = PyModule.main
+        let main = py.main
         
         main.PyArgumentTests_SUT = py.tpobject(PyArgumentTests_SUT.pyType)
                 

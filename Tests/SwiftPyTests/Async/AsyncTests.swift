@@ -17,7 +17,7 @@ func profile(_ name: StaticString) -> SignpostProfiler {
 @Suite("Async tests", .serialized)
 @MainActor
 struct AsyncTests {
-    let main = PyModule.main
+    let main = py.main
     let profiler = profile("AsyncTests")
     
     @Test func codeToRun() {
@@ -94,7 +94,7 @@ struct AsyncTests {
         #expect(main.new_result == 45)
     }
     
-    @Test func asyncWithoutAwait() async {
+    @Test func asyncWithoutAwait() async throws {
         main.def("async_func() -> AsyncTask") { _, _ in
             PyAPI.return { AsyncTask { 42 } }
         }
@@ -103,7 +103,8 @@ struct AsyncTests {
         result = async_func()
         """)
         
-        #expect(AsyncTask(main.result?.reference) != nil)
+        let task: AsyncTask? = main.result
+        #expect(task != nil)
     }
     
     static var asyncTaskIterator_task: AsyncTask!

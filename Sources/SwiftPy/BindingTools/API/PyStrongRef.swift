@@ -46,6 +46,9 @@ public final class PyStrongRef {
             let attribute = Interpreter.silenceErrors {
                 try py.getattr(reference, name: dynamicMember)
             }
+            if attribute?.isNone == true {
+                return nil
+            }
             return PyStrongRef(attribute)
         }
         set {
@@ -104,7 +107,7 @@ public final class PyStrongRef {
     /// Gets the item from a dictionary by a key.
     public subscript<Key: PythonConvertible>(_ key: Key) -> PyStrongRef? {
         get {
-            let keyObject = TempPyObject(key)
+            let keyObject = py.retain(key)
             let result = try? py.dict.getitem(reference, key: keyObject?.reference)
             return py.retain(result)
         }
@@ -120,7 +123,13 @@ public final class PyStrongRef {
     
     /// Gets the item from a dictionary by a key and convert the value to a swift type.
     public subscript<Key: PythonConvertible, Value: PythonConvertible>(_ key: Key) -> Value? {
-        get { Value(self[key]?.reference) }
+        get {
+            Interpreter.silenceErrors {
+                let key = py.retain(key)
+                let item =  try py.dict.getitem(reference, key: key?.reference)
+                return try .cast(item)
+            }
+        }
         set {
             Interpreter.silenceErrors {
                 let value = py.retain(newValue)

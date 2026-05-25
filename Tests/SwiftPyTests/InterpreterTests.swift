@@ -13,7 +13,7 @@ import pocketpy
 struct InterpreterTests {
     @Test func loadBundleModule() {
         Interpreter.execute("from rlcompleter import Completer")
-        #expect(PyModule.main.Completer != nil)
+        #expect(py.main.Completer != nil)
     }
     
     @Test func evaluate() {

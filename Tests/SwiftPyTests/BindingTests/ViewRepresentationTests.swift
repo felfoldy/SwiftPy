@@ -33,7 +33,7 @@ struct ViewRepresentationTests {
     
     @Test
     func customView() {
-        let main = PyModule.main
+        let main = py.main
         let io = TestIOStream()
         Interpreter.output = io
         

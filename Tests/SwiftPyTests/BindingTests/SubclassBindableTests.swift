@@ -22,7 +22,7 @@ private class Base: PythonBindable {
 
 @MainActor
 struct SubclassBindableTests {
-    let main = PyModule.main
+    let main = py.main
     let type = Base.pyType
     
     init() {
