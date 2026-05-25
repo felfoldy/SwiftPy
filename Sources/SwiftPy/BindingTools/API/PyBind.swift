@@ -25,7 +25,7 @@ public enum PyBind {
     /// PyBind.module("my_module", [MySwiftClass.self])
     /// ```
     /// This exposes `MySwiftClass` to Python and runs `my_module.py` if found in the app bundle.
-    public static func module(_ name: String, _ types: [PythonBindable.Type], block: @escaping (PyAPI.Reference?) -> Void = { _ in }) {
+    public static func module(_ name: String, _ types: [PythonBindable.Type], block: @escaping (PyRef?) -> Void = { _ in }) {
         Interpreter.moduleBuilders[name] = { module in
             guard let module = PyModule(module) else { return }
             // Set types.
@@ -42,7 +42,7 @@ public enum PyBind {
             block(module.reference)
             
             // Add module.__doc__.
-            _ = try? PyModule("interpreter")?.bind_interfaces?(module.reference)
+            _ = try? py.module("interpreter")?.bind_interfaces?(module.reference)
         }
     }
     
@@ -57,7 +57,7 @@ public enum PyBind {
             }
 
             // Add module.__doc__.
-            _ = try? PyModule("interpreter")?.bind_interfaces?(module.reference)
+            _ = try? py.module("interpreter")?.bind_interfaces?(module.reference)
         }
     }
     
@@ -76,7 +76,7 @@ public enum PyBind {
     /// - Returns: An array of casted arguments.
     @inlinable
     public static func castArgs<each Arg: PythonConvertible>(
-        argv: PyAPI.Reference?,
+        argv: PyRef?,
         from offset: Int = 0
     ) throws -> (repeat each Arg) {
         var i: Int = offset
@@ -97,7 +97,7 @@ public enum PyBind {
     @inlinable
     public static func checkArgs<each Arg: PythonConvertible>(
         argc: Int32,
-        argv: PyAPI.Reference?,
+        argv: PyRef?,
         from offset: Int = 0
     ) throws -> (repeat each Arg) {
         var i: Int = offset
@@ -120,7 +120,7 @@ public enum PyBind {
     @inlinable
     public static func function(
         _ argc: Int32,
-        _ argv: @autoclosure () -> PyAPI.Reference?,
+        _ argv: @autoclosure () -> PyRef?,
         _ fn: @MainActor () throws -> Void
     ) -> Bool {
         PyAPI.return {
@@ -134,7 +134,7 @@ public enum PyBind {
     @inlinable
     public static func function(
         _ argc: Int32,
-        _ argv: @autoclosure () -> PyAPI.Reference?,
+        _ argv: @autoclosure () -> PyRef?,
         _ fn: @MainActor @escaping () async throws -> Void
     ) -> Bool {
         PyAPI.return {
@@ -147,7 +147,7 @@ public enum PyBind {
     @inlinable
     public static func function(
         _ argc: Int32,
-        _ argv: @autoclosure () -> PyAPI.Reference?,
+        _ argv: @autoclosure () -> PyRef?,
         _ fn: @MainActor () throws -> (any PythonConvertible)
     ) -> Bool {
         PyAPI.return { try fn() }
@@ -157,7 +157,7 @@ public enum PyBind {
     @inlinable
     public static func function<Result: PythonConvertible>(
         _ argc: Int32,
-        _ argv: @autoclosure () -> PyAPI.Reference?,
+        _ argv: @autoclosure () -> PyRef?,
         _ fn: @MainActor @escaping () async throws -> Result
     ) -> Bool where Result: Sendable {
         PyAPI.return {
@@ -170,7 +170,7 @@ public enum PyBind {
     @inlinable
     public static func function<each Arg: PythonConvertible>(
         _ argc: Int32,
-        _ argv: PyAPI.Reference?,
+        _ argv: PyRef?,
         _ arguments: @MainActor (repeat each Arg) throws -> Void
     ) -> Bool {
         PyAPI.return {
@@ -184,7 +184,7 @@ public enum PyBind {
     @inlinable
     public static func function<each Arg: PythonConvertible>(
         _ argc: Int32,
-        _ argv: PyAPI.Reference?,
+        _ argv: PyRef?,
         _ fn: @MainActor @escaping (repeat each Arg) async throws -> Void
     ) -> Bool {
         PyAPI.return {
@@ -199,7 +199,7 @@ public enum PyBind {
     @inlinable
     public static func function<each Arg: PythonConvertible>(
         _ argc: Int32,
-        _ argv: PyAPI.Reference?,
+        _ argv: PyRef?,
         _ arguments: @MainActor (repeat each Arg) throws -> any PythonConvertible
     ) -> Bool {
         PyAPI.return {
@@ -215,7 +215,7 @@ public enum PyBind {
         Result: PythonConvertible
     >(
         _ argc: Int32,
-        _ argv: PyAPI.Reference?,
+        _ argv: PyRef?,
         _ fn: @MainActor @escaping (repeat each Arg) async throws -> Result
     ) -> Bool where Result: Sendable {
         PyAPI.return {

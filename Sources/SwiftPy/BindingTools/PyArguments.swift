@@ -5,23 +5,24 @@
 //  Created by Tibor Felföldy on 2025-10-25.
 //
 
+@available(*, deprecated, message: "Use PyObject for arguments")
 @MainActor
 public struct PyArguments {
     public let count: Int32
-    public let value: PyAPI.Reference?
+    public let value: PyRef?
 
-    public init(argc: Int32, argv: PyAPI.Reference?) {
+    public init(argc: Int32, argv: PyRef?) {
         self.count = argc
         self.value = argv
     }
     
     @inlinable
-    public subscript(_ offset: Int) -> PyAPI.Reference? {
+    public subscript(_ offset: Int) -> PyRef? {
         value?[offset]
     }
     
     @inlinable
-    public subscript(_ slot: any RawRepresentable<Int32>) -> PyAPI.Reference? {
+    public subscript(_ slot: any RawRepresentable<Int32>) -> PyRef? {
         get { value?[slot: slot.rawValue] }
         nonmutating set { value?[slot: slot.rawValue] = newValue }
     }

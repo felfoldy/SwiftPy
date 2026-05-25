@@ -13,7 +13,7 @@ public protocol PythonBindable: AnyObject, PythonConvertible {
 }
 
 public struct PythonBindingCache {
-    public var reference: PyAPI.Reference?
+    public var reference: PyRef?
     public var bindings: [String: PythonBindable] = [:]
     
     public init() {}
@@ -26,7 +26,7 @@ public extension PythonBindable {
     }
     
     @inlinable
-    func storeInPython(_ reference: PyAPI.Reference?, userdata: UnsafeMutableRawPointer? = nil) {
+    func storeInPython(_ reference: PyRef?, userdata: UnsafeMutableRawPointer? = nil) {
         guard let reference else { return }
 
         let userdata = userdata ?? reference.userdata
@@ -37,13 +37,13 @@ public extension PythonBindable {
         userdata.storeBytes(of: retainedSelfPointer, as: UnsafeRawPointer.self)
 
         // Store cache of python value.
-        let pointer = PyAPI.Reference.allocate(capacity: 1)
+        let pointer = PyRef.allocate(capacity: 1)
         pointer.initialize(to: reference.pointee)
         _pythonCache.reference = pointer
     }
     
     @inlinable
-    func toPython(_ reference: PyAPI.Reference) {
+    func toPython(_ reference: PyRef) {
         if let cached = _pythonCache.reference {
             reference.assign(cached)
             return
@@ -54,7 +54,7 @@ public extension PythonBindable {
     }
     
     @inlinable
-    static func fromPython(_ reference: PyAPI.Reference) -> Self {
+    static func fromPython(_ reference: PyRef) -> Self {
         let pointer = reference.userdata
             .load(as: UnsafeRawPointer.self)
         return Unmanaged<Self>.fromOpaque(pointer)
@@ -71,7 +71,7 @@ public extension PythonConvertible {
     ///   - ref: result it got
     ///   - position: position
     /// - Returns: `false`
-    @inlinable static func throwTypeError(_ ref: PyAPI.Reference?, _ position: Int) -> Bool {
+    @inlinable static func throwTypeError(_ ref: PyRef?, _ position: Int) -> Bool {
         PyAPI.throw(.TypeError, "Expected \(pyType.name) got \(py.typeof(ref).name) at position \(position)")
     }
 }
@@ -79,10 +79,10 @@ public extension PythonConvertible {
 // MARK: Binding helpers.
 
 public extension PythonBindable {
-    typealias object = PyAPI.Reference
+    typealias object = PyRef
 
     @inlinable
-    static func __new__(_ argv: PyAPI.Reference?) -> Bool {
+    static func __new__(_ argv: PyRef?) -> Bool {
         let type = py.totype(argv)
         py.newobject(
             py.retval,
@@ -94,7 +94,7 @@ public extension PythonBindable {
     
     @inlinable
     static func __init__(
-        _ argc: Int32, _ argv: PyAPI.Reference?,
+        _ argc: Int32, _ argv: PyRef?,
         _ initializer: @MainActor () throws -> Self
     ) -> Bool {
         guard argc == 1 else { return false }
@@ -105,7 +105,7 @@ public extension PythonBindable {
     
     @inlinable
     static func __init__<each Arg: PythonConvertible>(
-        _ argc: Int32, _ argv: PyAPI.Reference?,
+        _ argc: Int32, _ argv: PyRef?,
         _ initializer: @MainActor (repeat each Arg) throws -> Self
     ) -> Bool {
         var result: (repeat each Arg)
@@ -126,7 +126,7 @@ public extension PythonBindable {
     
     @inlinable
     static func __init__(
-        _ argc: Int32, _ argv: PyAPI.Reference?,
+        _ argc: Int32, _ argv: PyRef?,
         _ initializer: @MainActor (PyArguments) throws -> Self
     ) -> Bool {
         do {
@@ -141,7 +141,7 @@ public extension PythonBindable {
     }
     
     @inlinable
-    static func __repr__(_ argv: PyAPI.Reference?) -> Bool {
+    static func __repr__(_ argv: PyRef?) -> Bool {
         PyAPI.return {
             let obj = try cast(argv)
             return String(describing: obj)
@@ -149,7 +149,7 @@ public extension PythonBindable {
     }
 
     @inlinable
-    static func __view__(_ argv: PyAPI.Reference?) -> Bool {
+    static func __view__(_ argv: PyRef?) -> Bool {
         PyAPI.return {
             if Self.self is (any ViewRepresentable.Type) {
                 let obj = try cast(argv) as? (any ViewRepresentable)
@@ -160,12 +160,12 @@ public extension PythonBindable {
     }
     
     @inlinable
-    static func _bind_getter<Value>(_ keypath: KeyPath<Self, Value>, _ argv: PyAPI.Reference?) -> Bool {
+    static func _bind_getter<Value>(_ keypath: KeyPath<Self, Value>, _ argv: PyRef?) -> Bool {
         PyAPI.return { Self(argv)?[keyPath: keypath] }
     }
 
     @inlinable
-    static func _bind_setter<Value: PythonConvertible>(_ keypath: ReferenceWritableKeyPath<Self, Value>, _ argv: PyAPI.Reference?) -> Bool {
+    static func _bind_setter<Value: PythonConvertible>(_ keypath: ReferenceWritableKeyPath<Self, Value>, _ argv: PyRef?) -> Bool {
         PyAPI.return {
             let base = try cast(argv)
             base[keyPath: keypath] = try Value.cast(argv, 1)
@@ -174,7 +174,7 @@ public extension PythonBindable {
     }
     
     @inlinable
-    static func _bind_setter<Value>(_ keypath: ReferenceWritableKeyPath<Self, Value>, _ argv: PyAPI.Reference?) -> Bool {
+    static func _bind_setter<Value>(_ keypath: ReferenceWritableKeyPath<Self, Value>, _ argv: PyRef?) -> Bool {
         PyAPI.return {
             let anyValue = try SwiftObject.cast(argv, 1).value
             guard let value = anyValue as? Value else {
@@ -191,7 +191,7 @@ public extension PythonBindable {
     /// `() -> Void`
     @inlinable
     static func _bind_function(
-        _ argv: PyAPI.Reference?,
+        _ argv: PyRef?,
         _ fn: (Self) -> () throws -> Void
     ) -> Bool {
         PyAPI.`return` {
@@ -202,7 +202,7 @@ public extension PythonBindable {
     /// `() async -> Void`
     @inlinable
     static func _bind_function(
-        _ argv: PyAPI.Reference?,
+        _ argv: PyRef?,
         _ fn: @escaping (Self) -> () async throws -> Void
     ) -> Bool {
         PyAPI.return {
@@ -216,7 +216,7 @@ public extension PythonBindable {
     /// `() -> Result?`
     @inlinable
     static func _bind_function(
-        _ argv: PyAPI.Reference?,
+        _ argv: PyRef?,
         _ fn: (Self) -> () throws -> any PythonConvertible
     ) -> Bool {
         PyAPI.return {
@@ -227,7 +227,7 @@ public extension PythonBindable {
     /// `() async -> Result?`
     @inlinable
     static func _bind_function<Result: PythonConvertible>(
-        _ argv: PyAPI.Reference?,
+        _ argv: PyRef?,
         _ fn: @escaping (Self) -> () async throws -> Result
     ) -> Bool where Result: Sendable {
         PyAPI.return {
@@ -241,7 +241,7 @@ public extension PythonBindable {
     /// `(...) -> Void`
     @inlinable
     static func _bind_function<each Arg: PythonConvertible>(
-        _ argv: PyAPI.Reference?,
+        _ argv: PyRef?,
         _ arguments: (Self) -> (repeat each Arg) throws -> Void
     ) -> Bool {
         PyAPI.return {
@@ -255,7 +255,7 @@ public extension PythonBindable {
     /// `(...) async -> Void`
     @inlinable
     static func _bind_function<each Arg: PythonConvertible>(
-        _ argv: PyAPI.Reference?,
+        _ argv: PyRef?,
         _ fn: @escaping (Self) -> (repeat each Arg) async throws -> Void
     ) -> Bool where (repeat each Arg): Sendable {
         PyAPI.return {
@@ -271,7 +271,7 @@ public extension PythonBindable {
     /// `(...) -> any`
     @inlinable
     static func _bind_function<each Arg: PythonConvertible>(
-        _ argv: PyAPI.Reference?,
+        _ argv: PyRef?,
         _ arguments: (Self) -> (repeat each Arg) throws -> any PythonConvertible
     ) -> Bool {
         PyAPI.return {
@@ -284,7 +284,7 @@ public extension PythonBindable {
     /// `(...) async -> any`
     @inlinable
     static func _bind_function<each Arg: PythonConvertible, Result: PythonConvertible>(
-        _ argv: PyAPI.Reference?,
+        _ argv: PyRef?,
         _ fn: @escaping (Self) -> (repeat each Arg) async throws -> Result
     ) -> Bool where Result: Sendable, (repeat each Arg): Sendable {
         PyAPI.return {
@@ -298,7 +298,7 @@ public extension PythonBindable {
     }
 
     @inlinable
-    static func __getitem__<Key: PythonConvertible>(_ argc: Int32, _ argv: PyAPI.Reference?, _ fn: (Self) -> (Key) -> any PythonConvertible) -> Bool {
+    static func __getitem__<Key: PythonConvertible>(_ argc: Int32, _ argv: PyRef?, _ fn: (Self) -> (Key) -> any PythonConvertible) -> Bool {
         PyAPI.return {
             if argc != 2 {
                 throw PythonError.ValueError("Expected 2 arguments, got \(argc)")

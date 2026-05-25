@@ -29,7 +29,7 @@ extension PyArgumentTests_SUT: HasSlots {
         case result
     }
 
-    func setSlot(_ slot: Slot, value: PyAPI.Reference, to args: PyArguments) {
+    func setSlot(_ slot: Slot, value: PyRef, to args: PyArguments) {
         args.value?[slot: slot.rawValue] = value
     }
 }

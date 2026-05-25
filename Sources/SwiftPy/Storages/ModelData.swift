@@ -79,7 +79,7 @@ extension [LookupKeyValue] {
 @MainActor
 @Scriptable
 class ModelContainer: PythonBindable {
-    typealias object = PyAPI.Reference
+    typealias object = PyRef
     
     internal let container: SwiftData.ModelContainer
     internal let context: SwiftData.ModelContext

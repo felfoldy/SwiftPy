@@ -94,7 +94,7 @@ public final class PyObject {
     }
     
     @discardableResult
-    public func callAsFunction<Result: PythonConvertible>(_ args: PythonConvertible?...) throws(PythonError) -> Result? {
+    public func callAsFunction<Result: PythonConvertible>(_ args: PythonConvertible?...) throws(PythonError) -> Result {
         let result = try py.retain(py.call(reference, args: args))
         #if DEBUG
         log.trace("call \(self.description) -> \(result.description)")
@@ -142,6 +142,10 @@ public final class PyObject {
             }
         }
     }
+
+    public func def(_ signature: String, docs: String? = nil, function: PyAPI.CFunction) {
+        reference.bind(signature, docstring: docs, function: function)
+    }
 }
 
 // MARK: - Convenience initializers.
@@ -164,12 +168,12 @@ extension PyObject: PythonConvertible, @MainActor CustomStringConvertible {
         "<\(reference.pointee.type.name) at \(reference)>"
     }
     
-    public func toPython(_ reference: PyAPI.Reference) {
+    public func toPython(_ reference: PyRef) {
         log.trace("toPython: \(self.description)")
         reference.assign(self.reference)
     }
     
-    public static func fromPython(_ reference: PyAPI.Reference) -> PyObject {
+    public static func fromPython(_ reference: PyRef) -> PyObject {
         let ref = PyObject(reference)
         log.trace("fromPython: \(ref.description)")
         return ref

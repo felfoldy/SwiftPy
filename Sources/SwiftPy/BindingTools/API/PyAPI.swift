@@ -19,7 +19,7 @@ public typealias PyValue = PyAPI.Value
 @MainActor
 public struct PyAPI {
     /// Python function signature `(argc: Int32, argv: StackRef?) -> Bool`.
-    public typealias CFunction = py_CFunction
+    public typealias CFunction = @convention(c) (Int32, PyRef?) -> Bool
 
     /// Just a type alias of an `OpaquePointer`.
     public typealias Reference = py_Ref
@@ -44,7 +44,7 @@ public struct PyAPI {
     }
     
     @inlinable
-    public var retval: PyAPI.Reference {
+    public var retval: PyRef {
         py_retval()
     }
 
@@ -67,17 +67,17 @@ public struct PyAPI {
     }
 
     @inlinable
-    public func getmodule(_ name: String) -> PyAPI.Reference? {
+    public func getmodule(_ name: String) -> PyRef? {
         py_getmodule(name)
     }
     
     @inlinable
-    public func newmodule(_ path: String) -> PyAPI.Reference {
+    public func newmodule(_ path: String) -> PyRef {
         py_newmodule(path)
     }
     
     @inlinable
-    public func `import`(_ name: String) throws -> PyAPI.Reference? {
+    public func `import`(_ name: String) throws -> PyRef? {
         let result = py_import(name)
         let retval = try PyAPI.convertRetval {
             result != -1
@@ -86,12 +86,12 @@ public struct PyAPI {
     }
     
     @inlinable
-    public func getdict(_ self: PyAPI.Reference, name: String) -> PyAPI.Reference? {
+    public func getdict(_ self: PyRef, name: String) -> PyRef? {
         py_getdict(self, py_name(name))
     }
     
     @inlinable
-    public func setdict(_ self: PyAPI.Reference?, name: String, value: PyAPI.Reference?) {
+    public func setdict(_ self: PyRef?, name: String, value: PyRef?) {
         py_setdict(self, py_name(name), value ?? py_None())
     }
 
@@ -99,7 +99,7 @@ public struct PyAPI {
     @inlinable
     public static func convertRetval(
         _ call: () -> Bool
-    ) throws(PythonError) -> PyAPI.Reference {
+    ) throws(PythonError) -> PyRef {
         let p0 = py.peek()
         if call() {
             return py.retval
@@ -118,9 +118,9 @@ public struct PyAPI {
     @discardableResult
     @inlinable
     public static func convertRetval(
-        _ value: PyAPI.Reference?,
-        _ call: (PyAPI.Reference) -> Bool
-    ) throws(PythonError) -> PyAPI.Reference {
+        _ value: PyRef?,
+        _ call: (PyRef) -> Bool
+    ) throws(PythonError) -> PyRef {
         let tmp = py.pushtmp()
         tmp.assign(value)
         defer { py.pop() }
@@ -130,7 +130,7 @@ public struct PyAPI {
     }
 
     @inlinable
-    public func repr(_ value: PyAPI.Reference?) throws(PythonError) -> String {
+    public func repr(_ value: PyRef?) throws(PythonError) -> String {
         let result = try PyAPI.convertRetval(value) { tmp in
             py_repr(tmp)
         }
@@ -139,21 +139,21 @@ public struct PyAPI {
     }
 
     @inlinable
-    public func getattr(_ self: PyAPI.Reference, name: String) throws(PythonError) -> PyAPI.Reference {
+    public func getattr(_ self: PyRef, name: String) throws(PythonError) -> PyRef {
         try PyAPI.convertRetval(self) { tmp in
             py_getattr(tmp, py_name(name))
         }
     }
 
     @inlinable
-    public func setattr(_ self: PyAPI.Reference, name: String, value: PyAPI.Reference?) throws(PythonError) {
+    public func setattr(_ self: PyRef, name: String, value: PyRef?) throws(PythonError) {
         try PyAPI.convertRetval(self) { tmp in
             py_setattr(tmp, py_name(name), value ?? py_None())
         }
     }
 
     @inlinable
-    public func iter(_ self: PyAPI.Reference?) throws(PythonError) -> PyAPI.Reference {
+    public func iter(_ self: PyRef?) throws(PythonError) -> PyRef {
         try PyAPI.convertRetval(self) { tmp in
             py_iter(tmp)
         }
@@ -172,14 +172,14 @@ public struct PyAPI {
     }
 
     @inlinable
-    public func compile(source: String, filename: String, mode: CompileMode) throws(PythonError) -> PyAPI.Reference {
+    public func compile(source: String, filename: String, mode: CompileMode) throws(PythonError) -> PyRef {
         try PyAPI.convertRetval {
             py_compile(source, filename, mode.pyMode, false)
         }
     }
     
     @inlinable
-    public func exec(source: String, filename: String, mode: CompileMode, module: PyAPI.Reference?) throws(PythonError) -> PyAPI.Reference {
+    public func exec(source: String, filename: String, mode: CompileMode, module: PyRef?) throws(PythonError) -> PyRef {
         try PyAPI.convertRetval {
             py_exec(source, filename, mode.pyMode, module)
         }
@@ -187,7 +187,7 @@ public struct PyAPI {
 
     @discardableResult
     @inlinable
-    public func call(_ function: PyAPI.Reference, args: PythonConvertible?...) throws(PythonError) -> PyAPI.Reference {
+    public func call(_ function: PyRef, args: PythonConvertible?...) throws(PythonError) -> PyRef {
         try PyAPI.convertRetval(function) { function in
             py.push(function)
             py.pushnil()
@@ -205,13 +205,13 @@ public struct PyAPI {
     }
 
     @inlinable
-    public func callable(_ self: PyAPI.Reference) -> Bool {
+    public func callable(_ self: PyRef) -> Bool {
         py_callable(self)
     }
 
     @discardableResult
     @inlinable
-    public func newobject(_ out: PyAPI.Reference, type: PyType, slots: Int32) -> UnsafeMutablePointer<UnsafeRawPointer?> {
+    public func newobject(_ out: PyRef, type: PyType, slots: Int32) -> UnsafeMutablePointer<UnsafeRawPointer?> {
         let ud = py_newobject(
             out,
             type,
@@ -224,7 +224,7 @@ public struct PyAPI {
     }
 
     @inlinable
-    public func newobject<T: PythonConvertible>(_ value: T, out: PyAPI.Reference, slots: Int32) {
+    public func newobject<T: PythonConvertible>(_ value: T, out: PyRef, slots: Int32) {
         let ud = py_newobject(out, T.pyType, slots, Int32(MemoryLayout<T>.size))
             .assumingMemoryBound(to: T.self)
         ud.initialize(to: value)
@@ -233,7 +233,7 @@ public struct PyAPI {
     // MARK: - Stack accessors
     
     @inlinable
-    public func push(_ ref: PyAPI.Reference?) {
+    public func push(_ ref: PyRef?) {
         py_push(ref)
     }
 
@@ -244,7 +244,7 @@ public struct PyAPI {
     
     /// Get a temporary variable from the stack.
     @inlinable
-    public func pushtmp() -> PyAPI.Reference {
+    public func pushtmp() -> PyRef {
         py_pushtmp()
     }
     
@@ -259,7 +259,7 @@ public struct PyAPI {
     }
 
     @inlinable
-    public func peek() -> PyAPI.Reference {
+    public func peek() -> PyRef {
         py_peek(0)
     }
 
@@ -269,7 +269,7 @@ public struct PyAPI {
     }
     
     @inlinable
-    public func clearexc(_ unwindingPoint: PyAPI.Reference) {
+    public func clearexc(_ unwindingPoint: PyRef) {
         py_clearexc(unwindingPoint)
     }
 }
@@ -279,23 +279,23 @@ public struct PyAPI {
 public extension PyAPI {
     /// Get the type of the object.
     @inlinable
-    func typeof(_ self: PyAPI.Reference?) -> PyType {
+    func typeof(_ self: PyRef?) -> PyType {
         py_typeof(self ?? py_None())
     }
     
     /// Convert a type object in python to PyType.
     @inlinable
-    func totype(_ typeObject: PyAPI.Reference?) -> PyType {
+    func totype(_ typeObject: PyRef?) -> PyType {
         py_totype(typeObject)
     }
     
     @inlinable
-    func istype(_ self: PyAPI.Reference?, type: PyType) -> Bool {
+    func istype(_ self: PyRef?, type: PyType) -> Bool {
         py_istype(self, type)
     }
     
     @inlinable
-    func isinstance(_ obj: PyAPI.Reference?, type: PyType) -> Bool {
+    func isinstance(_ obj: PyRef?, type: PyType) -> Bool {
         py_isinstance(obj, type)
     }
     
@@ -303,7 +303,7 @@ public extension PyAPI {
     func newtype(
         name: String,
         base: PyType,
-        module: PyAPI.Reference?,
+        module: PyRef?,
         dtor: @convention(c) (UnsafeMutableRawPointer?) -> Void
     ) -> PyType {
         py_newtype(name, base, module, dtor)
@@ -315,7 +315,7 @@ public extension PyAPI {
     }
     
     @inlinable
-    func tpobject(_ type: PyType) -> PyAPI.Reference? {
+    func tpobject(_ type: PyType) -> PyRef? {
         py_tpobject(type)
     }
     
@@ -325,15 +325,15 @@ public extension PyAPI {
     }
     
     @inlinable
-    func newnativefunc(_ function: PyAPI.CFunction) -> PyAPI.Reference {
-        let out = PyAPI.Reference.allocate(capacity: 1)
+    func newnativefunc(_ function: PyAPI.CFunction) -> PyRef {
+        let out = PyRef.allocate(capacity: 1)
         out.initialize(to: py_TValue())
         py_newnativefunc(out, function)
         return out
     }
 
     @inlinable
-    func newfunction(_ out: PyAPI.Reference, signature: String, docstring: String?, function: PyAPI.CFunction) -> py_Name {
+    func newfunction(_ out: PyRef, signature: String, docstring: String?, function: PyAPI.CFunction) -> py_Name {
         let docstring = docstring?.withCString(strdup)
         return py_newfunction(out, signature, function, docstring, -1)
     }
@@ -347,7 +347,7 @@ public extension PyAPI {
         // TODO: Better error handling
         // (1: found, 0: not found, -1: error)
         @inlinable
-        public func getitem(_ self: PyAPI.Reference, key: PyAPI.Reference?) throws -> PyAPI.Reference? {
+        public func getitem(_ self: PyRef, key: PyRef?) throws -> PyRef? {
             let result = py_dict_getitem(self, key)
             let retval = try PyAPI.convertRetval {
                 result != -1
@@ -356,7 +356,7 @@ public extension PyAPI {
         }
         
         @inlinable
-        public func setitem(_ self: PyAPI.Reference, key: PyAPI.Reference?, value: PyAPI.Reference?) throws(PythonError) -> PyAPI.Reference {
+        public func setitem(_ self: PyRef, key: PyRef?, value: PyRef?) throws(PythonError) -> PyRef {
             try PyAPI.convertRetval(self) { temp in
                 py_dict_setitem(self, key, value)
             }
@@ -365,7 +365,7 @@ public extension PyAPI {
     
     struct List {
         @inlinable
-        public func append(_ self: PyAPI.Reference, value: PyAPI.Reference?) {
+        public func append(_ self: PyRef, value: PyRef?) {
             py_list_append(self, value)
         }
 
@@ -382,53 +382,53 @@ public extension PyAPI {
     
     struct Tuple {
         @inlinable
-        public func getitem(_ self: PyAPI.Reference?, i: Int32) -> PyAPI.Reference? {
+        public func getitem(_ self: PyRef?, i: Int32) -> PyRef? {
             py_tuple_getitem(self, i)
         }
 
         @inlinable
-        public func len(_ self: PyAPI.Reference?) -> Int32 {
+        public func len(_ self: PyRef?) -> Int32 {
             py_tuple_len(self)
         }
     }
     
     @inlinable
-    func newbool(_ out: PyAPI.Reference, value: Bool) {
+    func newbool(_ out: PyRef, value: Bool) {
         py_newbool(out, value)
     }
     
     @inlinable
-    func tobool(_ self: PyAPI.Reference) -> Bool {
+    func tobool(_ self: PyRef) -> Bool {
         py_tobool(self)
     }
     
     @inlinable
-    func newint(_ out: PyAPI.Reference, value: Int) {
+    func newint(_ out: PyRef, value: Int) {
         py_newint(out, py_i64(value))
     }
     
     @inlinable
-    func toint(_ self: PyAPI.Reference) -> Int {
+    func toint(_ self: PyRef) -> Int {
         Int(py_toint(self))
     }
     
     @inlinable
-    func newstr(_ out: PyAPI.Reference, value: String) {
+    func newstr(_ out: PyRef, value: String) {
         py_newstr(out, value)
     }
     
     @inlinable
-    func tostr(_ self: PyAPI.Reference) -> String {
+    func tostr(_ self: PyRef) -> String {
         String(cString: py_tostr(self))
     }
     
     @inlinable
-    func newfloat(_ out: PyAPI.Reference, value: Double) {
+    func newfloat(_ out: PyRef, value: Double) {
         py_newfloat(out, value)
     }
     
     @inlinable
-    func castfloat(_ self: PyAPI.Reference) -> Double {
+    func castfloat(_ self: PyRef) -> Double {
         switch self.pointee.type {
         case .int: Double(self.pointee._i64)
         case .float: self.pointee._f64
@@ -437,13 +437,13 @@ public extension PyAPI {
     }
 
     @inlinable
-    func newbytes(_ out: PyAPI.Reference, n: Int) -> UnsafeMutableRawBufferPointer {
+    func newbytes(_ out: PyRef, n: Int) -> UnsafeMutableRawBufferPointer {
         let pointer = py_newbytes(out, Int32(n))
         return UnsafeMutableRawBufferPointer(start: pointer, count: n)
     }
     
     @inlinable
-    func tobytes(_ self: PyAPI.Reference) -> Data {
+    func tobytes(_ self: PyRef) -> Data {
         var size: Int32 = 0
         guard let bytes = py_tobytes(self, &size) else {
             return Data()
@@ -452,17 +452,17 @@ public extension PyAPI {
     }
     
     @inlinable
-    func newnone(_ out: PyAPI.Reference) {
+    func newnone(_ out: PyRef) {
         py_newnone(out)
     }
     
     @inlinable
-    func newlist(_ out: PyAPI.Reference) {
+    func newlist(_ out: PyRef) {
         py_newlist(out)
     }
     
     @inlinable
-    func newdict(_ out: PyAPI.Reference) {
+    func newdict(_ out: PyRef) {
         py_newdict(out)
     }
 }
@@ -507,7 +507,7 @@ public extension PyAPI {
 }
 
 public extension Interpreter {
-    @inlinable func module(_ name: String) -> PyAPI.Reference? {
+    @inlinable func module(_ name: String) -> PyRef? {
         if let module = py_getmodule(name) {
             return module
         }
@@ -523,7 +523,7 @@ public typealias PyType = py_Type
 
 // MARK: - Functions
 
-public extension PyAPI.Reference {
+public extension PyRef {
     @MainActor
     struct Functions {
         let eval = py_getbuiltin(py_name("eval"))!
@@ -536,7 +536,7 @@ public extension PyAPI.Reference {
 // MARK: - Reference extensions
 
 @MainActor
-public extension PyAPI.Reference {
+public extension PyRef {
     @inlinable var userdata: UnsafeMutableRawPointer {
         py_touserdata(self)
     }
@@ -555,7 +555,7 @@ public extension PyAPI.Reference {
     }
 
     /// Copies the given value into the reference memory.
-    @inlinable func assign(_ newValue: PyAPI.Reference?) {
+    @inlinable func assign(_ newValue: PyRef?) {
         guard let newValue else { return }
         pointee = newValue.pointee
     }
@@ -569,26 +569,26 @@ public extension PyAPI.Reference {
         return AnyView(view)
     }
 
-    @inlinable func setAttribute(_ name: String, _ value: PyAPI.Reference?) {
+    @inlinable func setAttribute(_ name: String, _ value: PyRef?) {
         try? py.setattr(self, name: name, value: value)
     }
     
-    @inlinable func emplace(_ name: String) -> PyAPI.Reference {
+    @inlinable func emplace(_ name: String) -> PyRef {
         py_emplacedict(self, py_name(name))
     }
 
     @inlinable
-    subscript(name: String) -> PyAPI.Reference? {
+    subscript(name: String) -> PyRef? {
         py.getdict(self, name: name)
     }
     
     @inlinable
-    subscript(index: Int) -> PyAPI.Reference? {
+    subscript(index: Int) -> PyRef? {
         advanced(by: index)
     }
     
     @inlinable
-    subscript(slot i: Int32) -> PyAPI.Reference? {
+    subscript(slot i: Int32) -> PyRef? {
         get {
             guard let result = py_getslot(self, i),
                   !result.isNil else {
@@ -607,7 +607,7 @@ public extension PyAPI.Reference {
     
     @inlinable
     func bind(_ signature: String, docstring: String? = nil, function: PyAPI.CFunction) {
-        let temp = PyAPI.Reference.allocate(capacity: 1)
+        let temp = PyRef.allocate(capacity: 1)
         temp.initialize(to: py_TValue())
         let name = py.newfunction(temp, signature: signature, docstring: docstring, function: function)
 
@@ -660,8 +660,8 @@ public extension PyAPI.Reference {
     }
 }
 
-@MainActor public extension PyAPI.Reference? {
-    @inlinable static func == <T: PythonConvertible>(lhs: PyAPI.Reference?, rhs: T?) -> Bool where T: Equatable {
+@MainActor public extension PyRef? {
+    @inlinable static func == <T: PythonConvertible>(lhs: PyRef?, rhs: T?) -> Bool where T: Equatable {
         T(lhs) == rhs
     }
 }
@@ -745,18 +745,18 @@ public enum PythonError: LocalizedError {
 
 extension PythonError: PythonConvertible {
     // TODO: test
-    public func toPython(_ reference: PyAPI.Reference) {
+    public func toPython(_ reference: PyRef) {
         let error = try! py.call(py.tpobject(type)!, args: description)
         reference.assign(error)
     }
     
-    public static func fromPython(_ reference: PyAPI.Reference) -> PythonError {
+    public static func fromPython(_ reference: PyRef) -> PythonError {
         let type = py.typeof(reference)
         let args = Interpreter.silenceErrors {
             try py.getattr(reference, name: "args")
         }
 
-        var ref: PyAPI.Reference? = py_None()
+        var ref: PyRef? = py_None()
         if let args, py.tuple.len(args) > 0 {
             ref = py.tuple.getitem(args, i: 0)
         }

@@ -46,9 +46,9 @@ public final class Interpreter {
 
     var replLines = [String]()
 
-    static var moduleBuilders: [String: (PyAPI.Reference?) -> Void] = [:]
+    static var moduleBuilders: [String: (PyRef?) -> Void] = [:]
 
-    var moduleBuilders: [String: (PyAPI.Reference?) -> Void] {
+    var moduleBuilders: [String: (PyRef?) -> Void] {
         get { Interpreter.moduleBuilders }
         set { Interpreter.moduleBuilders = newValue }
     }
@@ -76,7 +76,7 @@ public final class Interpreter {
         let code = try py.compile(source: code, filename: filename, mode: mode)
         
         try PyAPI.convertRetval(code) { code in
-            let function: PyAPI.Reference? = mode == .evaluation ? .functions.eval : .functions.exec
+            let function: PyRef? = mode == .evaluation ? .functions.eval : .functions.exec
 
             profiler.begin()
             // TODO: Store low level C function instead.

@@ -10,8 +10,8 @@ import Foundation
 
 @MainActor
 public protocol PythonConvertible {
-    @inlinable func toPython(_ reference: PyAPI.Reference)
-    @inlinable static func fromPython(_ reference: PyAPI.Reference) -> Self
+    @inlinable func toPython(_ reference: PyRef)
+    @inlinable static func fromPython(_ reference: PyRef) -> Self
 
     static var pyType: PyType { get }
 }
@@ -19,7 +19,7 @@ public protocol PythonConvertible {
 public extension PythonConvertible {
     /// Returns the reference to the type object.
     @inlinable
-    static var pyTypeObject: PyAPI.Reference? {
+    static var pyTypeObject: PyRef? {
         py.tpobject(pyType)
     }
     
@@ -31,7 +31,7 @@ public extension PythonConvertible {
     }
 
     @inlinable
-    init?(_ reference: PyAPI.Reference?) {
+    init?(_ reference: PyRef?) {
         guard let reference else { return nil }
         let canCast = py.istype(reference, type: Self.pyType) ||
         py.isinstance(reference, type: Self.pyType)
@@ -39,13 +39,13 @@ public extension PythonConvertible {
         self = Self.fromPython(reference)
     }
     
-    @inlinable func toPython(_ reference: PyAPI.Reference?) {
+    @inlinable func toPython(_ reference: PyRef?) {
         guard let reference else { return }
         toPython(reference)
     }
     
     @inlinable
-    static func cast(_ arg: PyAPI.Reference?, _ offset: Int = 0) throws(PythonError) -> Self {
+    static func cast(_ arg: PyRef?, _ offset: Int = 0) throws(PythonError) -> Self {
         guard let arg = arg?[offset] else {
             throw PythonError.TypeError("Expected \(pyType.name) at position \(offset)")
         }
@@ -66,12 +66,12 @@ extension Bool: PythonConvertible {
     public static let pyType = PyType.bool
     
     @inlinable
-    public func toPython(_ reference: PyAPI.Reference) {
+    public func toPython(_ reference: PyRef) {
         py.newbool(reference, value: self)
     }
     
     @inlinable
-    public static func fromPython(_ reference: PyAPI.Reference) -> Bool {
+    public static func fromPython(_ reference: PyRef) -> Bool {
         py.tobool(reference)
     }
 }
@@ -80,12 +80,12 @@ extension Int: PythonConvertible {
     public static let pyType = PyType.int
 
     @inlinable
-    public func toPython(_ reference: PyAPI.Reference) {
+    public func toPython(_ reference: PyRef) {
         py.newint(reference, value: self)
     }
 
     @inlinable
-    public static func fromPython(_ reference: PyAPI.Reference) -> Int {
+    public static func fromPython(_ reference: PyRef) -> Int {
         py.toint(reference)
     }
 }
@@ -93,11 +93,11 @@ extension Int: PythonConvertible {
 extension Int64: PythonConvertible {
     public static let pyType = PyType.int
 
-    @inlinable public func toPython(_ reference: PyAPI.Reference) {
+    @inlinable public func toPython(_ reference: PyRef) {
         py.newint(reference, value: Int(self))
     }
 
-    @inlinable public static func fromPython(_ reference: PyAPI.Reference) -> Int64 {
+    @inlinable public static func fromPython(_ reference: PyRef) -> Int64 {
         Int64(py.toint(reference))
     }
 }
@@ -105,11 +105,11 @@ extension Int64: PythonConvertible {
 extension String: PythonConvertible {
     public static let pyType = PyType.str
 
-    @inlinable public func toPython(_ reference: PyAPI.Reference) {
+    @inlinable public func toPython(_ reference: PyRef) {
         py.newstr(reference, value: self)
     }
 
-    @inlinable public static func fromPython(_ reference: PyAPI.Reference) -> String {
+    @inlinable public static func fromPython(_ reference: PyRef) -> String {
         if py.typeof(reference) == .str {
             return py.tostr(reference)
         }
@@ -126,12 +126,12 @@ extension Double: PythonConvertible {
     public static let pyType = PyType.float
 
     @inlinable
-    public func toPython(_ reference: PyAPI.Reference) {
+    public func toPython(_ reference: PyRef) {
         py.newfloat(reference, value: self)
     }
 
     @inlinable
-    public static func fromPython(_ reference: PyAPI.Reference) -> Double {
+    public static func fromPython(_ reference: PyRef) -> Double {
         py.castfloat(reference)
     }
 }
@@ -140,12 +140,12 @@ extension Float: PythonConvertible {
     public static let pyType = PyType.float
 
     @inlinable
-    public func toPython(_ reference: PyAPI.Reference) {
+    public func toPython(_ reference: PyRef) {
         py.newfloat(reference, value: Double(self))
     }
 
     @inlinable
-    public static func fromPython(_ reference: PyAPI.Reference) -> Float {
+    public static func fromPython(_ reference: PyRef) -> Float {
         Float(py.castfloat(reference))
     }
 }
@@ -153,13 +153,13 @@ extension Float: PythonConvertible {
 extension Data: PythonConvertible {
     public static let pyType = PyType.bytes
 
-    public func toPython(_ reference: PyAPI.Reference) {
+    public func toPython(_ reference: PyRef) {
         let count = self.count
         let bytes = py.newbytes(reference, n: count)
         copyBytes(to: bytes)
     }
 
-    public static func fromPython(_ reference: PyAPI.Reference) -> Data {
+    public static func fromPython(_ reference: PyRef) -> Data {
         py.tobytes(reference)
     }
 }
@@ -168,7 +168,7 @@ extension Optional: PythonConvertible where Wrapped: PythonConvertible {
 
     public static var pyType: PyType { Wrapped.pyType }
     
-    public func toPython(_ reference: PyAPI.Reference) {
+    public func toPython(_ reference: PyRef) {
         if let wrappedValue = self {
             wrappedValue.toPython(reference)
         } else {
@@ -176,7 +176,7 @@ extension Optional: PythonConvertible where Wrapped: PythonConvertible {
         }
     }
 
-    public static func fromPython(_ reference: PyAPI.Reference) -> Optional<Wrapped> {
+    public static func fromPython(_ reference: PyRef) -> Optional<Wrapped> {
         Wrapped(reference)
     }
 }
@@ -186,7 +186,7 @@ extension Optional: PythonConvertible where Wrapped: PythonConvertible {
 extension Array: PythonConvertible {
     public static var pyType: PyType { .list }
     
-    public func toPython(_ reference: PyAPI.Reference) {
+    public func toPython(_ reference: PyRef) {
         py.newlist(reference)
         for value in self {
             guard let value = value as? PythonConvertible else {
@@ -203,7 +203,7 @@ extension Array: PythonConvertible {
         }
     }
 
-    public static func fromPython(_ reference: PyAPI.Reference) -> [Element] {
+    public static func fromPython(_ reference: PyRef) -> [Element] {
         var items: [Element] = []
         
         guard let iter = try? py.retain(py.iter(reference)) else {
@@ -240,7 +240,7 @@ extension Dictionary: PythonConvertible where Key: PythonConvertible {
     
     public static var pyType: PyType { .dict }
 
-    public func toPython(_ reference: PyAPI.Reference) {
+    public func toPython(_ reference: PyRef) {
         py.newdict(reference)
         for (key, value) in self {
             guard let value = value as? PythonConvertible else {
@@ -258,7 +258,7 @@ extension Dictionary: PythonConvertible where Key: PythonConvertible {
         }
     }
 
-    public static func fromPython(_ reference: PyAPI.Reference) -> [Key: Value] {
+    public static func fromPython(_ reference: PyRef) -> [Key: Value] {
         var dict = [Key: Value]()
         
         do {
@@ -297,26 +297,26 @@ extension Dictionary: PythonConvertible where Key: PythonConvertible {
     }
 }
 
-extension PyAPI.Reference: PythonConvertible {
+extension PyRef: PythonConvertible {
     public static let pyType = PyType.object
     
     @inlinable
-    public func toPython(_ reference: PyAPI.Reference) {
+    public func toPython(_ reference: PyRef) {
         reference.assign(self)
     }
 
-    public static func fromPython(_ reference: PyAPI.Reference) -> PyAPI.Reference {
+    public static func fromPython(_ reference: PyRef) -> PyRef {
         #if DEBUG
-        log.fault("Casting PyAPI.Reference is unsafe. Use PyObject instead.")
+        log.fault("Casting PyRef is unsafe. Use PyObject instead.")
         #endif
         return reference
     }
 }
 
-// MARK: - PyAPI.Reference -> Any?
+// MARK: - PyRef -> Any?
 
 @MainActor
-public extension PyAPI.Reference {
+public extension PyRef {
     var asAny: Any? {
         if let string = String(self) { return string }
         if let int = Int(self) { return int }

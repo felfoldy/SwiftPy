@@ -82,12 +82,12 @@ public extension PyType {
     @inlinable
     func staticmethod(_ signature: String, _ docstring: String? = nil, function: PyAPI.CFunction) {
         // Create a function.
-        let ref = PyAPI.Reference.allocate(capacity: 1)
+        let ref = PyRef.allocate(capacity: 1)
         ref.initialize(to: py_TValue())
         let name = py.newfunction(ref, signature: signature, docstring: docstring, function: function)
 
         // Create staticmethod
-        let staticmethod: PyAPI.Reference = try! py.call(py.tpobject(.staticmethod)!, args: ref)
+        let staticmethod: PyRef = try! py.call(py.tpobject(.staticmethod)!, args: ref)
 
         // Sets staticmethod to type.
         py_setdict(py.tpobject(self), name, staticmethod)
@@ -96,7 +96,7 @@ public extension PyType {
     @inlinable
     static func make(_ name: String,
                      base: PyType = .object,
-                     module: PyAPI.Reference? = nil,
+                     module: PyRef? = nil,
                      bind: (PyType) -> Void) -> PyType {
         let type = py.newtype(
             name: name,

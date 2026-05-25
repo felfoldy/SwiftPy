@@ -69,11 +69,11 @@ public extension ViewRepresentable where Content: RepresentationContent, Content
 }
 
 extension AnyView: PythonConvertible {
-    public func toPython(_ reference: PyAPI.Reference) {
+    public func toPython(_ reference: PyRef) {
         py.newobject(self, out: reference, slots: 0)
     }
 
-    public static func fromPython(_ reference: PyAPI.Reference) -> AnyView {
+    public static func fromPython(_ reference: PyRef) -> AnyView {
         reference.toUserdata()
     }
 

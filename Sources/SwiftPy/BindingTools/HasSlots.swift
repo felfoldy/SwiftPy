@@ -19,7 +19,7 @@ public extension HasSlots {
 public extension PythonBindable where Self: HasSlots {
     /// Returns the stored python object for the given slot.
     @inlinable
-    subscript(slot: Slot) -> PyAPI.Reference? {
+    subscript(slot: Slot) -> PyRef? {
         get {
             let obj = py.retain(self)
             return obj?.reference[slot: slot.rawValue]
