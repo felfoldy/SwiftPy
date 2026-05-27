@@ -9,43 +9,6 @@ import pocketpy
 
 @MainActor
 public enum PyBind {
-    /// Registers a new Python module by binding Swift types and loading optional source code.
-    ///
-    /// - Parameters:
-    ///   - name: The name of the module to register.
-    ///   - types: An array of types conforming to ``PythonBindable`` to expose to Python.
-    ///
-    /// This function enables dynamic module creation by:
-    /// 1. Registering Swift types as Python classes.
-    /// 2. Optionally loading and executing a `.py` file with the same name from ``bundles``.
-    /// 3. Setting module-level metadata such as documentation.
-    ///
-    /// ### Example:
-    /// ```swift
-    /// PyBind.module("my_module", [MySwiftClass.self])
-    /// ```
-    /// This exposes `MySwiftClass` to Python and runs `my_module.py` if found in the app bundle.
-    public static func module(_ name: String, _ types: [PythonBindable.Type], block: @escaping (PyRef?) -> Void = { _ in }) {
-        Interpreter.moduleBuilders[name] = { module in
-            guard let module = PyModule(module) else { return }
-            // Set types.
-            for type in types {
-                let pyType = type.pyType
-                module[dynamicMember: pyType.name] = py.tpobject(pyType)
-            }
-
-            // Load source.
-            if let content = Interpreter.importFromSource(name: name + ".py") {
-                _ = try? py.exec(source: content, filename: name, mode: .execution, module: module.reference)
-            }
-
-            block(module.reference)
-            
-            // Add module.__doc__.
-            _ = try? py.module("interpreter")?.bind_interfaces?(module.reference)
-        }
-    }
-    
     public static func module(_ name: String, block: @escaping (PyModule) -> Void) {
         Interpreter.shared.moduleBuilders[name] = { module in
             guard let module = PyModule(module) else { return }
@@ -57,63 +20,8 @@ public enum PyBind {
             }
 
             // Add module.__doc__.
-            _ = try? py.module("interpreter")?.bind_interfaces?(module.reference)
+            _ = try? py.module("interpreter")?.bind_interfaces?(module)
         }
-    }
-    
-    @inline(__always)
-    public static func checkArgCount(_ got: Int32, expected: Int) throws(PythonError) {
-        if expected != got {
-            throw .argCountError(got, expected: expected)
-        }
-    }
-    
-    /// Casts multiple generic ``PythonConvertible`` types without argument count checking,
-    ///
-    /// - Parameters:
-    ///   - argv: Pointer to the first argument.
-    ///   - offset: Initial index offset.
-    /// - Returns: An array of casted arguments.
-    @inlinable
-    public static func castArgs<each Arg: PythonConvertible>(
-        argv: PyRef?,
-        from offset: Int = 0
-    ) throws -> (repeat each Arg) {
-        var i: Int = offset
-
-        @inline(__always)
-        var index: Int { defer { i += 1 }; return i }
-
-        return try (repeat (each Arg).cast(argv, index))
-    }
-    
-    /// Casts multiple generic ``PythonConvertible`` types with argument count checking,
-    ///
-    /// - Parameters:
-    ///   - argc: Argument count.
-    ///   - argv: Pointer to the first argument.
-    ///   - offset: Initial index offset.
-    /// - Returns: An array of casted arguments.
-    @inlinable
-    public static func checkArgs<each Arg: PythonConvertible>(
-        argc: Int32,
-        argv: PyRef?,
-        from offset: Int = 0
-    ) throws -> (repeat each Arg) {
-        var i: Int = offset
-
-        @inline(__always)
-        func index() throws -> Int {
-            defer { i += 1 }
-            if i >= argc {
-                throw PythonError.ValueError("Expected more arguments, got \(argc)")
-            }
-            return i
-        }
-
-        let result = try (repeat (each Arg).cast(argv, index()))
-        try checkArgCount(argc, expected: i)
-        return result
     }
 
     /// `() -> Void`
@@ -150,7 +58,10 @@ public enum PyBind {
         _ argv: @autoclosure () -> PyRef?,
         _ fn: @MainActor () throws -> (any PythonConvertible)
     ) -> Bool {
-        PyAPI.return { try fn() }
+        PyAPI.return {
+            try checkArgCount(argc, expected: 0)
+            return try fn()
+        }
     }
 
     /// `() async -> Any`
@@ -171,11 +82,11 @@ public enum PyBind {
     public static func function<each Arg: PythonConvertible>(
         _ argc: Int32,
         _ argv: PyRef?,
-        _ arguments: @MainActor (repeat each Arg) throws -> Void
+        _ fn: @MainActor (repeat each Arg) throws -> Void
     ) -> Bool {
         PyAPI.return {
-            let result = try checkArgs(argc: argc, argv: argv) as (repeat (each Arg))
-            try arguments(repeat (each result))
+            let arguments = try castArgs(argc: argc, argv: argv) as (repeat (each Arg))
+            try fn(repeat (each arguments))
             return .none
         }
     }
@@ -188,7 +99,7 @@ public enum PyBind {
         _ fn: @MainActor @escaping (repeat each Arg) async throws -> Void
     ) -> Bool {
         PyAPI.return {
-            let arguments = try checkArgs(argc: argc, argv: argv) as (repeat (each Arg))
+            let arguments = try castArgs(argc: argc, argv: argv) as (repeat (each Arg))
             return AsyncTask {
                 try await fn(repeat (each arguments))
             }
@@ -200,11 +111,11 @@ public enum PyBind {
     public static func function<each Arg: PythonConvertible>(
         _ argc: Int32,
         _ argv: PyRef?,
-        _ arguments: @MainActor (repeat each Arg) throws -> any PythonConvertible
+        _ fn: @MainActor (repeat each Arg) throws -> any PythonConvertible
     ) -> Bool {
         PyAPI.return {
-            let result = try checkArgs(argc: argc, argv: argv) as (repeat (each Arg))
-            return try arguments(repeat (each result))
+            let arguments = try castArgs(argc: argc, argv: argv) as (repeat (each Arg))
+            return try fn(repeat (each arguments))
         }
     }
     
@@ -219,10 +130,95 @@ public enum PyBind {
         _ fn: @MainActor @escaping (repeat each Arg) async throws -> Result
     ) -> Bool where Result: Sendable {
         PyAPI.return {
-            let arguments = try checkArgs(argc: argc, argv: argv) as (repeat (each Arg))
+            let arguments = try castArgs(argc: argc, argv: argv) as (repeat (each Arg))
             return AsyncTask {
                 try await fn(repeat (each arguments))
             }
+        }
+    }
+}
+
+// MARK: - Argument checkers.
+
+extension PyBind {
+    @inline(__always)
+    public static func checkArgCount(_ got: Int32, expected: Int) throws(PythonError) {
+        if expected != got {
+            throw .argCountError(got, expected: expected)
+        }
+    }
+    
+    /// Casts multiple generic ``PythonConvertible`` types without argument count checking,
+    ///
+    /// - Parameters:
+    ///   - argv: Pointer to the first argument.
+    ///   - offset: Initial index offset.
+    /// - Returns: An array of casted arguments.
+    @inlinable
+    public static func castArgs<each Arg: PythonConvertible>(
+        argv: PyRef?,
+        from offset: Int = 0
+    ) throws(PythonError) -> (repeat each Arg) {
+        var i: Int = offset
+
+        @inline(__always)
+        var index: Int { defer { i += 1 }; return i }
+
+        let arguments = try (repeat (each Arg).cast(argv, index))
+        return arguments
+    }
+    
+    /// Casts multiple generic ``PythonConvertible`` types with argument count checking,
+    ///
+    /// - Parameters:
+    ///   - argc: Argument count.
+    ///   - argv: Pointer to the first argument.
+    ///   - offset: Initial index offset.
+    /// - Returns: An array of casted arguments.
+    @inlinable
+    public static func castArgs<each Arg: PythonConvertible>(
+        argc: Int32,
+        argv: PyRef?,
+        from offset: Int = 0
+    ) throws(PythonError) -> (repeat each Arg) {
+        var i: Int = offset
+
+        @inline(__always)
+        func index() throws(PythonError) -> Int {
+            defer { i += 1 }
+            if i >= argc {
+                throw .TypeError("Expected more arguments, got \(argc)")
+            }
+            return i
+        }
+
+        let result = try (repeat (each Arg).cast(argv, index()))
+        try checkArgCount(argc, expected: i)
+        return result
+    }
+}
+
+// MARK: - Legacy PyBind
+
+extension PyBind {
+    public static func module(_ name: String, _ types: [PythonBindable.Type], block: @escaping (PyRef?) -> Void = { _ in }) {
+        Interpreter.moduleBuilders[name] = { module in
+            guard let module = PyModule(module) else { return }
+            // Set types.
+            for type in types {
+                let pyType = type.pyType
+                module[dynamicMember: pyType.name] = py.tpobject(pyType)
+            }
+
+            // Load source.
+            if let content = Interpreter.importFromSource(name: name + ".py") {
+                _ = try? py.exec(source: content, filename: name, mode: .execution, module: module.reference)
+            }
+
+            block(module.reference)
+            
+            // Add module.__doc__.
+            _ = try? py.module("interpreter")?.bind_interfaces?(module.reference)
         }
     }
 }

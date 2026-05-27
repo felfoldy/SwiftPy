@@ -129,11 +129,11 @@ struct PythonConvertibleClassTests {
         main.test4 = obj
                 
         Interpreter.run("del test3")
-        try PyModule("gc")?.collect?()
+        try py.module("gc")?.collect?()
         #expect(obj._pythonCache.reference != nil)
         
         Interpreter.run("del test4")
-        try PyModule("gc")?.collect?()
+        try py.module("gc")?.collect?()
         #expect(obj._pythonCache.reference == nil)
     }
     

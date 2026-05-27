@@ -67,6 +67,18 @@ public struct PyModule {
     }
 }
 
+extension PyModule: PythonConvertible {
+    public static let pyType = PyType.module
+
+    public static func fromPython(_ reference: PyRef) -> PyModule {
+        PyModule(reference)!
+    }
+
+    public func toPython(_ reference: PyRef) {
+        reference.assign(reference)
+    }
+}
+
 public extension PyModule {
     @available(*, deprecated, renamed: "py.module")
     init?(_ name: String) {

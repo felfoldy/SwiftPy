@@ -21,7 +21,8 @@ struct ConversionTests {
     
     @Test func floatCastFromInt() throws {
         Interpreter.run("floatCastFromInt = 3")
-        let number = try Float.cast(py.main.floatCastFromInt)
+        let value = py.main.floatCastFromInt
+        let number = try Float.cast(value?.reference)
         #expect(number == 3.0)
     }
     
@@ -57,7 +58,7 @@ struct ConversionTests {
         
         Interpreter.run(#"dictionary = {"topic": "dict", "task": "iterate"}"#)
         
-        let result = try #require([String: String](py.main.dictionary))
+        let result: [String: String] = try #require(py.main.dictionary)
         
         #expect(result["topic"] == "dict")
         #expect(result["task"] == "iterate")
@@ -81,7 +82,7 @@ struct ConversionTests {
         #expect(py.main.dictionary?["string"] == "hello")
         #expect(py.main.dictionary?["integer"] == 42)
 
-        let dictionary = try #require([String: Any](py.main.dictionary))
+        let dictionary: [String: Any] = try #require(py.main.dictionary)
         #expect(dictionary["string"] as? String == "hello")
         #expect(dictionary["integer"] as? Int == 42)
         #expect(dictionary["double"] as? Double == 3.14)

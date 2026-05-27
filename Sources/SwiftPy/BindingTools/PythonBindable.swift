@@ -110,7 +110,7 @@ public extension PythonBindable {
     ) -> Bool {
         var result: (repeat each Arg)
         do {
-            result = try PyBind.checkArgs(argc: argc, argv: argv, from: 1) as (repeat each Arg)
+            result = try PyBind.castArgs(argc: argc, argv: argv, from: 1) as (repeat each Arg)
             do {
                 try initializer(repeat (each result)).storeInPython(argv)
             } catch {

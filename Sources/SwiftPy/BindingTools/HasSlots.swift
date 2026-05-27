@@ -7,6 +7,7 @@
 
 import pocketpy
 
+@available(*, deprecated, message: "Use PyObject instead.")
 @MainActor
 public protocol HasSlots<Slot> {
     associatedtype Slot: RawRepresentable<Int32>, CaseIterable

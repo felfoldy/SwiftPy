@@ -77,9 +77,11 @@ extension AnyView: PythonConvertible {
         reference.toUserdata()
     }
 
-    public static let pyType: PyType = {
-        py.newtype(name: "AnyView", base: .object, module: py.getmodule("__main__")) { pointer in
-            deinitialize(userdata: pointer)
-        }
-    }()
+    public static let pyType = py.newtype(
+        name: "AnyView",
+        base: .object,
+        module: py.getmodule("__main__")
+    ) { pointer in
+        deinitialize(userdata: pointer)
+    }
 }

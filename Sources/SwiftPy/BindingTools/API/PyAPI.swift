@@ -15,6 +15,15 @@ public let py = PyAPI()
 public typealias PyRef = PyAPI.Reference
 public typealias PyValue = PyAPI.Value
 
+
+public protocol PyReferencing {
+    var reference: PyRef { get }
+}
+
+extension PyRef: @MainActor PyReferencing {
+    @inlinable public var reference: PyRef { self }
+}
+
 /// Namespace for pocketpy typealias/interfaces.
 @MainActor
 public struct PyAPI {
@@ -607,8 +616,8 @@ public extension PyRef {
     
     @inlinable
     func bind(_ signature: String, docstring: String? = nil, function: PyAPI.CFunction) {
-        let temp = PyRef.allocate(capacity: 1)
-        temp.initialize(to: py_TValue())
+        let temp = py.pushtmp()
+        defer { py.pop() }
         let name = py.newfunction(temp, signature: signature, docstring: docstring, function: function)
 
         let sigRet = py.retain(signature)
@@ -667,7 +676,7 @@ public extension PyRef {
 }
 
 @MainActor
-public enum PythonError: LocalizedError {
+public indirect enum PythonError: LocalizedError {
     case SyntaxError(PythonConvertible)
     case RecursionError(PythonConvertible)
     case OSError(PythonConvertible)

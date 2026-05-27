@@ -38,7 +38,7 @@ struct SubclassBindableTests {
     }
     
     @Test func startCalled() {
-        let base = Base(main.subclass_test)
+        let base: Base? = main.subclass_test
         Interpreter.run("subclass_test.start()")
         
         #expect(base?.startCalled == true)

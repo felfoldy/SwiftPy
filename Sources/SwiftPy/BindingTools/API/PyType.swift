@@ -22,7 +22,8 @@ public extension PyType {
     static let staticmethod = PyType(tp_staticmethod.rawValue)
     static let bytes = PyType(tp_bytes.rawValue)
     static let generator = PyType(tp_generator.rawValue)
-    
+    static let module = PyType(tp_module.rawValue)
+
     // Errors:
     static let BaseException = PyType(tp_BaseException.rawValue)
     static let SyntaxError = PyType(tp_SyntaxError.rawValue)

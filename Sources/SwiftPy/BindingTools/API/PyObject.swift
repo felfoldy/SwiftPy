@@ -6,10 +6,10 @@ private var freeSlots: [Int32] = []
 
 @MainActor
 @dynamicMemberLookup
-public final class PyObject {
+public final class PyObject: @MainActor PyReferencing {
     public let reference: PyRef
     private let cacheID: Int32
-    
+
     public init(_ reference: PyRef) {
         let copy = PyRef.allocate(capacity: 1)
         copy.initialize(to: reference.pointee)

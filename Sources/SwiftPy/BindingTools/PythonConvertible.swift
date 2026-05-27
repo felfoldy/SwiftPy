@@ -31,8 +31,8 @@ public extension PythonConvertible {
     }
 
     @inlinable
-    init?(_ reference: PyRef?) {
-        guard let reference else { return nil }
+    init?<Reference: PyReferencing>(_ value: Reference?) {
+        guard let reference = value?.reference else { return nil }
         let canCast = py.istype(reference, type: Self.pyType) ||
         py.isinstance(reference, type: Self.pyType)
         guard canCast else { return nil }
@@ -47,7 +47,7 @@ public extension PythonConvertible {
     @inlinable
     static func cast(_ arg: PyRef?, _ offset: Int = 0) throws(PythonError) -> Self {
         guard let arg = arg?[offset] else {
-            throw PythonError.TypeError("Expected \(pyType.name) at position \(offset)")
+            throw .TypeError("Expected \(pyType.name) at position \(offset)")
         }
         
         if arg.canCast(to: pyType) {
@@ -58,7 +58,7 @@ public extension PythonConvertible {
             return Self.fromPython(arg)
         }
 
-        throw PythonError.TypeError("Expected \(pyType.name) got \(py.typeof(arg).name) at position \(offset)")
+        throw .TypeError("Expected \(pyType.name) got \(py.typeof(arg).name) at position \(offset)")
     }
 }
 
@@ -307,7 +307,7 @@ extension PyRef: PythonConvertible {
 
     public static func fromPython(_ reference: PyRef) -> PyRef {
         #if DEBUG
-        log.fault("Casting PyRef is unsafe. Use PyObject instead.")
+        assertionFailure("Casting PyRef is unsafe. Use PyObject instead.")
         #endif
         return reference
     }

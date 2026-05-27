@@ -71,13 +71,9 @@ public class AsyncTask: ViewRepresentable {
         AsyncTask.tasks[id] = self
     }
 
-    init(arguments: PyArguments) throws {
-        try arguments.expectedArgCount(2)
-
-        let generator = arguments[1]
-
+    init(generator: PyObject) throws {
         let context = AsyncContext.current
-        iterator = try py.retain(py.iter(generator))
+        iterator = try py.retain(py.iter(generator.reference))
 
         let id = UUID()
         self.task = Task {
