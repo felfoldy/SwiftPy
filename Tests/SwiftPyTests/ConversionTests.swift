@@ -7,7 +7,6 @@
 
 import SwiftPy
 import Testing
-import pocketpy
 import Foundation
 
 @MainActor

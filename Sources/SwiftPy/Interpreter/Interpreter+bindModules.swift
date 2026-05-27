@@ -5,7 +5,6 @@
 //  Created by Tibor Felföldy on 2025-11-19.
 //
 
-import pocketpy
 import Foundation
 #if canImport(UIKit)
 import UIKit

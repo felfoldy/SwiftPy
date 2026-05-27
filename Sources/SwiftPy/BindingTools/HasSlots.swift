@@ -5,8 +5,6 @@
 //  Created by Tibor Felföldy on 2025-04-15.
 //
 
-import pocketpy
-
 @available(*, deprecated, message: "Use PyObject instead.")
 @MainActor
 public protocol HasSlots<Slot> {

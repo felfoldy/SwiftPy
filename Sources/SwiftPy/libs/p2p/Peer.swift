@@ -6,7 +6,6 @@
 //
 
 import MultipeerConnectivity
-import pocketpy
 
 // TODO: test
 /// An object represents a peer in a multipeer session.

@@ -6,7 +6,6 @@
 //
 
 import Foundation
-import pocketpy
 
 extension Interpreter {
     /// Sets print output, importhook, importfile.

@@ -5,8 +5,6 @@
 //  Created by Tibor Felföldy on 2026-05-25.
 //
 
-import pocketpy
-
 @MainActor
 @dynamicMemberLookup
 public struct PyModule {

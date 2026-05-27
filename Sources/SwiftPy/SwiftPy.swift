@@ -2,7 +2,6 @@
 // https://docs.swift.org/swift-book
 //
 
-import pocketpy
 import Foundation
 import OSLog
 

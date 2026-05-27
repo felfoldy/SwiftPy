@@ -5,7 +5,6 @@
 //  Created by Tibor Felföldy on 2025-03-25.
 //
 
-import pocketpy
 import Foundation
 import SwiftUI
 

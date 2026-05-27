@@ -5,7 +5,6 @@
 //  Created by Tibor Felföldy on 2025-01-17.
 //
 
-import pocketpy
 import Foundation
 #if canImport(UIKit)
 import UIKit
@@ -59,7 +58,7 @@ public final class Interpreter {
     init() {
         setCallbacks()
         
-        log.info("pocketpy [\(PK_VERSION)] initialized")
+        log.info("pocketpy [\(py.version)] initialized")
 
         // Change default working directory to the applications Documents directory.
         let documentsPath = URL.documentsDirectory.path

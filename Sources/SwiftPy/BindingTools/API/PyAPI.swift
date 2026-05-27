@@ -30,8 +30,7 @@ public struct PyAPI {
     /// Python function signature `(argc: Int32, argv: StackRef?) -> Bool`.
     public typealias CFunction = @convention(c) (Int32, PyRef?) -> Bool
 
-    /// Just a type alias of an `OpaquePointer`.
-    public typealias Reference = py_Ref
+    public typealias Reference = UnsafeMutablePointer<Value>
 
     public typealias Value = py_TValue
 
@@ -39,7 +38,9 @@ public struct PyAPI {
     public typealias Callbacks = py_Callbacks
     
     public typealias pyCompileMode = py_CompileMode
-    
+
+    public let version = PK_VERSION
+
     public let dict = Dict()
     public let list = List()
     public let tuple = Tuple()
@@ -517,7 +518,7 @@ public extension PyAPI {
 
 public extension Interpreter {
     @inlinable func module(_ name: String) -> PyRef? {
-        if let module = py_getmodule(name) {
+        if let module = py.getmodule(name) {
             return module
         }
 

@@ -5,8 +5,6 @@
 //  Created by Tibor Felföldy on 2025-02-11.
 //
 
-import pocketpy
-
 @MainActor
 public protocol PythonBindable: AnyObject, PythonConvertible {
     var _pythonCache: PythonBindingCache { get set }

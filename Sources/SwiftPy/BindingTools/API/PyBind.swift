@@ -5,8 +5,6 @@
 //  Created by Tibor Felföldy on 2025-05-07.
 //
 
-import pocketpy
-
 @MainActor
 public enum PyBind {
     public static func module(_ name: String, block: @escaping (PyModule) -> Void) {

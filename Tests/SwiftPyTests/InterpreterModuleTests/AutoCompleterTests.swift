@@ -7,7 +7,6 @@
 
 import Testing
 import SwiftPy
-import pocketpy
 
 @MainActor
 struct AutoCompleterTests {

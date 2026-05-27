@@ -8,7 +8,6 @@
 #if canImport(SwiftData)
 import SwiftData
 import Foundation
-import pocketpy
 
 @available(macOS 15, iOS 18, *)
 @MainActor

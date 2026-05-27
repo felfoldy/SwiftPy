@@ -7,7 +7,6 @@
 
 import Testing
 @testable import SwiftPy
-import pocketpy
 
 @MainActor
 struct InterpreterTests {

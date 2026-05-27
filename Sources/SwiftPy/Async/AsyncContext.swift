@@ -5,7 +5,6 @@
 //  Created by Tibor Felföldy on 2025-04-05.
 //
 
-import pocketpy
 import Foundation
 
 @MainActor
