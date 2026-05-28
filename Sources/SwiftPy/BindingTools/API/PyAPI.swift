@@ -234,8 +234,13 @@ public struct PyAPI {
     }
 
     @inlinable
-    public func newobject<T: PythonConvertible>(_ value: T, out: PyRef, slots: Int32) {
-        let ud = py_newobject(out, T.pyType, slots, Int32(MemoryLayout<T>.size))
+    public func newobject<T: PythonConvertible>(
+        _ value: T,
+        type: PyType,
+        out: PyRef,
+        slots: Int32
+    ) {
+        let ud = py_newobject(out, type, slots, Int32(MemoryLayout<T>.size))
             .assumingMemoryBound(to: T.self)
         ud.initialize(to: value)
     }

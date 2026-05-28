@@ -70,7 +70,7 @@ public extension ViewRepresentable where Content: RepresentationContent, Content
 
 extension AnyView: PythonConvertible {
     public func toPython(_ reference: PyRef) {
-        py.newobject(self, out: reference, slots: 0)
+        py.newobject(self, type: Self.pyType, out: reference, slots: 0)
     }
 
     public static func fromPython(_ reference: PyRef) -> AnyView {
