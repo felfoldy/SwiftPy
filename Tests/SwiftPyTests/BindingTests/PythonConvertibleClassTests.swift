@@ -23,10 +23,9 @@ final class TestClass {
     }
 
     /// Init with multiple parameters.
-    init(a: Int, b: Int) {
+    init(a: Int, b: Int, c: Int? = nil) {
         self.number = b
     }
-    init(a: Int, b: Int, c: Int) {}
 
     func setNumber(value: Int? = nil) {
         number = value
@@ -56,12 +55,14 @@ extension TestClass: @preconcurrency CustomStringConvertible {
 extension TestClass: PythonBindable {
     static let pyType: PyType = .make("TestClass", module: py.getmodule("__main__")) { type in
         type.magic("__new__") { __new__($1) }
-        type.magic("__init__") { argc, argv in
-            __init__(argc, argv, TestClass.init) ||
-            __init__(argc, argv, TestClass.init(number:)) ||
-            __init__(argc, argv, TestClass.init(a:b:)) ||
-            __init__(argc, argv, TestClass.init(a:b:c:)) ||
-            PyAPI.throw(.TypeError, "Invalid arguments")
+        type.function("__init__(self) -> None") { argc, argv in
+            __init__(argc, argv, TestClass.init)
+        }
+        type.function("__init__(self, number: int) -> None") { argc, argv in
+            __init__(argc, argv, TestClass.init(number:))
+        }
+        type.function("__init__(self, a: int, b: int, c: int | None = None) -> None") { argc, argv in
+            PyBind.function(argc, argv, TestClass.init(a:b:c:))
         }
         type.magic("__repr__") { __repr__($1) }
         type.property("number") {
@@ -97,10 +98,7 @@ extension TestClass: PythonBindable {
             def __init__(self, number: int): ...
             @overload
             def __init__(self, a: int, b: int):
-                """Init with multiple parameters."""
-            @overload
-            def __init__(self, a: int, b: int, c: int): ...
-        
+                """Init with multiple parameters."""        
             def set_number(self, value: int) -> None: ...
             def get_number(self) -> int: ...
             @staticmethod
@@ -141,9 +139,14 @@ struct PythonConvertibleClassTests {
     }
     
     @Test func createFromPython() throws {
-        Interpreter.run("test5 = TestClass(12)")
-
-        #expect(main.test5?.number == 12)
+        Interpreter.run("""
+        init_with_number = TestClass(12)
+        TestClass_init = TestClass()
+        """)
+        #expect(main.init_with_number?.number == 12)
+        let TestClass_init = try #require(main.TestClass_init)
+        #expect(TestClass_init.number == nil)
+        
     }
     
     @Test func pythonMutation() {

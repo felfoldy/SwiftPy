@@ -10,33 +10,23 @@ import SwiftUI
 import Testing
 
 @MainActor
-struct StructView {
+struct StructView: View {
     let value: String
-    
+
+    init(value: String) {
+        self.value = value
+    }
+
     init() {
         value = "default"
     }
     
-    init(value: String) {
-        self.value = value
+    var body: some View {
+        Text(value)
     }
 }
 
-extension StructView: PythonValueObject {
-    func toPython(_ reference: PyRef) {
-        py.newobject(
-            Optional(self),
-            type: Self.pyType,
-            out: reference,
-            slots: -1
-        )
-    }
-    
-    @inlinable
-    static func fromPython(_ reference: PyRef) -> StructView {
-        reference.toUserdata(as: Self?.self)!
-    }
-    
+extension StructView: PythonValueBindable {
     static let pyType: PyType = {
         let type = py.newtype(
             name: "StructView",
@@ -48,65 +38,28 @@ extension StructView: PythonValueObject {
         type.function("__init__(self, value: str) -> None") { argc, argv in
             __init__(argc, argv, StructView.init(value:))
         }
+        type.function("__init__(self) -> None") { argc, argv in
+            __init__(argc, argv, StructView.init)
+        }
+        type.magic("__view__") { __view__($1) }
         type.property(
             "value",
             getter: { _bind_getter(\.value, $1) },
             setter: nil
         )
+
         return type
     }()
 }
 
-protocol PythonValueObject: PythonConvertible {}
-
-enum OverloadError: Error {
-    case argumentMismatch
-    case functionFailure(any Error)
-}
-
-extension PythonValueObject {
-    static func __new__(_ argv: PyRef?) -> Bool {
-        let type = py.totype(argv)
-        py.newobject(
-            Self?.none,
-            type: type,
-            out: py.retval,
-            slots: -1
-        )
-        return true
-    }
-    
-    @inlinable
-    static func __init__<each Arg: PythonConvertible>(
-        _ argc: Int32, _ argv: PyRef?,
-        _ initializer: @MainActor (repeat each Arg) throws -> Self
-    ) -> Bool {
-        PyAPI.return {
-            let result = try PyBind.castArgs(argc: argc, argv: argv, from: 1) as (repeat each Arg)
-            try initializer(repeat (each result)).storeInPython(argv)
-            return .none
-        }
-    }
-    
-    @inlinable
-    func storeInPython(_ reference: PyRef?) {
-        reference?.userdata
-            .assumingMemoryBound(to: Self?.self)
-            .pointee = self
-    }
-
-    @inlinable
-    static func _bind_getter<Value>(_ keypath: KeyPath<Self, Value>, _ argv: PyRef?) -> Bool {
-        PyAPI.return { Self(argv)?[keyPath: keypath] }
-    }
-}
-
 @MainActor
 struct StructBindingTests {
+    init() {
+        py.main.StructView = PyObject(StructView.pyType)
+    }
+    
     @Test
     func initializerBinding() throws {
-        py.main.StructView = PyObject(StructView.pyType)
-        
         Interpreter.run("""
         view = StructView('content')
         value = view.value
@@ -115,5 +68,17 @@ struct StructBindingTests {
         let view: StructView = try #require(py.main.view)
         #expect(view.value == "content")
         #expect(py.main.value == "content")
+    }
+    
+    @Test
+    func __view__binding() throws {
+        Interpreter.run("""
+        viewBinding = StructView()
+        """)
+
+        let viewBinding = try #require(py.main.viewBinding)
+        let view: AnyView? = try viewBinding.__view__?()
+        
+        #expect(view != nil)
     }
 }

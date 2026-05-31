@@ -347,10 +347,12 @@ public extension PyAPI {
         return out
     }
 
+    @discardableResult
     @inlinable
-    func newfunction(_ out: PyRef, signature: String, docstring: String?, function: PyAPI.CFunction) -> py_Name {
+    func newfunction(_ out: PyRef, signature: String, docstring: String?, function: PyAPI.CFunction) -> String {
         let docstring = docstring?.withCString(strdup)
-        return py_newfunction(out, signature, function, docstring, -1)
+        let name = py_newfunction(out, signature, function, docstring, -1)
+        return String(cString: py_name2str(name))
     }
 }
 
@@ -359,8 +361,11 @@ public extension PyAPI {
 public extension PyAPI {
     @MainActor
     struct Dict {
-        // TODO: Better error handling
-        // (1: found, 0: not found, -1: error)
+        @inlinable
+        public func len(_ self: PyRef?) -> Int32 {
+            py_dict_len(self)
+        }
+
         @inlinable
         public func getitem(_ self: PyRef, key: PyRef?) throws -> PyRef? {
             let result = py_dict_getitem(self, key)
@@ -370,6 +375,15 @@ public extension PyAPI {
             return result == 1 ? retval : nil
         }
         
+        @inlinable
+        public func getitem(_ self: PyRef?, i: Int64) throws -> PyRef? {
+            let result = py_dict_getitem_by_int(self, i)
+            let retval = try PyAPI.convertRetval {
+                result != -1
+            }
+            return result == 1 ? retval : nil
+        }
+
         @inlinable
         public func setitem(_ self: PyRef, key: PyRef?, value: PyRef?) throws(PythonError) -> PyRef {
             try PyAPI.convertRetval(self) { temp in
@@ -392,6 +406,11 @@ public extension PyAPI {
         @inlinable
         public func getitem(_ self: PyRef, i: Int32) -> PyRef {
             py_list_getitem(self, i)
+        }
+        
+        @inlinable
+        public func len(_ self: PyRef) -> Int32 {
+            py_list_len(self)
         }
     }
     
@@ -501,13 +520,10 @@ public extension PyAPI {
                 SwiftObject(result).toPython(py.retval)
             }
             return true
+        } catch let error as PythonError {
+            return PyAPI.throw(error.type, error.value)
         } catch {
-            return switch error {
-            case let error as PythonError:
-                PyAPI.throw(error.type, error.value)
-            default:
-                PyAPI.throw(.RuntimeError, error.localizedDescription)
-            }
+            return PyAPI.throw(.RuntimeError, error.localizedDescription)
         }
     }
 
@@ -618,31 +634,6 @@ public extension PyRef {
                 py_setslot(self, i, py_None())
             }
         }
-    }
-    
-    @inlinable
-    func bind(_ signature: String, docstring: String? = nil, function: PyAPI.CFunction) {
-        let temp = py.pushtmp()
-        defer { py.pop() }
-        let name = py.newfunction(temp, signature: signature, docstring: docstring, function: function)
-
-        let sigRet = py.retain(signature)
-        py.setdict(temp, name: "_signature", value: sigRet?.reference)
-
-        var interface = "def \(signature):"
-        if let docstring {
-            interface += "\n    \"\"\"\(docstring)\"\"\""
-        } else {
-            interface += " ..."
-        }
-        let interfaceRet = py.retain(interface)
-        py.setdict(
-            temp,
-            name: "_interface",
-            value: interfaceRet?.reference
-        )
-
-        py_setdict(self, name, temp)
     }
 
     @available(*, deprecated, renamed: "py.istype")

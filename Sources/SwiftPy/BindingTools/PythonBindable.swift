@@ -5,16 +5,97 @@
 //  Created by Tibor Felföldy on 2025-02-11.
 //
 
+import SwiftUI
+
+public protocol PythonValueBindable: PythonConvertible {}
+
 @MainActor
-public protocol PythonBindable: AnyObject, PythonConvertible {
+public protocol PythonBindable: AnyObject, PythonValueBindable {
     var _pythonCache: PythonBindingCache { get set }
 }
 
 public struct PythonBindingCache {
     public var reference: PyRef?
-    public var bindings: [String: PythonBindable] = [:]
-    
     public init() {}
+}
+
+public extension PythonValueBindable {
+    func toPython(_ reference: PyRef) {
+        py.newobject(
+            Optional(self),
+            type: Self.pyType,
+            out: reference,
+            slots: -1
+        )
+    }
+
+    @inlinable
+    static func fromPython(_ reference: PyRef) -> Self {
+        reference.toUserdata(as: Self?.self)!
+    }
+
+    @inlinable
+    func storeInPython(_ reference: PyRef?) {
+        reference?.userdata
+            .assumingMemoryBound(to: Self?.self)
+            .pointee = self
+    }
+
+    /// Creates a new object and initializes as `nil`.
+    static func __new__(_ argv: PyRef?) -> Bool {
+        let type = py.totype(argv)
+        py.newobject(
+            Self?.none,
+            type: type,
+            out: py.retval,
+            slots: -1
+        )
+        return true
+    }
+
+    /// Binds an `init()`.
+    @inlinable
+    static func __init__(
+        _ argc: Int32, _ argv: PyRef?,
+        _ initializer: @MainActor () throws -> Self
+    ) -> Bool {
+        PyAPI.return {
+            try initializer().storeInPython(argv)
+        }
+    }
+
+    /// Binds an  `init(args)`.
+    @inlinable
+    static func __init__<each Arg: PythonConvertible>(
+        _ argc: Int32, _ argv: PyRef?,
+        _ initializer: @MainActor (repeat each Arg) throws -> Self
+    ) -> Bool {
+        PyAPI.return {
+            let result = try PyBind.castArgs(argc: argc, argv: argv, from: 1) as (repeat each Arg)
+            try initializer(repeat (each result)).storeInPython(argv)
+            return .none
+        }
+    }
+
+    @inlinable
+    static func _bind_getter<Value>(_ keypath: KeyPath<Self, Value>, _ argv: PyRef?) -> Bool {
+        PyAPI.return { Self(argv)?[keyPath: keypath] }
+    }
+    
+    @inlinable
+    static func __view__(_ argv: PyRef?) -> Bool {
+        PyAPI.return { .none }
+    }
+}
+
+public extension PythonValueBindable where Self: View {
+    @inlinable
+    static func __view__(_ argv: PyRef?) -> Bool {
+        PyAPI.return {
+            let view = try cast(argv)
+            return AnyView(view.body)
+        }
+    }
 }
 
 public extension PythonBindable {
@@ -58,6 +139,30 @@ public extension PythonBindable {
         return Unmanaged<Self>.fromOpaque(pointer)
             .takeUnretainedValue()
     }
+    
+    @inlinable
+    static func __repr__(_ argv: PyRef?) -> Bool {
+        PyAPI.return {
+            let obj = try cast(argv)
+            return String(describing: obj)
+        }
+    }
+    
+    @inlinable
+    static func __view__(_ argv: PyRef?) -> Bool {
+        PyAPI.return {
+            if Self.self is (any View.Type) {
+                let obj = try cast(argv) as? (any View)
+                return AnyView { obj }
+            }
+            
+            if Self.self is (any ViewRepresentable.Type) {
+                let obj = try cast(argv) as? (any ViewRepresentable)
+                return obj?.representation
+            }
+            return nil
+        }
+    }
 }
 
 // MARK: - Binding tools
@@ -88,17 +193,6 @@ public extension PythonBindable {
             slots: slotCount
         )
         return true
-    }
-    
-    @inlinable
-    static func __init__(
-        _ argc: Int32, _ argv: PyRef?,
-        _ initializer: @MainActor () throws -> Self
-    ) -> Bool {
-        guard argc == 1 else { return false }
-        return PyAPI.`return` {
-            try initializer().storeInPython(argv)
-        }
     }
     
     @inlinable
@@ -136,25 +230,6 @@ public extension PythonBindable {
         }
 
         return PyAPI.return { .none }
-    }
-    
-    @inlinable
-    static func __repr__(_ argv: PyRef?) -> Bool {
-        PyAPI.return {
-            let obj = try cast(argv)
-            return String(describing: obj)
-        }
-    }
-
-    @inlinable
-    static func __view__(_ argv: PyRef?) -> Bool {
-        PyAPI.return {
-            if Self.self is (any ViewRepresentable.Type) {
-                let obj = try cast(argv) as? (any ViewRepresentable)
-                return obj?.representation
-            }
-            return nil
-        }
     }
     
     @inlinable

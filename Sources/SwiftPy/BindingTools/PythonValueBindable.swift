@@ -43,5 +43,3 @@ open class PythonValueReference<Value> {
         }
     }
 }
-
-public typealias PythonValueBindable<Value> = PythonValueReference<Value> & PythonBindable

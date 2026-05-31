@@ -1,6 +1,5 @@
 from rlcompleter import Completer
 
-_swift_object_cache = []
 
 def completions(text: str) -> list[str]:
     completer = Completer()
@@ -17,6 +16,7 @@ def completions(text: str) -> list[str]:
         state += 1
     
     return completion_list
+
 
 def bind_interfaces(module):
     interfaces = []

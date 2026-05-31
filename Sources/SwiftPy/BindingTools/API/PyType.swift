@@ -20,6 +20,7 @@ public extension PyType {
     static let dict = PyType(tp_dict.rawValue)
     static let function = PyType(tp_function.rawValue)
     static let staticmethod = PyType(tp_staticmethod.rawValue)
+    static let boundmethod = PyType(tp_boundmethod.rawValue)
     static let bytes = PyType(tp_bytes.rawValue)
     static let generator = PyType(tp_generator.rawValue)
     static let module = PyType(tp_module.rawValue)
@@ -76,7 +77,8 @@ public extension PyType {
         py.tpobject(self)?.bind(
             signature,
             docstring: docstring,
-            function: block
+            overloads: true,
+            function: block,
         )
     }
 
@@ -91,7 +93,7 @@ public extension PyType {
         let staticmethod: PyRef = try! py.call(py.tpobject(.staticmethod)!, args: ref)
 
         // Sets staticmethod to type.
-        py_setdict(py.tpobject(self), name, staticmethod)
+        py.setdict(py.tpobject(self), name: name, value: staticmethod)
     }
 
     @inlinable
