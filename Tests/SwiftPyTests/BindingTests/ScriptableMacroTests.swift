@@ -187,11 +187,8 @@ class ScriptableMacroTests: XCTestCase {
         
         extension TestClass: PythonBindable {
             @MainActor static let pyType: PyType = .make("TestClass", base: .object) { type in
-                type.magic("__init__") { argc, argv in
-                    __init__(argc, argv, TestClass.init) ||
-                    __init__(argc, argv, TestClass.init(number:)) ||
-                    PyAPI.throw(.TypeError, "Invalid arguments")
-                }
+                \(initializer("__init__(self) -> None", "TestClass.init"))
+                \(initializer("__init__(self, number: int) -> None", "TestClass.init(number:)"))
                 \(newAndRepr)
                 \(interfaceBegin)
                 class TestClass:
@@ -206,7 +203,7 @@ class ScriptableMacroTests: XCTestCase {
         """,
         macros: testMacros)
     }
-    
+
     func testRedundantPythonBindable() {
         assertMacroExpansion("""
         @Scriptable
@@ -356,6 +353,28 @@ private func function(_ name: String, _ syntax: String) -> String {
     """
 }
 
+private func initializer(_ syntax: String, _ initializer: String) -> String {
+    """
+    type.function("\(syntax)") {
+                __init__($1, \(initializer))
+            }
+    """
+}
+
+private var newAndRepr: String {
+    """
+    type.function("__new__(cls, *args, **kwargs)") {
+                __new__($1)
+            }
+            type.magic("__repr__") {
+                __repr__($1)
+            }
+            type.property("__view__") {
+                __view__($1)
+            }
+    """
+}
+
 private func property(_ name: String, python: String, setter: Bool = true) -> String {
     if setter {
     """
@@ -380,20 +399,6 @@ private func property(_ name: String, python: String, setter: Bool = true) -> St
             )
     """
     }
-}
-
-private var newAndRepr: String {
-    """
-    type.magic("__new__") {
-                __new__($1)
-            }
-            type.magic("__repr__") {
-                __repr__($1)
-            }
-            type.property("__view__") {
-                __view__($1)
-            }
-    """
 }
 
 private let interfaceBegin: String = #"PyObject(type)._interface = #""""#

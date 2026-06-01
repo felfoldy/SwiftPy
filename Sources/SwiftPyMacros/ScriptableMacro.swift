@@ -64,9 +64,15 @@ extension ScriptableMacro: ExtensionMacro {
             """
             @MainActor \(raw: classMeta.visibility)static let pyType: PyType = .make(\(raw: classMeta.typeMakeArgs)) { type in
             \(raw: classMeta.bindings.joined(separator: "\n"))
-            type.magic("__new__") { __new__($1) }
-            type.magic("__repr__") { __repr__($1) }
-            type.property("__view__") { __view__($1) }
+            type.function("__new__(cls, *args, **kwargs)") {
+                __new__($1)
+            }
+            type.magic("__repr__") {
+                __repr__($1)
+            }
+            type.property("__view__") {
+                __view__($1)
+            }
             PyObject(type)._interface = \(raw: buildInterface(classMeta))
             }
             """
@@ -168,30 +174,40 @@ struct InitializerExtractor: MemberExtractor {
             return
         }
 
-        var bindingSyntax: [String] = []
-
         for initializer in initializers {
             let parameters = initializer.signature.parameterClause.parameters
 
-            let names = parameters
-                .map { $0.firstName.text + ":" }
+            let swiftParameterLabels = parameters
+                .map { parameter in
+                    parameter.firstName.text + ":"
+                }
                 .joined()
 
-            bindingSyntax.append(
-                "\(metadata.className).init(\(names))"
-                    .replacingOccurrences(of: "()", with: "")
-            )
+            let swiftInitializer = "\(metadata.className).init(\(swiftParameterLabels))"
+                .replacingOccurrences(of: "()", with: "")
 
-            let argsSyntax = parameters.map { parameter in
+            let pyArguments = parameters.map { parameter in
                 let name = parameter.secondName ?? parameter.firstName
                 let type = parameter.type.description.pyType
-                return ", \(name): \(type)"
+                let defaultExpression = parameter.defaultValue?.description.pyLiteralExpression ?? ""
+
+                return ", \(name): \(type)\(defaultExpression)"
             }
             .joined()
 
+            let pySignature = "__init__(self\(pyArguments)) -> None"
+
+            metadata.bindings.append(
+            """
+            type.function("\(pySignature)") {
+                __init__($1, \(swiftInitializer))
+            }
+            """
+            )
+
             metadata.initSyntax.append("@overload")
 
-            let initSyntax = "def __init__(self\(argsSyntax)) -> None:"
+            let initSyntax = "def \(pySignature):"
 
             if let docstring = initializer.description.docstring {
                 metadata.initSyntax.append(initSyntax)
@@ -201,20 +217,6 @@ struct InitializerExtractor: MemberExtractor {
                 metadata.initSyntax.append(initSyntax + " ...")
             }
         }
-
-        let bindings = bindingSyntax.map {
-            "__init__(argc, argv, \($0)) ||"
-        }
-        .joined(separator: "\n")
-
-        metadata.bindings.append(
-        """
-        type.magic("__init__") { argc, argv in
-        \(bindings)
-        PyAPI.throw(.TypeError, "Invalid arguments")
-        }
-        """
-        )
     }
 }
 
