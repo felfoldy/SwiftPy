@@ -775,21 +775,16 @@ extension PythonError: PythonConvertible {
 
         return switch type {
         case .SyntaxError: .SyntaxError(value)
-
         case .OSError: .OSError(value)
-
         case .NotImplementedError: .NotImplementedError(value)
         case .RecursionError: .RecursionError(value)
         case .RuntimeError: .RuntimeError(value)
-
         case .TypeError: .TypeError(value)
         case .IndexError: .IndexError(value)
         case .ValueError: .ValueError(value)
         case .ZeroDivisionError: .ZeroDivisionError(value)
-
         case .UnboundLocalError: .UnboundLocalError(value)
         case .NameError: .NameError(value)
-
         case .AttributeError: .AttributeError(value)
         case .ImportError: .ImportError(value)
         case .AssertionError: .AssertionError(value)

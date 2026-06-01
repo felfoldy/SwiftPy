@@ -198,4 +198,37 @@ struct AsyncTests {
         
         #expect(main.childFailing_result == 0)
     }
+    
+    @Test
+    func asyncNotAGenerator() async throws {
+        await Interpreter.asyncRun("""
+        async def not_generator() -> str:
+            return 'success'
+        result = await not_generator()
+        """)
+
+        withKnownIssue {
+            let result: String = try #require(py.main.result)
+            #expect(result == "success")
+        }
+    }
+    
+    @Test
+    func awaitedResultSurvivesGarbageCollection() async throws {
+        main.def("gcCollectAfterAwait_some_other() -> AsyncTask") { _, _ in
+            PyAPI.return { AsyncTask { 42 } }
+        }
+
+        await Interpreter.asyncRun("""
+        async def gcCollectAfterAwait_something() -> int:
+            import gc; gc.collect()
+            result = await gcCollectAfterAwait_some_other()
+            return result
+
+        gcCollectAfterAwait_result = await gcCollectAfterAwait_something()
+        """)
+
+        let result: Int = try #require(py.main.gcCollectAfterAwait_result)
+        #expect(result == 42)
+    }
 }

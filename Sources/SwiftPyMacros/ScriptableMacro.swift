@@ -188,14 +188,14 @@ struct InitializerExtractor: MemberExtractor {
 
             let pyArguments = parameters.map { parameter in
                 let name = parameter.secondName ?? parameter.firstName
-                let type = parameter.type.description.pyType
-                let defaultExpression = parameter.defaultValue?.description.pyLiteralExpression ?? ""
+                let type = parameter.type.description.singleLine.pyType
+                let defaultExpression = parameter.defaultValue?.value.description.singleLine.pyLiteralExpression ?? ""
 
                 return ", \(name): \(type)\(defaultExpression)"
             }
             .joined()
 
-            let pySignature = "__init__(self\(pyArguments)) -> None"
+            let pySignature = "__init__(self\(pyArguments)) -> None".singleLine
 
             metadata.bindings.append(
             """
@@ -263,7 +263,7 @@ struct VariableExtractor: MemberExtractor {
         }
 
         if let annotation = binding.typeAnnotation?.type.description {
-            metadata.variableSyntax.append("\(pythonIdentifier): \(annotation.pyType)")
+            metadata.variableSyntax.append("\(pythonIdentifier): \(annotation.singleLine.pyType)")
         }
 
         // Bind static property.
@@ -326,9 +326,9 @@ struct FunctionExtractor: MemberExtractor {
             isStatic: isStatic
         )
 
-        let returnType = signature.returnClause?.type.description.pyType ?? "None"
+        let returnType = signature.returnClause?.type.description.singleLine.pyType ?? "None"
         let pythonIdentifier = metadata.identifier(identifier)
-        let pySignature = "\(pythonIdentifier)(\(paramsString)) -> \(returnType)"
+        let pySignature = "\(pythonIdentifier)(\(paramsString)) -> \(returnType)".singleLine
 
         if isStatic {
             metadata.functionSyntax.append("@staticmethod")
@@ -374,8 +374,8 @@ struct FunctionExtractor: MemberExtractor {
 
         parameters += signature.parameterClause.parameters.map { parameter in
             let name = parameter.secondName ?? parameter.firstName
-            let type = parameter.type.description.pyType
-            let defaultExpression = parameter.defaultValue?.description.pyLiteralExpression ?? ""
+            let type = parameter.type.description.singleLine.pyType
+            let defaultExpression = parameter.defaultValue?.value.description.singleLine.pyLiteralExpression ?? ""
 
             return "\(name): \(type)\(defaultExpression)"
         }
@@ -502,6 +502,43 @@ extension DeclModifierListSyntax {
 // MARK: - String Helpers
 
 extension String {
+    /// Converts something like this:
+    /// ```swift
+    /// func test(
+    ///    a: Int,
+    ///    b: Int
+    /// )
+    /// ```
+    ///
+    /// Into this:
+    /// ```swift
+    /// func test(a: Int, b: Int)
+    /// ```
+    var singleLine: String {
+        var result = ""
+        var index = startIndex
+
+        while index < endIndex {
+            let character = self[index]
+            if character.isNewline {
+                let previous = result.last
+                index = self.index(after: index)
+                while index < endIndex, self[index].isWhitespace, !self[index].isNewline {
+                    index = self.index(after: index)
+                }
+                if previous == "," {
+                    result.append(" ")
+                }
+                continue
+            }
+            result.append(character)
+            index = self.index(after: index)
+        }
+        return result.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+}
+
+extension String {
     var trim: String {
         trimmingCharacters(in: .whitespacesAndNewlines)
     }
@@ -540,9 +577,13 @@ extension String {
         }
     }
 
-    /// From "= nil" to " = None"
+    /// From Swift literals to Python default argument syntax.
+    /// Examples:
+    /// nil     -> " = None"
+    /// "text"  -> " = 'text'"
+    /// true    -> " = True"
     var pyLiteralExpression: String {
-        " " + trim
+        " = " + singleLine
             .replacingOccurrences(of: "nil", with: "None")
             .replacingOccurrences(of: "\"", with: "'")
             .replacingOccurrences(of: "true", with: "True")

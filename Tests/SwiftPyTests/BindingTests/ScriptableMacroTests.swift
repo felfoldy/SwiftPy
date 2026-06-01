@@ -343,6 +343,44 @@ class ScriptableMacroTests: XCTestCase {
             macros: testMacros
         )
     }
+
+    func testMultilineFunctionSignature() {
+        assertMacroExpansion("""
+        @Scriptable
+        class TestClass {
+            static func map(
+                content: String? = nil
+            ) -> TestClass {
+                TestClass()
+            }
+        }
+        """, expandedSource: """
+        class TestClass {
+            static func map(
+                content: String? = nil
+            ) -> TestClass {
+                TestClass()
+            }
+        
+            var _pythonCache = PythonBindingCache()
+        }
+        
+        extension TestClass: PythonBindable {
+            @MainActor static let pyType: PyType = .make("TestClass", base: .object) { type in
+                type.staticmethod("map(content: str | None = None) -> TestClass") { argc, argv in
+                    PyBind.function(argc, argv, map)
+                }
+                \(newAndRepr)
+                \(interfaceBegin)
+                class TestClass:
+                    @staticmethod
+                    def map(content: str | None = None) -> TestClass: ...
+                \(interfaceEnd)
+            }
+        }
+        """,
+        macros: testMacros)
+    }
 }
 
 private func function(_ name: String, _ syntax: String) -> String {

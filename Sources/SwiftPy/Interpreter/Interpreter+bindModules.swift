@@ -108,6 +108,7 @@ extension Interpreter {
 
         let asyncSource = """
         def async(func):
+            import inspect
             import asyncio
             def coroutine(*args,**kwargs):
                 cr = func(*args,**kwargs)
