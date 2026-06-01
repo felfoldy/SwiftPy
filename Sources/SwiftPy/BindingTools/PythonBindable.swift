@@ -56,14 +56,28 @@ public extension PythonValueBindable {
     /// Binds an `init()`.
     @inlinable
     static func __init__(
-        _ argc: Int32, _ argv: PyRef?,
+        _ argv: PyRef?,
         _ initializer: @MainActor () throws -> Self
     ) -> Bool {
         PyAPI.return {
+            PyBind.overloadArgumentsMatched = true
             try initializer().storeInPython(argv)
+            return .none
         }
     }
 
+    @inlinable
+    static func __init__<each Arg: PythonConvertible>(
+        _ argv: PyRef?,
+        _ initializer: @MainActor (repeat each Arg) throws -> Self
+    ) -> Bool {
+        PyAPI.return {
+            let result = try PyBind.castArgs(argv: argv, from: 1) as (repeat each Arg)
+            try initializer(repeat (each result)).storeInPython(argv)
+            return .none
+        }
+    }
+    
     /// Binds an  `init(args)`.
     @inlinable
     static func __init__<each Arg: PythonConvertible>(

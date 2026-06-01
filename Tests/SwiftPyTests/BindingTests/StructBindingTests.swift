@@ -38,8 +38,8 @@ extension StructView: PythonValueBindable {
         type.function("__init__(self, value: str) -> None") { argc, argv in
             __init__(argc, argv, StructView.init(value:))
         }
-        type.function("__init__(self) -> None") { argc, argv in
-            __init__(argc, argv, StructView.init)
+        type.function("__init__(self) -> None") {
+            __init__($1, StructView.init)
         }
         type.magic("__view__") { __view__($1) }
         type.property(

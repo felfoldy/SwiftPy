@@ -48,14 +48,20 @@ public struct OutputRelays {
 
     init(filterOSLog: Bool = true) {
         outputRelayHandler = OutputRelayHandler(stream: STDOUT_FILENO) { value in
-            Interpreter.output.stdout(value)
+            let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !trimmed.isEmpty {
+                Interpreter.output.stdout(trimmed)
+            }
         }
         
         errorRelayHandler = OutputRelayHandler(stream: STDERR_FILENO) { value in
-            if filterOSLog, value.trimmingCharacters(in: .whitespacesAndNewlines).hasPrefix("OSLOG") {
+            let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+            if filterOSLog, trimmed.hasPrefix("OSLOG") {
                 return
             }
-            Interpreter.output.stderr(value)
+            if !trimmed.isEmpty {
+                Interpreter.output.stderr(trimmed)
+            }
         }
     }
 }

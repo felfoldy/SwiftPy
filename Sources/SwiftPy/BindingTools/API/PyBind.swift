@@ -319,43 +319,39 @@ extension PyBind {
         PyAPI.return {
             let function = py_inspect_currentfunction()!
             let overloads = py.getdict(function, name: "_overloads")!
+            
+            Interpreter.silenceErrors = true
 
             for i in 0..<py.list.len(overloads) {
                 do {
-                    return try PyAPI.convertRetval {
+                    let result = try PyAPI.convertRetval {
                         let overload = py.list.getitem(overloads, i: i)
 
                         py.push(overload)
                         py.push(argv)
 
-                        // Setup args.
-                        let args = argv?[1]
-                        let argc = py.tuple.len(args)
-                        for i in 0..<argc {
-                            py.push(py.tuple.getitem(args, i: i))
-                        }
-
-                        // Setup kwargs
-                        let kwargs = argv?[2]
-                        let kwargc = py.dict.len(kwargs)
-                        let iter = try! py.iter(kwargs)
-                        while let next = try? py.next(iter) {
-                            py.push(py.tuple.getitem(next, i: 0))
-                            py.push(py.tuple.getitem(next, i: 1))
-                        }
-
+                        let argc = forwardArgs(argv?[1])
+                        let kwargc = forwardKwargs(argv?[2])
+                        
+                        Interpreter.silenceErrors = true
                         PyBind.overloadArgumentsMatched = false
+                        
                         return py_vectorcall(UInt16(argc), UInt16(kwargc))
                     }
+
+                    Interpreter.silenceErrors = false
+                    return result
                 } catch {
                     if !PyBind.overloadArgumentsMatched {
                         continue
                     }
 
+                    Interpreter.silenceErrors = false
                     throw error
                 }
             }
 
+            Interpreter.silenceErrors = false
             throw PythonError.TypeError("no matching overload")
         }
     }
@@ -367,43 +363,61 @@ extension PyBind {
             let function = py_inspect_currentfunction()!
             let overloads = py.getdict(function, name: "_overloads")!
 
+            Interpreter.silenceErrors = true
+
             for i in 0..<py.list.len(overloads) {
                 do {
-                    return try PyAPI.convertRetval {
+                    let result = try PyAPI.convertRetval {
                         let overload = py.list.getitem(overloads, i: i)
 
                         py.push(overload)
                         py.pushnil()
 
-                        // Setup args.
-                        let args = argv?[0]
-                        let argc = py.tuple.len(args)
-                        for i in 0..<argc {
-                            py.push(py.tuple.getitem(args, i: i))
-                        }
-
-                        // Setup kwargs
-                        let kwargs = argv?[1]
-                        let kwargc = py.dict.len(kwargs)
-                        let iter = try! py.iter(kwargs)
-                        while let next = try? py.next(iter) {
-                            py.push(py.tuple.getitem(next, i: 0))
-                            py.push(py.tuple.getitem(next, i: 1))
-                        }
-
+                        let argc = forwardArgs(argv?[0])
+                        let kwargc = forwardKwargs(argv?[1])
+                        
+                        Interpreter.silenceErrors = true
                         PyBind.overloadArgumentsMatched = false
+                        
                         return py_vectorcall(UInt16(argc), UInt16(kwargc))
                     }
+
+                    Interpreter.silenceErrors = false
+                    return result
                 } catch {
                     if !PyBind.overloadArgumentsMatched {
                         continue
                     }
 
+                    Interpreter.silenceErrors = false
                     throw error
                 }
             }
 
+            Interpreter.silenceErrors = false
             throw PythonError.TypeError("no matching overload")
         }
+    }
+    
+    @usableFromInline
+    static func forwardArgs(_ args: PyRef?) -> Int32 {
+        let length = py.tuple.len(args)
+        for i in 0..<length {
+            py.push(py.tuple.getitem(args, i: i))
+        }
+        return length
+    }
+    
+    @usableFromInline
+    static func forwardKwargs(_ kwargs: PyRef?) -> Int32 {
+        let iter = try! py.retain(py.iter(kwargs))
+        while let key = try? py.next(iter.reference) {
+            let keyName = py_name(py_tostr(key))
+            py.newint(py.pushtmp(), value: Int(bitPattern: keyName))
+
+            py_dict_getitem(kwargs, key)
+            py.push(py.retval)
+        }
+        return py.dict.len(kwargs)
     }
 }

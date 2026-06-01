@@ -55,9 +55,7 @@ extension TestClass: @preconcurrency CustomStringConvertible {
 extension TestClass: PythonBindable {
     static let pyType: PyType = .make("TestClass", module: py.getmodule("__main__")) { type in
         type.magic("__new__") { __new__($1) }
-        type.function("__init__(self) -> None") { argc, argv in
-            __init__(argc, argv, TestClass.init)
-        }
+        type.function("__init__(self) -> None") { __init__($1, TestClass.init) }
         type.function("__init__(self, number: int) -> None") { argc, argv in
             __init__(argc, argv, TestClass.init(number:))
         }
