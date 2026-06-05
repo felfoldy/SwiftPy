@@ -74,7 +74,11 @@ extension AnyView: PythonConvertible {
     }
 
     public static func fromPython(_ reference: PyRef) -> AnyView {
-        reference.toUserdata()
+        if py.typeof(reference) == pyType {
+            reference.toUserdata()
+        } else {
+            reference.view ?? AnyView(erasing: EmptyView())
+        }
     }
 
     public static let pyType = py.newtype(

@@ -186,16 +186,10 @@ struct InitializerExtractor: MemberExtractor {
             let swiftInitializer = "\(metadata.className).init(\(swiftParameterLabels))"
                 .replacingOccurrences(of: "()", with: "")
 
-            let pyArguments = parameters.map { parameter in
-                let name = parameter.secondName ?? parameter.firstName
-                let type = parameter.type.description.singleLine.pyType
-                let defaultExpression = parameter.defaultValue?.value.description.singleLine.pyLiteralExpression ?? ""
+            let paramsString = PythonSignatureFormatStyle(hasSelf: true)
+                .format(initializer.signature)
 
-                return ", \(name): \(type)\(defaultExpression)"
-            }
-            .joined()
-
-            let pySignature = "__init__(self\(pyArguments)) -> None".singleLine
+            let pySignature = "__init__(\(paramsString)) -> None"
 
             metadata.bindings.append(
             """
@@ -321,10 +315,7 @@ struct FunctionExtractor: MemberExtractor {
         let isStatic = function.modifiers.isStatic
         let signature = function.signature
 
-        let paramsString = makeParameterList(
-            from: signature,
-            isStatic: isStatic
-        )
+        let paramsString = PythonSignatureFormatStyle(hasSelf: !isStatic).format(signature)
 
         let returnType = signature.returnClause?.type.description.singleLine.pyType ?? "None"
         let pythonIdentifier = metadata.identifier(identifier)
@@ -364,23 +355,6 @@ struct FunctionExtractor: MemberExtractor {
             """
             )
         }
-    }
-
-    private func makeParameterList(
-        from signature: FunctionSignatureSyntax,
-        isStatic: Bool
-    ) -> String {
-        var parameters: [String] = isStatic ? [] : ["self"]
-
-        parameters += signature.parameterClause.parameters.map { parameter in
-            let name = parameter.secondName ?? parameter.firstName
-            let type = parameter.type.description.singleLine.pyType
-            let defaultExpression = parameter.defaultValue?.value.description.singleLine.pyLiteralExpression ?? ""
-
-            return "\(name): \(type)\(defaultExpression)"
-        }
-
-        return parameters.joined(separator: ", ")
     }
 }
 
@@ -572,6 +546,8 @@ extension String {
             "str"
         case "Bool":
             "bool"
+        case "PyObject":
+            "Any"
         default:
             trimmed
         }
@@ -636,5 +612,26 @@ extension MacroExpansionContext {
     func warning(_ node: any SyntaxProtocol, _ message: String) {
         let msg = MacroExpansionWarningMessage(message)
         diagnose(.init(node: node, message: msg))
+    }
+}
+
+struct PythonSignatureFormatStyle: FormatStyle {
+    var hasSelf: Bool
+
+    func format(_ signature: FunctionSignatureSyntax) -> String {
+        var parameters: [String] = hasSelf ? ["self"] : []
+
+        parameters += signature.parameterClause.parameters.map { parameter in
+            let name = (parameter.secondName ?? parameter.firstName)
+            let type = parameter.type.description.singleLine.pyType
+            let defaultExpression = parameter.defaultValue?.value.description.singleLine.pyLiteralExpression ?? ""
+
+            if type == "Unpack" {
+                return "*\(name)"
+            }
+            return "\(name): \(type)\(defaultExpression)"
+        }
+
+        return parameters.joined(separator: ", ")
     }
 }

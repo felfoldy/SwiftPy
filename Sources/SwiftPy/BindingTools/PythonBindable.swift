@@ -95,7 +95,18 @@ public extension PythonValueBindable {
     static func _bind_getter<Value>(_ keypath: KeyPath<Self, Value>, _ argv: PyRef?) -> Bool {
         PyAPI.return { Self(argv)?[keyPath: keypath] }
     }
-    
+
+    @inlinable
+    static func _bind_setter<Value: PythonConvertible>(_ keypath: WritableKeyPath<Self, Value>, _ argv: PyRef?) -> Bool {
+        PyAPI.return {
+            var base = try cast(argv)
+            let value = try Value.cast(argv, 1)
+            base[keyPath: keypath] = value
+            base.storeInPython(argv)
+            return .none
+        }
+    }
+
     @inlinable
     static func __view__(_ argv: PyRef?) -> Bool {
         PyAPI.return { .none }
@@ -246,11 +257,6 @@ public extension PythonBindable {
         return PyAPI.return { .none }
     }
     
-    @inlinable
-    static func _bind_getter<Value>(_ keypath: KeyPath<Self, Value>, _ argv: PyRef?) -> Bool {
-        PyAPI.return { Self(argv)?[keyPath: keypath] }
-    }
-
     @inlinable
     static func _bind_setter<Value: PythonConvertible>(_ keypath: ReferenceWritableKeyPath<Self, Value>, _ argv: PyRef?) -> Bool {
         PyAPI.return {

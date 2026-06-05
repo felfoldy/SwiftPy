@@ -58,7 +58,7 @@ public struct PyModule {
     }
 
     @discardableResult
-    public func `class`(_ type: PythonBindable.Type) -> PyModule {
+    public func `class`(_ type: PythonValueBindable.Type) -> PyModule {
         let type = type.pyType
         py.setdict(reference, name: type.name, value: py.tpobject(type))
         return self

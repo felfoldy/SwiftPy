@@ -108,6 +108,7 @@ public struct PyAPI {
     @discardableResult
     @inlinable
     public static func convertRetval(
+        silenceErrors: Bool = false,
         _ call: () -> Bool
     ) throws(PythonError) -> PyRef {
         let p0 = py.peek()
@@ -117,7 +118,7 @@ public struct PyAPI {
 
         let ok = py_matchexc(.BaseException)
         precondition(ok)
-        if !Interpreter.silenceErrors {
+        if !silenceErrors && !Interpreter.silenceErrors {
             Interpreter.output.stderr(String(cString: py_formatexc()))
         }
         py.clearexc(p0)
@@ -594,9 +595,13 @@ public extension PyRef {
     /// Returns a `ViewRepresentation` if the bounded object implements `ViewRepresentable`.
     @inlinable
     var view: AnyView? {
-        Interpreter.silenceErrors = true
-        defer { Interpreter.silenceErrors = false }
-        let view = try? py.getattr(self, name: "__view__")
+        if py.typeof(self) == AnyView.pyType,
+           let view = AnyView(self) {
+            return view
+        }
+        let view = Interpreter.silenceErrors {
+            try py.getattr(self, name: "__view__")
+        }
         return AnyView(view)
     }
 

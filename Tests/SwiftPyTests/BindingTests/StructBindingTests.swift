@@ -11,7 +11,7 @@ import Testing
 
 @MainActor
 struct StructView: View {
-    let value: String
+    var value: String
 
     init(value: String) {
         self.value = value
@@ -45,7 +45,7 @@ extension StructView: PythonValueBindable {
         type.property(
             "value",
             getter: { _bind_getter(\.value, $1) },
-            setter: nil
+            setter: { _bind_setter(\.value, $1) }
         )
 
         return type
@@ -80,5 +80,16 @@ struct StructBindingTests {
         let view: AnyView? = try viewBinding.__view__?()
         
         #expect(view != nil)
+    }
+    
+    @Test
+    func setter() throws {
+        Interpreter.run("""
+        view = StructView('content')
+        view.value = 'new content'
+        """)
+        
+        let value: String = try #require(py.main.view?.value)
+        #expect(value == "new content")
     }
 }

@@ -8,6 +8,10 @@
 import SwiftPy
 import Testing
 
+extension PythonValueBindable {
+    typealias Variadic = Array
+}
+
 private class SUT: PythonBindable {
     var member: String?
     

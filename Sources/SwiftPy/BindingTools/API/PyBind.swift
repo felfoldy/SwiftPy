@@ -21,7 +21,7 @@ public enum PyBind {
             }
 
             // Add module.__doc__.
-            _ = try? py.module("interpreter")?.bind_interfaces?(module)
+            _ = try? py.module("interpreter")?.bind_interfaces?(module.reference)
         }
     }
 
@@ -320,38 +320,32 @@ extension PyBind {
             let function = py_inspect_currentfunction()!
             let overloads = py.getdict(function, name: "_overloads")!
             
-            Interpreter.silenceErrors = true
-
             for i in 0..<py.list.len(overloads) {
-                do {
-                    let result = try PyAPI.convertRetval {
-                        let overload = py.list.getitem(overloads, i: i)
+                let overload = py.list.getitem(overloads, i: i)
 
+                do {
+                    let result = try PyAPI.convertRetval(silenceErrors: true) {
                         py.push(overload)
                         py.push(argv)
 
                         let argc = forwardArgs(argv?[1])
                         let kwargc = forwardKwargs(argv?[2])
                         
-                        Interpreter.silenceErrors = true
                         PyBind.overloadArgumentsMatched = false
                         
                         return py_vectorcall(UInt16(argc), UInt16(kwargc))
                     }
 
-                    Interpreter.silenceErrors = false
                     return result
                 } catch {
                     if !PyBind.overloadArgumentsMatched {
                         continue
                     }
 
-                    Interpreter.silenceErrors = false
                     throw error
                 }
             }
 
-            Interpreter.silenceErrors = false
             throw PythonError.TypeError("no matching overload")
         }
     }
@@ -362,8 +356,6 @@ extension PyBind {
         PyAPI.return {
             let function = py_inspect_currentfunction()!
             let overloads = py.getdict(function, name: "_overloads")!
-
-            Interpreter.silenceErrors = true
 
             for i in 0..<py.list.len(overloads) {
                 do {
