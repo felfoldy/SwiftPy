@@ -592,17 +592,31 @@ public extension PyRef {
         pointee = newValue.pointee
     }
     
-    /// Returns a `ViewRepresentation` if the bounded object implements `ViewRepresentable`.
+    /// Returns an `AnyView` if the bounded object implements `ViewRepresentable`.
     @inlinable
     var view: AnyView? {
+        // Try AnyView. AnyView cannot be subclassed.
         if py.typeof(self) == AnyView.pyType,
            let view = AnyView(self) {
             return view
         }
+
+        // Try View.
+        if py.isinstance(self, type: .View),
+           let body = try? py.getattr(self, name: "body") {
+            let view = try? py.call(body)
+            return view?.view
+        }
+
+        // Try self.__view__.
         let view = Interpreter.silenceErrors {
             try py.getattr(self, name: "__view__")
         }
-        return AnyView(view)
+        if let view {
+            return AnyView(view)
+        }
+
+        return nil
     }
 
     @inlinable func setAttribute(_ name: String, _ value: PyRef?) {

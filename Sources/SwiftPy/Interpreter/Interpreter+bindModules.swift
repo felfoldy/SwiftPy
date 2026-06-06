@@ -108,7 +108,6 @@ extension Interpreter {
 
         let asyncSource = """
         def async(func):
-            import inspect
             import asyncio
             def coroutine(*args,**kwargs):
                 cr = func(*args,**kwargs)
@@ -122,5 +121,7 @@ extension Interpreter {
             mode: .execution,
             module: builtins
         )
+
+        py.setdict(builtins, name: "View", value:  py.tpobject(.View))
     }
 }

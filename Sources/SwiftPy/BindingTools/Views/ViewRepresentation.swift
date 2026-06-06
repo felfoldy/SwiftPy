@@ -67,25 +67,3 @@ public extension ViewRepresentable where Content: RepresentationContent, Content
         Content(model: self)
     }
 }
-
-extension AnyView: PythonConvertible {
-    public func toPython(_ reference: PyRef) {
-        py.newobject(self, type: Self.pyType, out: reference, slots: 0)
-    }
-
-    public static func fromPython(_ reference: PyRef) -> AnyView {
-        if py.typeof(reference) == pyType {
-            reference.toUserdata()
-        } else {
-            reference.view ?? AnyView(erasing: EmptyView())
-        }
-    }
-
-    public static let pyType = py.newtype(
-        name: "AnyView",
-        base: .object,
-        module: py.getmodule("__main__")
-    ) { pointer in
-        deinitialize(userdata: pointer)
-    }
-}
