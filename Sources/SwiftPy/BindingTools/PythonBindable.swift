@@ -124,11 +124,6 @@ public extension PythonValueBindable where Self: View {
 }
 
 public extension PythonBindable {
-    @inlinable static var slotCount: Int32 {
-        let slots = (self as? (any HasSlots.Type))?.slotCount
-        return Int32(slots ?? -1)
-    }
-    
     @inlinable
     func storeInPython(_ reference: PyRef?, userdata: UnsafeMutableRawPointer? = nil) {
         guard let reference else { return }
@@ -153,7 +148,7 @@ public extension PythonBindable {
             return
         }
 
-        let userdata = py.newobject(reference, type: Self.pyType, slots: Self.slotCount)
+        let userdata = py.newobject(reference, type: Self.pyType, slots: -1)
         storeInPython(reference, userdata: userdata)
     }
     
@@ -190,20 +185,6 @@ public extension PythonBindable {
     }
 }
 
-// MARK: - Binding tools
-
-public extension PythonConvertible {
-    /// Throws generic `TypeError`.
-    ///
-    /// - Parameters:
-    ///   - ref: result it got
-    ///   - position: position
-    /// - Returns: `false`
-    @inlinable static func throwTypeError(_ ref: PyRef?, _ position: Int) -> Bool {
-        PyAPI.throw(.TypeError, "Expected \(pyType.name) got \(py.typeof(ref).name) at position \(position)")
-    }
-}
-
 // MARK: Binding helpers.
 
 public extension PythonBindable {
@@ -215,7 +196,7 @@ public extension PythonBindable {
         py.newobject(
             py.retval,
             type: type,
-            slots: slotCount
+            slots: -1
         )
         return true
     }
@@ -238,22 +219,6 @@ public extension PythonBindable {
             return false
         }
         
-        return PyAPI.return { .none }
-    }
-    
-    @inlinable
-    static func __init__(
-        _ argc: Int32, _ argv: PyRef?,
-        _ initializer: @MainActor (PyArguments) throws -> Self
-    ) -> Bool {
-        do {
-            try initializer(PyArguments(argc: argc, argv: argv))
-                .storeInPython(argv)
-        } catch {
-            // TODO: incorrect when the error thrown by the init itself.
-            return false
-        }
-
         return PyAPI.return { .none }
     }
     
