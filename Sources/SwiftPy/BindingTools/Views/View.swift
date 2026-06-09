@@ -30,6 +30,7 @@ public extension PyType {
     }()
 }
 
+@MainActor
 extension AnyView: PythonConvertible {
     public func toPython(_ reference: PyRef) {
         py.newobject(self, type: Self.pyType, out: reference, slots: 0)

@@ -22,7 +22,7 @@ extension Interpreter {
             guard let cName else { return nil }
             let name = String(cString: cName)
             
-            if let lib = Interpreter.moduleBuilders[name] {
+            if let lib = Interpreter.shared.moduleFactory[name] {
                 let module = py.newmodule(name)
                 lib(module)
                 return module

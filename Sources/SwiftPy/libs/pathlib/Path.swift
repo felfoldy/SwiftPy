@@ -11,16 +11,20 @@ import Foundation
 public final class Path {
     public var url: URL
 
+    internal init(url: URL) {
+        self.url = url
+    }
+    
     internal init(url: URL?) throws {
         guard let url else {
             throw PythonError.ValueError("Path not found")
         }
         self.url = url
     }
-    
-    public convenience init(path: String) throws {
+
+    public convenience init(_ path: String) {
         let url = URL(filePath: path, relativeTo: .currentDirectory())
-        try self.init(url: url)
+        self.init(url: url)
     }
 
     /// Create a new directory at this given path.
@@ -34,19 +38,19 @@ public final class Path {
     }
 
     /// Documents directory.
-    public static func home() throws -> Path {
-        try Path(url: .documentsDirectory)
+    public static func home() -> Path {
+        Path(url: .documentsDirectory)
     }
 
     /// The path to the program’s current directory.
-    public static func cwd() throws -> Path {
-        try Path(url: .currentDirectory())
+    public static func cwd() -> Path {
+        Path(url: .currentDirectory())
     }
     
     /// Documents/site-packges directory.
     public static func sitePackages() throws -> Path {
-        let sitePackagesUrl = try home().url.appending(path: "site-packages", directoryHint: .isDirectory)
-        let path = try Path(url: sitePackagesUrl)
+        let sitePackagesUrl = home().url.appending(path: "site-packages", directoryHint: .isDirectory)
+        let path = Path(url: sitePackagesUrl)
 
         // Create site-packages folder if not exists.
         if !FileManager.default.fileExists(atPath: sitePackagesUrl.path) {
@@ -64,13 +68,18 @@ public final class Path {
         FileManager.default.fileExists(atPath: url.path)
     }
 
-    func __truediv__(_ other: String) throws -> Path {
-        try Path(url: url.appending(path: other))
+    func __truediv__(_ other: String) -> Path {
+        Path(url: url.appending(path: other))
     }
 }
 
 extension Path: CustomStringConvertible {
     public var description: String {
         url.path
+    }
+    
+    @available(*, deprecated, renamed: "init(_:)")
+    public convenience init(path: String) {
+        self.init(path)
     }
 }

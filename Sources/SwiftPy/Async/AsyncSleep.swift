@@ -8,8 +8,8 @@
 import Foundation
 import SwiftUI
 
+@Scriptable(base: .View)
 @MainActor
-@Scriptable
 public final class AsyncSleep {
     public let seconds: Double
     public internal(set) var startDate = Date()
@@ -21,41 +21,32 @@ public final class AsyncSleep {
         task = AsyncTask {
             try await Task.sleep(for: .seconds(seconds))
         }
-
-        task.viewRepresentation = representation
+        task.viewRepresentation = body()
     }
-}
 
-extension AsyncSleep: ViewRepresentable {
-    public struct Content: RepresentationContent {
-        @State public var model: AsyncSleep
-        
-        public init(model: AsyncSleep) {
-            self.model = model
-        }
-
-        public var body: some View {
-            LogContainerView(tint: .indigo) {
-                TimelineView(.animation) { context in
-                    let interval = max(
-                        0,
-                        model.startDate
-                            .addingTimeInterval(model.seconds)
-                            .timeIntervalSince(context.date)
-                    )
+    func body() -> AnyView {
+        let startDate = startDate
+        let seconds = seconds
+        return AnyView(erasing: LogContainerView(tint: .indigo) {
+            TimelineView(.animation) { context in
+                let interval = max(
+                    0,
+                    startDate
+                        .addingTimeInterval(seconds)
+                        .timeIntervalSince(context.date)
+                )
+                
+                HStack {
+                    Image(systemName: "clock")
                     
-                    HStack {
-                        Image(systemName: "clock")
-                        
-                        Text(
-                            Date(timeIntervalSinceReferenceDate: interval),
-                            format: .dateTime.minute().second()
-                        )
-                    }
+                    Text(
+                        Date(timeIntervalSinceReferenceDate: interval),
+                        format: .dateTime.minute().second()
+                    )
                 }
-                .frame(maxWidth: .infinity, alignment: .leading)
             }
-        }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        })
     }
 }
 
@@ -64,7 +55,6 @@ extension AsyncSleep: ViewRepresentable {
     @Previewable @State var sleep = AsyncSleep(seconds: 5)
 
     ScrollView {
-        AsyncSleep.Content(model: sleep)
-            .frame(maxWidth: .infinity)
+        AsyncSleep(seconds: 3).body()
     }
 }

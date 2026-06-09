@@ -12,52 +12,31 @@ import SwiftUI
 #endif
 
 extension Interpreter {
-    static func bindModules() {
-        bindAsync()
-        bindOS()
-        bindSys()
-        
-        PyBind.module("interpreter", []) { module in
-            let builtins = py.getmodule("builtins")
-            builtins?["dir"]?.assign(module?["dir"])
-            
-            module?.bind(
-                "host(name: str) -> None",
-                docstring: "Hosts the remote Python interpreter on this device."
-            ) { _, argv in
-                PyAPI.return {
-                    let name = try String.cast(argv)
-                    let remote = RemoteIOStream(name: name)
-                    Interpreter.output = MultiIOStream(streams: [Interpreter.output, remote])
-                    return .none
-                }
-            }
-        }
+    func bindBuiltins() {
+        let builtins = py.getmodule("builtins")
 
-        PyBind.module("asyncio", [
-            AsyncTask.self,
-        ]) { module in
-            module?.bind(
-                "sleep(seconds: float) -> None",
-                docstring: "Coroutine that completes after a given time (in seconds)."
-            ) { argc, argv in
-                PyBind.function(argc, argv) { (seconds: Double) in
-                    let sleep = AsyncSleep(seconds: seconds)
-                    return sleep.task
-                }
-            }
-        }
+        // Add async decorator.
+        let asyncSource = """
+        def async(func):
+            import asyncio
+            def coroutine(*args,**kwargs):
+                cr = func(*args,**kwargs)
+                return asyncio.AsyncTask(cr)
+            return coroutine
+        """
 
-        PyBind.module("pathlib", [
-            Path.self,
-        ])
+        _ = try? py.exec(
+            source: asyncSource,
+            filename: "<stdin>",
+            mode: .execution,
+            module: builtins
+        )
 
-        PyBind.module("p2p", [
-            Peer.self,
-        ])
+        // Add View type.
+        py.setdict(builtins, name: "View", value:  py.tpobject(.View))
     }
-    
-    private static func bindOS() {
+
+    func bindOS() {
         let os = py.getmodule("os")
 
         os?.bind(
@@ -81,8 +60,23 @@ extension Interpreter {
             PyAPI.return { FileManager.default.currentDirectoryPath }
         }
     }
+
+    func bindAsyncio() {
+        bindModule("asyncio") { module in
+            module.class(AsyncTask.self)
+
+            module.def(
+                "sleep(seconds: float) -> None",
+                docstring: "Coroutine that completes after a given time (in seconds)."
+            ) { argc, argv in
+                PyBind.function(argc, argv) { (seconds: Double) in
+                    AsyncSleep(seconds: seconds).task
+                }
+            }
+        }
+    }
     
-    private static func bindSys() {
+    func bindSys() {
         guard let sys = py.getmodule("sys") else { return }
 
         #if os(visionOS)
@@ -103,25 +97,44 @@ extension Interpreter {
         )
     }
     
-    private static func bindAsync() {
-        let builtins = py.getmodule("builtins")
+    func bindInterpreter() {
+        bindModule("interpreter") { module in
+            // Override dir in builtins.
+            let builtins = py.getmodule("builtins")
+            py.setdict(builtins, name: "dir", value: module.dir?.reference)
 
-        let asyncSource = """
-        def async(func):
-            import asyncio
-            def coroutine(*args,**kwargs):
-                cr = func(*args,**kwargs)
-                return asyncio.AsyncTask(cr)
-            return coroutine
-        """
-        
-        _ = try? py.exec(
-            source: asyncSource,
-            filename: "<stdin>",
-            mode: .execution,
-            module: builtins
-        )
-
-        py.setdict(builtins, name: "View", value:  py.tpobject(.View))
+            module.def("host(name: str) -> None",
+                       docstring: "Hosts the remote Python interpreter on this device.") { argc, argv in
+                PyBind.function(argc, argv) { (name: String) in
+                    let remote = RemoteIOStream(name: name)
+                    Interpreter.output = MultiIOStream(streams: [Interpreter.output, remote])
+                    return
+                }
+            }
+        }
+    }
+    
+    func bindPathlib() {
+        bindModule("pathlib") { module in
+            module.class(Path.self)
+        }
+    }
+    
+    func bindP2P() {
+        bindModule("p2p") { module in
+            module.class(Peer.self)
+        }
+    }
+    
+    func bindStorages() {
+        bindModule("storages") { module in
+            if #available(macOS 15, iOS 18, visionOS 2, *) {
+                module.classes(
+                    ModelContainer.self,
+                    ModelData.self,
+                    LookupKeyValue.self,
+                )
+            }
+        }
     }
 }

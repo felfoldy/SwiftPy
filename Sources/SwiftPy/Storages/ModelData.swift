@@ -9,16 +9,6 @@
 import SwiftData
 import Foundation
 
-@available(macOS 15, iOS 18, *)
-@MainActor
-func hookStoragesModule() {
-    PyBind.module("storages", [
-        ModelContainer.self,
-        ModelData.self,
-        LookupKeyValue.self,
-    ])
-}
-
 // MARK: - Models
 
 @available(macOS 15, iOS 18, *)

@@ -609,6 +609,7 @@ public extension PyRef {
         }
 
         // Try self.__view__.
+        // TODO: Depricate.
         let view = Interpreter.silenceErrors {
             try py.getattr(self, name: "__view__")
         }

@@ -8,12 +8,12 @@
 import pocketpy
 import Foundation
 
-@MainActor
-public enum PyBind {
-    public static func module(_ name: String, block: @escaping (PyModule) -> Void) {
-        Interpreter.shared.moduleBuilders[name] = { module in
+extension Interpreter {
+    /// Internal module binding.
+    func bindModule(_ name: String, block: @escaping (PyModule) -> Void) {
+        moduleFactory[name] = { module in
             guard let module = PyModule(module) else { return }
-            
+
             block(module)
 
             if let content = Interpreter.importFromSource(name: name + ".py") {
@@ -23,6 +23,13 @@ public enum PyBind {
             // Add module.__doc__.
             _ = try? py.module("interpreter")?.bind_interfaces?(module.reference)
         }
+    }
+}
+
+@MainActor
+public enum PyBind {
+    public static func module(_ name: String, block: @escaping (PyModule) -> Void) {
+        Interpreter.shared.bindModule(name, block: block)
     }
 
     /// `() -> Void`
@@ -207,8 +214,9 @@ extension PyBind {
 // MARK: - Legacy PyBind
 
 extension PyBind {
+    @available(*, deprecated, renamed: "module(_:block:)")
     public static func module(_ name: String, _ types: [PythonBindable.Type], block: @escaping (PyRef?) -> Void = { _ in }) {
-        Interpreter.moduleBuilders[name] = { module in
+        Interpreter.shared.moduleFactory[name] = { module in
             guard let module = PyModule(module) else { return }
             // Set types.
             for type in types {

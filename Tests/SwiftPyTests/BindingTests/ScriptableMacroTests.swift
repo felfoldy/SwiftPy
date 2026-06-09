@@ -381,6 +381,46 @@ class ScriptableMacroTests: XCTestCase {
         """,
         macros: testMacros)
     }
+    
+    func testViewBaseHidesBodyFromInterface() {
+        assertMacroExpansion("""
+        @Scriptable(base: .View)
+        class TestClass {
+            func body() -> AnyView {
+                AnyView(EmptyView())
+            }
+
+            func update() {}
+        }
+        """, expandedSource: """
+        class TestClass {
+            func body() -> AnyView {
+                AnyView(EmptyView())
+            }
+
+            func update() {}
+        
+            var _pythonCache = PythonBindingCache()
+        }
+        
+        extension TestClass: PythonBindable {
+            @MainActor static let pyType: PyType = .make("TestClass", base: .View) { type in
+                type.function("body(self) -> AnyView") {
+                    _bind_function($1, body)
+                }
+                type.function("update(self) -> None") {
+                    _bind_function($1, update)
+                }
+                \(newAndRepr)
+                \(interfaceBegin)
+                class TestClass(View):
+                    def update(self) -> None: ...
+                \(interfaceEnd)
+            }
+        }
+        """,
+        macros: testMacros)
+    }
 }
 
 private func function(_ name: String, _ syntax: String) -> String {

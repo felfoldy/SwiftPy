@@ -59,6 +59,8 @@ extension ScriptableMacro: ExtensionMacro {
             extractor.extract(from: members, metadata: &classMeta)
         }
 
+        let pythonInterface = PythonInterfaceFormatStyle().format(classMeta)
+        
         return try [
             ExtensionDeclSyntax("extension \(raw: className)\(raw: conformance)") {
             """
@@ -73,7 +75,7 @@ extension ScriptableMacro: ExtensionMacro {
             type.property("__view__") {
                 __view__($1)
             }
-            PyObject(type)._interface = \(raw: buildInterface(classMeta))
+            PyObject(type)._interface = \(raw: pythonInterface)
             }
             """
             }
@@ -245,11 +247,6 @@ struct VariableExtractor: MemberExtractor {
 
         let identifier = pattern.identifier.text
 
-        // Ignore ViewRepresentable.view.
-        if identifier == "view" {
-            return
-        }
-
         let pythonIdentifier = metadata.identifier(identifier)
 
         if let docstring = variable.description.docstring {
@@ -356,66 +353,6 @@ struct FunctionExtractor: MemberExtractor {
             )
         }
     }
-}
-
-// MARK: - Interface
-
-func buildInterface(_ metadata: ClassMetadata) -> String {
-    var rows = [
-        "#\"\"\"",
-        metadata.interfaceHeader
-    ]
-
-    if let classDoc = metadata.classDoc {
-        var docRows = [classDoc]
-
-        if !metadata.variableDocs.isEmpty {
-            docRows.append("")
-            docRows.append(.tab + "Attributes:")
-
-            for variableDoc in metadata.variableDocs {
-                docRows.append(.tab + .tab + variableDoc)
-            }
-        }
-
-        let docstring = .tab + docRows
-            .joined(separator: "\n")
-            .inPythonTrippleQuotes
-
-        rows.append(docstring)
-        rows.append("")
-    }
-
-    if !metadata.variableSyntax.isEmpty {
-        for variableSyntax in metadata.variableSyntax {
-            rows.append(.tab + variableSyntax)
-        }
-
-        rows.append("")
-    }
-
-    if !metadata.initSyntax.isEmpty {
-        for initSyntax in metadata.initSyntax {
-            rows.append(.tab + initSyntax)
-        }
-
-        rows.append("")
-    }
-
-    if !metadata.functionSyntax.isEmpty {
-        for functionSyntax in metadata.functionSyntax {
-            rows.append(.tab + functionSyntax)
-        }
-
-        rows.append("")
-    }
-
-    if rows.count == 2 {
-        rows.append(.tab + "...")
-    }
-
-    let content = rows.joined(separator: "\n").trim
-    return content + "\n\"\"\"#"
 }
 
 // MARK: - ClassMetadata Helpers
@@ -633,5 +570,78 @@ struct PythonSignatureFormatStyle: FormatStyle {
         }
 
         return parameters.joined(separator: ", ")
+    }
+}
+
+struct PythonInterfaceFormatStyle: FormatStyle {
+    func format(_ value: ClassMetadata) -> String {
+        var rows = [
+            "#\"\"\"",
+            value.interfaceHeader
+        ]
+
+        if let classDoc = value.classDoc {
+            var docRows = [classDoc]
+
+            if !value.variableDocs.isEmpty {
+                docRows.append("")
+                docRows.append(.tab + "Attributes:")
+
+                for variableDoc in value.variableDocs {
+                    docRows.append(.tab + .tab + variableDoc)
+                }
+            }
+
+            let docstring = .tab + docRows
+                .joined(separator: "\n")
+                .inPythonTrippleQuotes
+
+            rows.append(docstring)
+            rows.append("")
+        }
+
+        if !value.variableSyntax.isEmpty {
+            for variableSyntax in value.variableSyntax {
+                rows.append(.tab + variableSyntax)
+            }
+
+            rows.append("")
+        }
+
+        if !value.initSyntax.isEmpty {
+            for initSyntax in value.initSyntax {
+                rows.append(.tab + initSyntax)
+            }
+
+            rows.append("")
+        }
+
+        let functionSyntax = filteredFunctionSyntax(from: value)
+
+        if !functionSyntax.isEmpty {
+            for syntax in functionSyntax {
+                rows.append(.tab + syntax)
+            }
+
+            rows.append("")
+        }
+
+        if rows.count == 2 {
+            rows.append(.tab + "...")
+        }
+
+        let content = rows.joined(separator: "\n").trim
+        return content + "\n\"\"\"#"
+    }
+
+    private func filteredFunctionSyntax(from metadata: ClassMetadata) -> [String] {
+        guard metadata.base == ".View" else {
+            return metadata.functionSyntax
+        }
+
+        return metadata.functionSyntax.filter { syntax in
+            !syntax.starts(with: "def body(self)")
+                && !syntax.starts(with: "async def body(self)")
+        }
     }
 }

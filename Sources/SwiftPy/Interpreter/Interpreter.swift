@@ -43,14 +43,7 @@ public final class Interpreter {
     @usableFromInline
     static let shared = Interpreter()
 
-    var replLines = [String]()
-
-    static var moduleBuilders: [String: (PyRef?) -> Void] = [:]
-
-    var moduleBuilders: [String: (PyRef?) -> Void] {
-        get { Interpreter.moduleBuilders }
-        set { Interpreter.moduleBuilders = newValue }
-    }
+    var moduleFactory: [String: (PyRef?) -> Void] = [:]
     
     let profiler = SignpostProfiler("Python")
     private let relays = OutputRelays()
@@ -64,11 +57,14 @@ public final class Interpreter {
         let documentsPath = URL.documentsDirectory.path
         FileManager.default.changeCurrentDirectoryPath(documentsPath)
 
-        Interpreter.bindModules()
-
-        if #available(macOS 15, iOS 18, visionOS 2, *) {
-            hookStoragesModule()
-        }
+        bindBuiltins()
+        bindOS()
+        bindAsyncio()
+        bindSys()
+        bindInterpreter()
+        bindPathlib()
+        bindP2P()
+        bindStorages()
     }
     
     func execute(_ code: String, filename: String, mode: CompileMode = .execution) throws {
