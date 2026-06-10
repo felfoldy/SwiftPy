@@ -72,9 +72,6 @@ extension ScriptableMacro: ExtensionMacro {
             type.magic("__repr__") {
                 __repr__($1)
             }
-            type.property("__view__") {
-                __view__($1)
-            }
             PyObject(type)._interface = \(raw: pythonInterface)
             }
             """

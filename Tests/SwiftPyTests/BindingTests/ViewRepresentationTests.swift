@@ -9,10 +9,10 @@ import Testing
 import SwiftPy
 import SwiftUI
 
-@Scriptable
-class CustomView: ViewRepresentable {
-    var view: some View {
-        Text("content")
+@Scriptable(base: .View)
+class CustomView {
+    func body() -> AnyView {
+        AnyView(Text("content"))
     }
 }
 

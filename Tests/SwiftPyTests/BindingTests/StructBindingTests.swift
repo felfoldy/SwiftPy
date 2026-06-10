@@ -41,7 +41,6 @@ extension StructView: PythonValueBindable {
         type.function("__init__(self) -> None") {
             __init__($1, StructView.init)
         }
-        type.magic("__view__") { __view__($1) }
         type.property(
             "value",
             getter: { _bind_getter(\.value, $1) },
@@ -68,18 +67,6 @@ struct StructBindingTests {
         let view: StructView = try #require(py.main.view)
         #expect(view.value == "content")
         #expect(py.main.value == "content")
-    }
-    
-    @Test
-    func __view__binding() throws {
-        Interpreter.run("""
-        viewBinding = StructView()
-        """)
-
-        let viewBinding = try #require(py.main.viewBinding)
-        let view: AnyView? = try viewBinding.__view__?()
-        
-        #expect(view != nil)
     }
     
     @Test

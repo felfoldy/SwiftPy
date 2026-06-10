@@ -175,9 +175,12 @@ extension AsyncTask {
         })
     }
     
-    public convenience init<T: PythonConvertible>(presenting: any ViewRepresentable, _ task: @escaping () async throws -> T) where T: Sendable {
+    public convenience init<T: PythonConvertible>(
+        presenting: any View,
+        _ task: @escaping () async throws -> T
+    ) where T: Sendable {
         self.init(task)
-        viewRepresentation = presenting.representation
+        viewRepresentation = AnyView(presenting)
     }
     
     public func untilCompletes() async {

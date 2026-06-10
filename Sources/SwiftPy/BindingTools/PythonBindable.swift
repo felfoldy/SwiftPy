@@ -106,21 +106,6 @@ public extension PythonValueBindable {
             return .none
         }
     }
-
-    @inlinable
-    static func __view__(_ argv: PyRef?) -> Bool {
-        PyAPI.return { .none }
-    }
-}
-
-public extension PythonValueBindable where Self: View {
-    @inlinable
-    static func __view__(_ argv: PyRef?) -> Bool {
-        PyAPI.return {
-            let view = try cast(argv)
-            return AnyView(view.body)
-        }
-    }
 }
 
 public extension PythonBindable {
@@ -165,22 +150,6 @@ public extension PythonBindable {
         PyAPI.return {
             let obj = try cast(argv)
             return String(describing: obj)
-        }
-    }
-    
-    @inlinable
-    static func __view__(_ argv: PyRef?) -> Bool {
-        PyAPI.return {
-            if Self.self is (any View.Type) {
-                let obj = try cast(argv) as? (any View)
-                return AnyView { obj }
-            }
-            
-            if Self.self is (any ViewRepresentable.Type) {
-                let obj = try cast(argv) as? (any ViewRepresentable)
-                return obj?.representation
-            }
-            return nil
         }
     }
 }

@@ -21,10 +21,12 @@ class TestClass4 {
 @MainActor
 struct BindInterfacesTests {
     init() {
-        PyBind.module("test", [
-            TestClass3.self,
-            TestClass4.self
-        ])
+        PyBind.module("test") { test in
+            test.classes(
+                TestClass3.self,
+                TestClass4.self
+            )
+        }
     }
     
     @Test func helpOnModule() throws {
