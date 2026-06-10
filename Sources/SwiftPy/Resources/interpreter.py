@@ -1,5 +1,5 @@
 from rlcompleter import Completer
-
+from interpreter.native import *
 
 def completions(text: str) -> list[str]:
     completer = Completer()
@@ -47,3 +47,7 @@ def dir(obj) -> list[str]:
         names.update([k for k, _ in cls.__dict__.items()])
         cls = cls.__base__
     return sorted(list(names))
+
+
+import builtins as _builtins
+_builtins.dir = dir

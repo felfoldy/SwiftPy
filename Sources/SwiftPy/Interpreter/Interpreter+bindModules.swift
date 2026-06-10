@@ -98,11 +98,7 @@ extension Interpreter {
     }
     
     func bindInterpreter() {
-        bindModule("interpreter") { module in
-            // Override dir in builtins.
-            let builtins = py.getmodule("builtins")
-            py.setdict(builtins, name: "dir", value: module.dir?.reference)
-
+        bindModule("interpreter.native") { module in
             module.def("host(name: str) -> None",
                        docstring: "Hosts the remote Python interpreter on this device.") { argc, argv in
                 PyBind.function(argc, argv) { (name: String) in

@@ -33,9 +33,9 @@ extension Interpreter {
     }
 }
 
+@Scriptable(base: .View)
 @MainActor
-@Scriptable
-public class AsyncTask: ViewRepresentable {
+public class AsyncTask {
     public var isDone: Bool = false
     public var viewRepresentation: AnyView?
 
@@ -87,7 +87,7 @@ public class AsyncTask: ViewRepresentable {
 
                         // Fix a loop if any child task fails.
                         if let task = AsyncTask(next) {
-                            Interpreter.output.view(task.representation)
+                            Interpreter.output.view(task.body())
                             _ = await task.task.value
                             
                             if AsyncContext.current == nil {
@@ -122,6 +122,10 @@ public class AsyncTask: ViewRepresentable {
             throw .StopIteration(result?.reference)
         }
         return self
+    }
+
+    func body() -> AnyView {
+        viewRepresentation ?? AnyView(EmptyView())
     }
 
     deinit {

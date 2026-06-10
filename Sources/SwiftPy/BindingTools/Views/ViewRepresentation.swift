@@ -7,24 +7,7 @@
 
 import SwiftUI
 
-/// A protocol for types that can provide a SwiftUI-based visual representation of themselves.
-///
-/// Conform to `ViewRepresentable` when you want your type to render a custom SwiftUI view
-/// instead of plain text in interactive or inspection contexts.
-///
-/// Example:
-/// ```swift
-/// @Scriptable("Text")
-/// final class TextRepresentable: ViewRepresentable {
-///     let content: String
-///
-///     init(content: String) { self.content = content }
-///
-///     var view: some View {
-///         Text(content)
-///     }
-/// }
-/// ```
+@available(*, deprecated, message: "Use @Scriptable(base: .View) and func body() -> AnyView")
 @MainActor
 public protocol ViewRepresentable {
     associatedtype Content: View

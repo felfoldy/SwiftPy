@@ -18,7 +18,13 @@ struct InterpreterTests {
     @Test func evaluate() {
         #expect(Interpreter.evaluate("3 + 4") == 7)
     }
-    
+
+    @Test func dirIsNotNone() {
+        Interpreter.execute("import interpreter")
+
+        #expect(Interpreter.evaluate("dir is None") == false)
+    }
+
     @Test(
         .disabled("Performance benchmark")
     )
