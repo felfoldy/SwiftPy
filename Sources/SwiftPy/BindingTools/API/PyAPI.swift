@@ -680,6 +680,10 @@ public extension PyRef {
             if canCast(to: Path.pyType) {
                 return true
             }
+        case AnyView.pyType:
+            if canCast(to: .View) {
+                return true
+            }
         default: break
         }
         return false
