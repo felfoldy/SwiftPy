@@ -47,8 +47,8 @@ public final class Interpreter {
     
     let profiler = SignpostProfiler("Python")
     private let relays = OutputRelays()
-    private let builtinExec: PyAPI.CFunction
-    private let builtinEval: PyAPI.CFunction
+    let builtinExec: PyAPI.CFunction
+    let builtinEval: PyAPI.CFunction
 
     init() {
         // Store builtin exec and eval.
@@ -77,6 +77,20 @@ public final class Interpreter {
         let code = try py.compile(source: code, filename: filename, mode: mode)
         
         try PyAPI.convertRetval(code) { code in
+            let function = mode == .evaluation ? builtinEval : builtinExec
+
+            profiler.begin()
+            let isExecuted = function(1, code)
+            profiler.end()
+
+            Interpreter.output.executionTime(profiler.executionTime)
+
+            return isExecuted
+        }
+    }
+
+    func execute(_ code: PyObject, mode: CompileMode = .execution) throws {
+        try PyAPI.convertRetval(code.reference) { code in
             let function = mode == .evaluation ? builtinEval : builtinExec
 
             profiler.begin()
@@ -147,21 +161,37 @@ public extension Interpreter {
     static func execute(_ code: String, filename: String = "<string>", mode: CompileMode = .execution) {
         try? shared.execute(code, filename: filename, mode: mode)
     }
+
+    /// Executes a pre-compiled code object.
+    ///
+    /// - Parameters:
+    ///   - code: A compiled ``PyObject`` returned by ``compile(_:filename:mode:)``.
+    ///   - mode: The mode the code was compiled with.
+    static func execute(_ code: PyObject, mode: CompileMode = .execution) {
+        try? shared.execute(code, mode: mode)
+    }
     
+    /// Executes a block with Python error output suppressed.
+    ///
+    /// - Parameter block: A throwing closure to execute with errors silenced.
+    /// - Returns: The value returned by `block`.
+    /// - Throws: Any error thrown by `block`.
     @discardableResult
-    static func silenceErrors<Result>(block: () throws -> Result) -> Result? {
+    static func silenceErrors<Result, Failure: Error>(
+        block: () throws(Failure) -> Result
+    ) throws(Failure) -> Result {
         silenceErrors = true
         defer { silenceErrors = false }
-        return try? block()
+        return try block()
     }
 
     /// Runs a code in execution mode.
     /// 
     /// Performs profiling and outputs the input to the console.
-    /// - Parameter code: Code to execute.
-    static func run(_ code: String, filename: String = "<string>", mode: CompileMode = .execution) {
-        output.input(code)
-        try? shared.execute(code, filename: filename, mode: mode)
+    /// - Parameter source: Code to execute.
+    static func run(_ source: String, filename: String = "<string>", mode: CompileMode = .execution) {
+        output.input(source)
+        try? shared.execute(source, filename: filename, mode: mode)
     }
 
     static func asyncRun(_ code: String, filename: String = "<string>", mode: CompileMode = .execution) async {
@@ -207,8 +237,6 @@ public extension Interpreter {
         filename: String = "<string>",
         mode: CompileMode = .execution
     ) throws(PythonError) -> PyObject {
-        silenceErrors = true
-        defer { silenceErrors = false }
         let codeRef = try py.compile(source: source, filename: filename, mode: mode)
         return PyObject(codeRef)
     }

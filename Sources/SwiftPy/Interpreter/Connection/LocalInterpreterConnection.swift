@@ -25,31 +25,12 @@ actor LocalInterpreterConnection: InterpreterConnection {
             send(id: currentContextId, .contextCreated)
 
         case let .compile(id, source):
-            guard id > latestCompileId else { return }
-            latestCompileId = id
-
-            let completions = await Interpreter.complete(source)
-
-            guard latestCompileId == id else { return }
-            send(id: id, .completions(suggestions: completions))
-
-            do {
-                let code = try await Interpreter.compile(source, filename: "<stdin>", mode: .single)
-
-                guard latestCompileId == id else { return }
-                compiled = CompiledCode(id: id, code: code)
-                send(id: id, .isExecutable(value: true))
-            } catch {
-                guard latestCompileId == id else { return }
-                send(id: id, .isExecutable(value: false))
-            }
+            await compile(id: id, source: source)
 
         case let .run(id):
-            guard let compiled, compiled.id == id else {
-                return
-            }
-            
-            // TODO: run
+            guard let compiled, compiled.id == id else { return }
+
+            await Interpreter.execute(compiled.code, mode: .single)
         }
     }
     
@@ -72,6 +53,31 @@ actor LocalInterpreterConnection: InterpreterConnection {
     deinit {
         for continuation in continuations.values {
             continuation.finish()
+        }
+    }
+    
+    private func compile(id: UInt64, source: String) async {
+        guard id > latestCompileId else { return }
+        latestCompileId = id
+
+        let completions = await Interpreter.complete(source)
+
+        guard latestCompileId == id else { return }
+        send(id: id, .completions(suggestions: completions))
+
+        do {
+            let code = try await MainActor.run {
+                Interpreter.silenceErrors = true
+                defer { Interpreter.silenceErrors = false }
+                return try Interpreter.compile(source, filename: "<stdin>", mode: .single)
+            }
+
+            guard latestCompileId == id else { return }
+            compiled = CompiledCode(id: id, code: code)
+            send(id: id, .isExecutable(value: true))
+        } catch {
+            guard latestCompileId == id else { return }
+            send(id: id, .isExecutable(value: false))
         }
     }
 }

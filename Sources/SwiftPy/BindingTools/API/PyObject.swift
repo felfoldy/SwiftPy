@@ -43,7 +43,7 @@ public final class PyObject: @MainActor PyReferencing {
     @inlinable
     public subscript(dynamicMember dynamicMember: String) -> PyObject? {
         get {
-            let attribute = Interpreter.silenceErrors {
+            let attribute = try? Interpreter.silenceErrors {
                 try py.getattr(reference, name: dynamicMember)
             }
             if attribute?.isNone == true {
@@ -52,7 +52,7 @@ public final class PyObject: @MainActor PyReferencing {
             return PyObject(attribute)
         }
         set {
-            Interpreter.silenceErrors {
+            try? Interpreter.silenceErrors {
                 try py.setattr(reference, name: dynamicMember, value: newValue?.reference)
             }
         }
@@ -61,14 +61,14 @@ public final class PyObject: @MainActor PyReferencing {
     @inlinable
     public subscript<Value: PythonConvertible>(dynamicMember dynamicMember: String) -> Value? {
         get {
-            Interpreter.silenceErrors {
+            try? Interpreter.silenceErrors {
                 try .cast(
                     py.getattr(reference, name: dynamicMember)
                 )
             }
         }
         set {
-            Interpreter.silenceErrors {
+            try? Interpreter.silenceErrors {
                 let tmp = py.pushtmp()
                 defer { py.pop() }
                 newValue?.toPython(tmp)
@@ -124,14 +124,14 @@ public final class PyObject: @MainActor PyReferencing {
     /// Gets the item from a dictionary by a key and convert the value to a swift type.
     public subscript<Key: PythonConvertible, Value: PythonConvertible>(_ key: Key) -> Value? {
         get {
-            Interpreter.silenceErrors {
+            try? Interpreter.silenceErrors {
                 let key = py.retain(key)
                 let item =  try py.dict.getitem(reference, key: key?.reference)
                 return try .cast(item)
             }
         }
         set {
-            Interpreter.silenceErrors {
+            try? Interpreter.silenceErrors {
                 let value = py.retain(newValue)
                 let key = py.retain(key)
                 _ = try py.dict.setitem(

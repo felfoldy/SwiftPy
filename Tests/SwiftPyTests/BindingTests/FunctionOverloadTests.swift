@@ -149,11 +149,11 @@ struct FunctionOverloadTests {
     
     @Test func asyncFunctionOverload() async throws {
         await Interpreter.asyncRun("""
-        sut = SUT()
-        await sut.update(True)
+        asyncFunctionOverload = SUT()
+        await asyncFunctionOverload.update(True)
         """)
 
-        let sut: SUT = try #require(py.main.sut)
+        let sut: SUT = try #require(py.main.asyncFunctionOverload)
         #expect(sut.member == "async")
     }
 

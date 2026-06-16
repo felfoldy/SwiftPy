@@ -603,7 +603,7 @@ public extension PyRef {
 
         // Try self.__view__.
         // TODO: Depricate.
-        let view = Interpreter.silenceErrors {
+        let view = try? Interpreter.silenceErrors {
             try py.getattr(self, name: "__view__")
         }
         if let view {
@@ -775,7 +775,7 @@ extension PythonError: PythonConvertible {
     
     public static func fromPython(_ reference: PyRef) -> PythonError {
         let type = py.typeof(reference)
-        let args = Interpreter.silenceErrors {
+        let args = try? Interpreter.silenceErrors {
             try py.getattr(reference, name: "args")
         }
 
