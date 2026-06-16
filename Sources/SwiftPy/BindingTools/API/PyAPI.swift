@@ -80,7 +80,12 @@ public struct PyAPI {
     public func getmodule(_ name: String) -> PyRef? {
         py_getmodule(name)
     }
-    
+
+    @inlinable
+    public func getbuiltin(_ name: String) -> PyRef? {
+        py_getbuiltin(py_name(name))
+    }
+
     @inlinable
     public func newmodule(_ path: String) -> PyRef {
         py_newmodule(path)
@@ -552,18 +557,6 @@ public extension Interpreter {
 
 /// `Int16`
 public typealias PyType = py_Type
-
-// MARK: - Functions
-
-public extension PyRef {
-    @MainActor
-    struct Functions {
-        let eval = py_getbuiltin(py_name("eval"))!
-        let exec = py_getbuiltin(py_name("exec"))!
-    }
-    
-    @MainActor static let functions = Functions()
-}
 
 // MARK: - Reference extensions
 

@@ -47,8 +47,14 @@ public final class Interpreter {
     
     let profiler = SignpostProfiler("Python")
     private let relays = OutputRelays()
+    private let builtinExec: PyAPI.CFunction
+    private let builtinEval: PyAPI.CFunction
 
     init() {
+        // Store builtin exec and eval.
+        builtinExec = py.getbuiltin("exec")!.pointee._cfunc
+        builtinEval = py.getbuiltin("eval")!.pointee._cfunc
+
         setCallbacks()
         
         log.info("pocketpy [\(py.version)] initialized")
@@ -71,11 +77,10 @@ public final class Interpreter {
         let code = try py.compile(source: code, filename: filename, mode: mode)
         
         try PyAPI.convertRetval(code) { code in
-            let function: PyRef? = mode == .evaluation ? .functions.eval : .functions.exec
+            let function = mode == .evaluation ? builtinEval : builtinExec
 
             profiler.begin()
-            // TODO: Store low level C function instead.
-            let isExecuted = function?.pointee._cfunc(1, code) ?? true
+            let isExecuted = function(1, code)
             profiler.end()
 
             Interpreter.output.executionTime(profiler.executionTime)
@@ -185,5 +190,26 @@ public extension Interpreter {
     static func complete(_ text: String) -> [String] {
         let result: [String]? = try? py.module("interpreter")?.completions?(text)
         return result ?? []
+    }
+
+    /// Compiles Python source code into a code object without executing it.
+    ///
+    /// This is equivalent to Python's built-in `compile()` function.
+    ///
+    /// - Parameters:
+    ///   - source: The Python source code to compile.
+    ///   - filename: The filename used in error messages and tracebacks.
+    ///   - mode: Determines how the source is compiled.
+    /// - Returns: A ``PyObject`` representing the compiled code object.
+    /// - Throws: ``PythonError`` if the source contains a syntax error or cannot be compiled.
+    static func compile(
+        _ source: String,
+        filename: String = "<string>",
+        mode: CompileMode = .execution
+    ) throws(PythonError) -> PyObject {
+        silenceErrors = true
+        defer { silenceErrors = false }
+        let codeRef = try py.compile(source: source, filename: filename, mode: mode)
+        return PyObject(codeRef)
     }
 }
