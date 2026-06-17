@@ -44,11 +44,13 @@ public final class Interpreter {
     static let shared = Interpreter()
 
     var moduleFactory: [String: (PyRef?) -> Void] = [:]
-    
+
     let profiler = SignpostProfiler("Python")
     private let relays = OutputRelays()
     let builtinExec: PyAPI.CFunction
     let builtinEval: PyAPI.CFunction
+
+    let connection: any InterpreterConnection = LocalInterpreterConnection()
 
     init() {
         // Store builtin exec and eval.
@@ -239,5 +241,9 @@ public extension Interpreter {
     ) throws(PythonError) -> PyObject {
         let codeRef = try py.compile(source: source, filename: filename, mode: mode)
         return PyObject(codeRef)
+    }
+
+    static var connection: any InterpreterConnection {
+        shared.connection
     }
 }

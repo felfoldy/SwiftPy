@@ -5,7 +5,7 @@
 //  Created by Tibor Felföldy on 2026. 06. 16..
 //
 
-public protocol InterpreterConnection {
+public protocol InterpreterConnection: Sendable {
     func perform(_ command: ConsoleCommand) async
     var events: AsyncStream<InterpreterEvent> { get async }
 }
@@ -17,8 +17,8 @@ public enum ConsoleCommand: Codable, Sendable {
 }
 
 public struct InterpreterEvent: Codable, Sendable {
-    let id: UInt64
-    let payload: Payload
+    public let id: UInt64
+    public let payload: Payload
 
     public enum Payload: Codable, Sendable {
         case contextCreated
