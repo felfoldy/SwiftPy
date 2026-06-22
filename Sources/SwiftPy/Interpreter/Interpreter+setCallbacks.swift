@@ -10,13 +10,15 @@ import Foundation
 extension Interpreter {
     /// Sets print output, importhook, importfile.
     func setCallbacks() {
-        py.callbacks.print = { cString in
-            guard let cString else { return }
-            let str = String(cString: cString)
-                .trimmingCharacters(in: .whitespacesAndNewlines)
-            if str.isEmpty { return }
-            Interpreter.output.stdout(str)
-        }
+        // TODO: Check if Apple accepts redirection.
+        // py.callbacks.print = { str in
+        //     guard let str else { return }
+        //     let content = String(cString: str)
+        //     Task {
+        //         await Interpreter.shared.connection
+        //             .send(id: 0, .stdout(text: content))
+        //     }
+        // }
         
         py.callbacks.lazyimport = { cName in
             guard let cName else { return nil }
@@ -51,7 +53,7 @@ extension Interpreter {
             }
 
             do {
-                try Interpreter.output.stdout(py.repr(obj))
+                try print(py.repr(obj))
             } catch {}
             return true
         }

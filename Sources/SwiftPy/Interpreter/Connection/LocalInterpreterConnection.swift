@@ -12,13 +12,13 @@ struct CompiledCode: Sendable {
     let code: PyObject
 }
 
-actor LocalInterpreterConnection: InterpreterConnection {
+public actor LocalInterpreterConnection: InterpreterConnection {
     var currentContextId: UInt64 = 0
     var continuations: [UUID: AsyncStream<InterpreterEvent>.Continuation] = [:]
     var latestCompileId: UInt64 = 0
     var compiled: CompiledCode?
 
-    func perform(_ command: ConsoleCommand) async {
+    public func perform(_ command: ConsoleCommand) async {
         switch command {
         case .createContext:
             currentContextId += 1
@@ -34,6 +34,7 @@ actor LocalInterpreterConnection: InterpreterConnection {
         }
     }
     
+    @usableFromInline
     func send(id: UInt64, _ payload: InterpreterEvent.Payload) {
         let event = InterpreterEvent(id: id, payload: payload)
 
@@ -42,7 +43,7 @@ actor LocalInterpreterConnection: InterpreterConnection {
         }
     }
 
-    var events: AsyncStream<InterpreterEvent> {
+    public var events: AsyncStream<InterpreterEvent> {
         let id = UUID()
 
         return AsyncStream { continuation in
@@ -63,7 +64,7 @@ actor LocalInterpreterConnection: InterpreterConnection {
         let completions = await Interpreter.complete(source)
 
         guard latestCompileId == id else { return }
-        send(id: id, .completions(suggestions: completions))
+        await send(id: id, .completions(suggestions: completions))
 
         do {
             let code = try await MainActor.run {
@@ -74,10 +75,10 @@ actor LocalInterpreterConnection: InterpreterConnection {
 
             guard latestCompileId == id else { return }
             compiled = CompiledCode(id: id, code: code)
-            send(id: id, .isExecutable(value: true))
+            await send(id: id, .isExecutable(value: true))
         } catch {
             guard latestCompileId == id else { return }
-            send(id: id, .isExecutable(value: false))
+            await send(id: id, .isExecutable(value: false))
         }
     }
 }

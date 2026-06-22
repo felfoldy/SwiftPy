@@ -7,6 +7,7 @@
 
 import Foundation
 
+// TODO: Refactor with InterpreterConnection.
 public final class RemoteIOStream: IOStream {
     let peer: Peer
 

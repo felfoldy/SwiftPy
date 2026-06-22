@@ -124,7 +124,13 @@ public struct PyAPI {
         let ok = py_matchexc(.BaseException)
         precondition(ok)
         if !silenceErrors && !Interpreter.silenceErrors {
-            Interpreter.output.stderr(String(cString: py_formatexc()))
+            let exception = py_formatexc()!
+            Task {
+                await Interpreter.shared.connection.send(
+                    id: 0,
+                    .stderr(text: String(cString: exception))
+                )
+            }
         }
         py.clearexc(p0)
 

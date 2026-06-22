@@ -102,8 +102,7 @@ extension Interpreter {
             module.def("host(name: str) -> None",
                        docstring: "Hosts the remote Python interpreter on this device.") { argc, argv in
                 PyBind.function(argc, argv) { (name: String) in
-                    let remote = RemoteIOStream(name: name)
-                    Interpreter.output = MultiIOStream(streams: [Interpreter.output, remote])
+                    // TODO: Refactor hosting.
                     return
                 }
             }

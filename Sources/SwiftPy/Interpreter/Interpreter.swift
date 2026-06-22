@@ -26,10 +26,6 @@ import UIKit
 /// let result: Int? = Interpreter.evaluate("3 + 6")
 /// ```
 ///
-/// Bind a module with ``bindModule(_:_:)``:
-/// ```swift
-/// Interpreter.bindModule("my_module", [MySwiftClass.self])
-/// ```
 @MainActor
 public final class Interpreter {
     /// IO stream for console output.
@@ -50,7 +46,8 @@ public final class Interpreter {
     let builtinExec: PyAPI.CFunction
     let builtinEval: PyAPI.CFunction
 
-    let connection: any InterpreterConnection = LocalInterpreterConnection()
+    @usableFromInline
+    let connection = LocalInterpreterConnection()
 
     init() {
         // Store builtin exec and eval.
@@ -73,6 +70,10 @@ public final class Interpreter {
         bindPathlib()
         bindP2P()
         bindStorages()
+        
+        Task {
+            await connectionIOBridge()
+        }
     }
     
     func execute(_ code: String, filename: String, mode: CompileMode = .execution) throws {

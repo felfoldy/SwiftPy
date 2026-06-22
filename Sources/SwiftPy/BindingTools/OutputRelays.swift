@@ -12,32 +12,40 @@ class OutputRelayHandler {
     let pipe = Pipe()
     let stream: Int32
     let lastStream: Int32
-    
-    init(stream: Int32, output: @escaping @MainActor (String) -> Void) {
+
+    init(stream: Int32, output: @escaping @Sendable (String) -> Void) {
+        fflush(nil)
         let lastStream = dup(stream)
         self.stream = stream
         self.lastStream = lastStream
-        
+
         pipe.fileHandleForReading.readabilityHandler = { handle in
             let data = handle.availableData
-            
+            guard !data.isEmpty else { return }
+
             _ = data.withUnsafeBytes { buffer in
                 Darwin.write(lastStream, buffer.baseAddress, buffer.count)
             }
-            
+
             if let str = String(data: data, encoding: .utf8) {
-                DispatchQueue.main.async {
-                    output(str)
-                }
+                output(str)
             }
         }
-        
+
         dup2(pipe.fileHandleForWriting.fileDescriptor, stream)
     }
-    
+
     deinit {
+        pipe.fileHandleForReading.readabilityHandler = nil
         dup2(lastStream, stream)
         close(lastStream)
+        pipe.fileHandleForWriting.closeFile()
+        let remaining = pipe.fileHandleForReading.readDataToEndOfFile()
+        if !remaining.isEmpty {
+            _ = remaining.withUnsafeBytes { buffer in
+                Darwin.write(stream, buffer.baseAddress, buffer.count)
+            }
+        }
     }
 }
 
@@ -47,20 +55,22 @@ public struct OutputRelays {
     let errorRelayHandler: OutputRelayHandler
 
     init(filterOSLog: Bool = true) {
+        setvbuf(stdout, nil, _IONBF, 0)
+        setvbuf(stderr, nil, _IONBF, 0)
+        
         outputRelayHandler = OutputRelayHandler(stream: STDOUT_FILENO) { value in
-            let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
-            if !trimmed.isEmpty {
-                Interpreter.output.stdout(trimmed)
+            Task {
+                await Interpreter.shared.connection.send(id: 0, .stdout(text: value))
             }
         }
-        
+
         errorRelayHandler = OutputRelayHandler(stream: STDERR_FILENO) { value in
             let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
             if filterOSLog, trimmed.hasPrefix("OSLOG") {
                 return
             }
-            if !trimmed.isEmpty {
-                Interpreter.output.stderr(trimmed)
+            Task {
+                await Interpreter.shared.connection.send(id: 0, .stderr(text: value))
             }
         }
     }

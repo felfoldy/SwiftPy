@@ -6,8 +6,9 @@
 //
 
 public protocol InterpreterConnection: Sendable {
-    func perform(_ command: ConsoleCommand) async
     var events: AsyncStream<InterpreterEvent> { get async }
+    
+    func perform(_ command: ConsoleCommand) async
 }
 
 public enum ConsoleCommand: Codable, Sendable {
