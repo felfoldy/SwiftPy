@@ -42,7 +42,7 @@ public final class Interpreter {
     var moduleFactory: [String: (PyRef?) -> Void] = [:]
 
     let profiler = SignpostProfiler("Python")
-    private let relays = OutputRelays()
+    private var relays: OutputRelays?
     let builtinExec: PyAPI.CFunction
     let builtinEval: PyAPI.CFunction
 
@@ -70,7 +70,9 @@ public final class Interpreter {
         bindPathlib()
         bindP2P()
         bindStorages()
-        
+
+        relays = OutputRelays(interpreter: self)
+
         Task {
             await connectionIOBridge()
         }

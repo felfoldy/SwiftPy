@@ -125,12 +125,7 @@ public struct PyAPI {
         precondition(ok)
         if !silenceErrors && !Interpreter.silenceErrors {
             let exception = py_formatexc()!
-            Task {
-                await Interpreter.shared.connection.send(
-                    id: 0,
-                    .stderr(text: String(cString: exception))
-                )
-            }
+            Interpreter.shared.connection.send(id: 0, .stderr(text: String(cString: exception)))
         }
         py.clearexc(p0)
 

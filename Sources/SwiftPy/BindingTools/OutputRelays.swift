@@ -27,9 +27,11 @@ class OutputRelayHandler {
                 Darwin.write(lastStream, buffer.baseAddress, buffer.count)
             }
 
-            if let str = String(data: data, encoding: .utf8) {
-                output(str)
-            }
+            // `String(decoding:as:)` substitutes U+FFFD for invalid bytes
+            // instead of returning nil, so a multibyte character split across
+            // two pipe reads garbles only the seam rather than dropping the
+            // whole chunk.
+            output(String(decoding: data, as: UTF8.self))
         }
 
         dup2(pipe.fileHandleForWriting.fileDescriptor, stream)
@@ -54,14 +56,14 @@ public struct OutputRelays {
     let outputRelayHandler: OutputRelayHandler
     let errorRelayHandler: OutputRelayHandler
 
-    init(filterOSLog: Bool = true) {
+    init(interpreter: Interpreter, filterOSLog: Bool = true) {
         setvbuf(stdout, nil, _IONBF, 0)
         setvbuf(stderr, nil, _IONBF, 0)
+
+        let connection = interpreter.connection
         
         outputRelayHandler = OutputRelayHandler(stream: STDOUT_FILENO) { value in
-            Task {
-                await Interpreter.shared.connection.send(id: 0, .stdout(text: value))
-            }
+            connection.send(id: 0, .stdout(text: value))
         }
 
         errorRelayHandler = OutputRelayHandler(stream: STDERR_FILENO) { value in
@@ -69,9 +71,7 @@ public struct OutputRelays {
             if filterOSLog, trimmed.hasPrefix("OSLOG") {
                 return
             }
-            Task {
-                await Interpreter.shared.connection.send(id: 0, .stderr(text: value))
-            }
+            connection.send(id: 0, .stderr(text: value))
         }
     }
 }

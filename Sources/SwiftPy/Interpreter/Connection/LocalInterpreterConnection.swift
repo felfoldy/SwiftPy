@@ -18,11 +18,30 @@ public actor LocalInterpreterConnection: InterpreterConnection {
     var latestCompileId: UInt64 = 0
     var compiled: CompiledCode?
 
+    private let _sendContinuation: AsyncStream<InterpreterEvent>.Continuation
+
+    public init() {
+        let (stream, continuation) = AsyncStream<InterpreterEvent>.makeStream()
+        _sendContinuation = continuation
+        Task { await self.processEvents(stream) }
+    }
+
+    private func processEvents(_ stream: AsyncStream<InterpreterEvent>) async {
+        for await event in stream {
+            for continuation in continuations.values {
+                continuation.yield(event)
+            }
+        }
+    }
+
     public func perform(_ command: ConsoleCommand) async {
         switch command {
         case .createContext:
             currentContextId += 1
             send(id: currentContextId, .contextCreated)
+
+        case let .complete(id, lastComponent):
+            await complete(id: id, lastComponent: lastComponent)
 
         case let .compile(id, source):
             await compile(id: id, source: source)
@@ -35,12 +54,8 @@ public actor LocalInterpreterConnection: InterpreterConnection {
     }
     
     @usableFromInline
-    func send(id: UInt64, _ payload: InterpreterEvent.Payload) {
-        let event = InterpreterEvent(id: id, payload: payload)
-
-        for continuation in continuations.values {
-            continuation.yield(event)
-        }
+    nonisolated func send(id: UInt64, _ payload: InterpreterEvent.Payload) {
+        _sendContinuation.yield(InterpreterEvent(id: id, payload: payload))
     }
 
     public var events: AsyncStream<InterpreterEvent> {
@@ -52,19 +67,24 @@ public actor LocalInterpreterConnection: InterpreterConnection {
     }
 
     deinit {
+        _sendContinuation.finish()
         for continuation in continuations.values {
             continuation.finish()
         }
     }
     
+    private func complete(id: UInt64, lastComponent: String) async {
+        let completions = await Interpreter.complete(lastComponent)
+
+        // Drop the result if a newer context has been created in the meantime.
+        guard currentContextId == id else { return }
+        send(id: id, .completions(suggestions: completions))
+    }
+
     private func compile(id: UInt64, source: String) async {
+        log.trace("compile: \(id)")
         guard id > latestCompileId else { return }
         latestCompileId = id
-
-        let completions = await Interpreter.complete(source)
-
-        guard latestCompileId == id else { return }
-        await send(id: id, .completions(suggestions: completions))
 
         do {
             let code = try await MainActor.run {
@@ -75,10 +95,10 @@ public actor LocalInterpreterConnection: InterpreterConnection {
 
             guard latestCompileId == id else { return }
             compiled = CompiledCode(id: id, code: code)
-            await send(id: id, .isExecutable(value: true))
+            send(id: id, .isExecutable(value: true))
         } catch {
             guard latestCompileId == id else { return }
-            await send(id: id, .isExecutable(value: false))
+            send(id: id, .isExecutable(value: false))
         }
     }
 }

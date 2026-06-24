@@ -13,6 +13,7 @@ public protocol InterpreterConnection: Sendable {
 
 public enum ConsoleCommand: Codable, Sendable {
     case createContext
+    case complete(id: UInt64, lastComponent: String)
     case compile(id: UInt64, source: String)
     case run(id: UInt64)
 }

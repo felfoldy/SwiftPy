@@ -14,7 +14,6 @@ public protocol Profiler {
     func event(_ name: StaticString)
 }
 
-@available(macOS 12.0, iOS 15.0, *)
 final class Signposter: Profiler {
     static let signposter = OSSignposter(
         logger: Logger(
@@ -65,11 +64,7 @@ public class SignpostProfiler: Profiler {
     var isProfiling: Bool = false
 
     public init(_ name: StaticString) {
-        if #available(macOS 12.0, iOS 15.0, *) {
-            signposter = Signposter(name: name)
-        } else {
-            signposter = nil
-        }
+        signposter = Signposter(name: name)
     }
     
     deinit {
