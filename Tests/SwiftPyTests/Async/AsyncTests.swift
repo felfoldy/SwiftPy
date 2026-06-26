@@ -20,25 +20,25 @@ struct AsyncTests {
     let main = py.main
     let profiler = profile("AsyncTests")
     
-    @Test func codeToRun() {
+    @Test func codeToRun() throws {
         profiler.event("AsyncTests.codeToRun")
 
-        let decoder = AsyncContext("""
+        let decoder = try AsyncContext("""
         await URL.download()
         print('finished')
-        """, filename: "<string>", mode: .execution) {}
+        """, filename: "<string>", mode: .execution)
         
         #expect(decoder.code == "URL.download()")
         #expect(decoder.continuationCode == "print('finished')")
     }
     
-    @Test func result() {
+    @Test func result() throws {
         profiler.event("AsyncTests.result")
-        
-        let decoder = AsyncContext("""
+
+        let decoder = try AsyncContext("""
         result = await async_func()
         print(result)
-        """, filename: "<string>", mode: .evaluation) {}
+        """, filename: "<string>", mode: .evaluation)
 
         #expect(decoder.code == "async_func()")
         #expect(decoder.continuationCode == "print(result)")

@@ -11,16 +11,33 @@ import SwiftUI
 typealias TaskResult = PythonConvertible & Sendable
 
 extension Interpreter {
-    func asyncExecute(_ code: String, filename: String, mode: CompileMode) async {
-        await withCheckedContinuation { continuation in
-            let decoder = AsyncContext(code, filename: filename, mode: mode) {
-                continuation.resume()
-            }
-            AsyncContext.$current.withValue(decoder) {
-                do {
-                    try Interpreter.shared.execute(decoder.code, filename: filename, mode: mode)
+    /// Parses async-aware source and compiles it into a reusable
+    /// ``AsyncContext`` without running it. Execute it later with
+    /// ``asyncExecute(_:)``.
+    func asyncCompile(_ code: String, filename: String, mode: CompileMode) throws(PythonError) -> AsyncContext {
+        try AsyncContext(code, filename: filename, mode: mode)
+    }
 
-                    if !decoder.didMatch {
+    func asyncExecute(_ code: String, filename: String, mode: CompileMode) async {
+        guard let context = try? asyncCompile(code, filename: filename, mode: mode) else {
+            return
+        }
+        await asyncExecute(context)
+    }
+
+    func asyncExecute(_ context: AsyncContext) async {
+        await withCheckedContinuation { continuation in
+            var context = context
+            // Only the awaited path resumes through the context; the unmatched
+            // path resumes directly below, so its completion stays a no-op to
+            // avoid resuming the continuation twice.
+            context.completion = context.didMatch ? { continuation.resume() } : {}
+
+            AsyncContext.$current.withValue(context) {
+                do {
+                    try Interpreter.shared.execute(context.compiledCode, mode: context.mode)
+
+                    if !context.didMatch {
                         continuation.resume()
                     }
                 } catch {
