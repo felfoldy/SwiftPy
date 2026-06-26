@@ -41,28 +41,42 @@ struct LocalInterpreterConnectionTests {
         #expect(second?.id == 2)
     }
 
+    // MARK: - complete
+
+    @Test func completeWithMatchingContextIdEmitsCompletions() async {
+        let connection = LocalInterpreterConnection()
+        let stream = await connection.events
+
+        await connection.perform(.createContext)
+        await connection.perform(.complete(id: 1, lastComponent: ""))
+
+        var iterator = stream.makeAsyncIterator()
+        _ = await iterator.next() // contextCreated
+        let event = await iterator.next()
+
+        guard case .completions = event?.payload else {
+            Issue.record("Expected .completions payload")
+            return
+        }
+        #expect(event?.id == 1)
+    }
+
     // MARK: - compile
 
-    @Test func compileValidCodeEmitsCompletionsThenExecutable() async {
+    @Test func compileValidCodeEmitsExecutable() async {
         let connection = LocalInterpreterConnection()
         let stream = await connection.events
         await connection.perform(.compile(id: 1, source: "1 + 1"))
 
         var iterator = stream.makeAsyncIterator()
-        let first = await iterator.next()
-        let second = await iterator.next()
+        let event = await iterator.next()
 
-        guard case .completions = first?.payload else {
-            Issue.record("Expected .completions as first event")
-            return
-        }
-        guard case .isExecutable(let value) = second?.payload else {
-            Issue.record("Expected .isExecutable as second event")
+        guard case .isExecutable(let value) = event?.payload else {
+            Issue.record("Expected .isExecutable payload")
             return
         }
         #expect(value == true)
-        #expect(first?.id == 1)
-        #expect(second?.id == 1)
+        #expect(event?.id == 1)
     }
 
     @Test func compileIncompleteCodeEmitsNotExecutable() async {
@@ -71,10 +85,9 @@ struct LocalInterpreterConnectionTests {
         await connection.perform(.compile(id: 1, source: "def f("))
 
         var iterator = stream.makeAsyncIterator()
-        _ = await iterator.next() // completions
-        let second = await iterator.next()
+        let event = await iterator.next()
 
-        guard case .isExecutable(let value) = second?.payload else {
+        guard case .isExecutable(let value) = event?.payload else {
             Issue.record("Expected .isExecutable event")
             return
         }
@@ -89,12 +102,10 @@ struct LocalInterpreterConnectionTests {
         await connection.perform(.compile(id: 1, source: "b = 2")) // stale, id < latestCompileId
 
         var iterator = stream.makeAsyncIterator()
-        let first = await iterator.next()
-        let second = await iterator.next()
+        let event = await iterator.next()
 
-        // Only the id=2 compile should have emitted events
-        #expect(first?.id == 2)
-        #expect(second?.id == 2)
+        // Only the id=2 compile should have emitted an event
+        #expect(event?.id == 2)
     }
 
     // MARK: - run
@@ -106,7 +117,6 @@ struct LocalInterpreterConnectionTests {
         await connection.perform(.compile(id: 1, source: "_test_run_x = 42"))
 
         var iterator = stream.makeAsyncIterator()
-        _ = await iterator.next() // completions
         let executableEvent = await iterator.next()
 
         guard case .isExecutable(let isExec) = executableEvent?.payload, isExec else {
@@ -127,7 +137,6 @@ struct LocalInterpreterConnectionTests {
         await connection.perform(.compile(id: 1, source: "_test_no_run_y = 99"))
 
         var iterator = stream.makeAsyncIterator()
-        _ = await iterator.next() // completions
         _ = await iterator.next() // isExecutable
 
         await connection.perform(.run(id: 2)) // id mismatch — should not execute

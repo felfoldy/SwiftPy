@@ -36,7 +36,9 @@ public struct InterpreterEvent: Codable, Sendable {
     }
 }
 
-public enum InputAttachment: Codable, Sendable {
+public enum InputAttachment: Codable, Sendable, Hashable, Identifiable {
     case image(name: String)
     case text(text: String)
+
+    public var id: Self { self }
 }
