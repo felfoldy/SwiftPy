@@ -82,7 +82,7 @@ struct AsyncContext: @unchecked Sendable {
             .joined(separator: "\n")
     }
     
-    func complete<Result: PythonConvertible>(result: Result?) async {
+    func complete(result: PyObject?) async {
         if let resultName {
             py.main[dynamicMember: resultName] = result
         }

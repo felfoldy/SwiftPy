@@ -37,85 +37,69 @@ public class AsyncTask {
     public var isDone: Bool = false
     public var viewRepresentation: AnyView?
 
-    internal let task: Task<Void, Never>
-    internal static var tasks = [UUID: AsyncTask]()
-    
+    internal var task: Task<Void, Never>?
+
     internal var iterator: PyObject?
     internal var result: PyObject?
 
     private init(task: @escaping () async -> Void) {
-        let id = UUID()
-        
-        self.task = Task {
+        self.task = Task { [self] in
             await task()
-            AsyncTask.tasks[id]?.isDone = true
-            AsyncTask.tasks[id] = nil
+            isDone = true
         }
-
-        AsyncTask.tasks[id] = self
     }
 
     private init<T: PythonConvertible>(returns task: @escaping () async -> T?) {
-        let id = UUID()
-        
-        self.task = Task {
+        self.task = Task { [self] in
             let result = await task()
-            AsyncTask.tasks[id]?.result = py.retain(result)
-            AsyncTask.tasks[id]?.isDone = true
-            AsyncTask.tasks[id] = nil
+            self.result = py.retain(result)
+            isDone = true
         }
-
-        AsyncTask.tasks[id] = self
     }
 
     init(generator: PyObject) throws {
         let context = AsyncContext.current
         iterator = try py.retain(py.iter(generator.reference))
 
-        let id = UUID()
         // Child tasks created in the loop must not inherit this generator's
         // context, otherwise they would resume its continuation a second time.
         self.task = AsyncContext.$current.withValue(nil) {
-            Task {
-            do {
-                while let task = AsyncTask.tasks[id], task.isDone == false {
-                    guard let iterator = task.iterator else {
-                        throw PythonError.AssertionError("Iterator is missing")
-                    }
-                    
-                    do {
-                        let next = try py.next(iterator.reference)
-
-                        // Fix a loop if any child task fails.
-                        if let task = AsyncTask(next) {
-                            Interpreter.output.view(task.body())
-                            _ = await task.task.value
-                            task.isDone = true
-                        } else {
-                            try await Task.sleep(nanoseconds: 1)
+            Task { [self] in
+                do {
+                    while !isDone {
+                        guard let iterator else {
+                            throw PythonError.AssertionError("Iterator is missing")
                         }
 
-                    } catch let PythonError.StopIteration(result) {
-                        task.result = py.retain(result)
-                        task.isDone = true
-                        await context?.complete(result: result)
+                        do {
+                            let next = try py.next(iterator.reference)
+
+                            // Fix a loop if any child task fails.
+                            if let child = AsyncTask(next) {
+                                Interpreter.output.view(child.body())
+                                _ = await child.task?.value
+                                child.isDone = true
+                            } else {
+                                try await Task.sleep(nanoseconds: 1)
+                            }
+                        } catch let PythonError.StopIteration(result) {
+                            let object = py.retain(result)
+                            self.result = object
+                            self.isDone = true
+                            await context?.complete(result: object)
+                        }
                     }
+                } catch {
+                    context?.completion()
                 }
-            } catch {
-                context?.completion()
-            }
-            
-            AsyncTask.tasks[id] = nil
             }
         }
-        
-        AsyncTask.tasks[id] = self
     }
-    
+
     func __iter__() -> AsyncTask {
         self
     }
-    
+
     func __next__() throws(PythonError) -> AsyncTask {
         if isDone {
             throw .StopIteration(result?.reference)
@@ -128,16 +112,12 @@ public class AsyncTask {
     }
 
     deinit {
-        task.cancel()
+        task?.cancel()
     }
 
     public func cancel() {
-        task.cancel()
+        task?.cancel()
     }
-}
-
-extension AsyncTask {
-    public var view: some View { viewRepresentation }
 }
 
 extension AsyncTask {
@@ -147,7 +127,7 @@ extension AsyncTask {
         self.init {
             do {
                 try await task()
-                await context?.complete(result: Int?.none)
+                await context?.complete(result: nil)
             } catch {
                 log.critical("\(error.localizedDescription)")
                 context?.completion()
@@ -162,7 +142,7 @@ extension AsyncTask {
             do {
                 let result = try await task()
 
-                await context?.complete(result: result)
+                await context?.complete(result: py.retain(result))
 
                 return result
             } catch {
@@ -183,6 +163,6 @@ extension AsyncTask {
     }
     
     public func untilCompletes() async {
-        await task.value
+        await task?.value
     }
 }
