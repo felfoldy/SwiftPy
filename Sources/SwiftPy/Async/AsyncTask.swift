@@ -16,18 +16,16 @@ extension Interpreter {
             let decoder = AsyncContext(code, filename: filename, mode: mode) {
                 continuation.resume()
             }
-            AsyncContext.current = decoder
-            defer { AsyncContext.current = nil }
-            
-            do {
-                try Interpreter.shared.execute(decoder.code, filename: filename, mode: mode)
+            AsyncContext.$current.withValue(decoder) {
+                do {
+                    try Interpreter.shared.execute(decoder.code, filename: filename, mode: mode)
 
-                if !decoder.didMatch {
+                    if !decoder.didMatch {
+                        continuation.resume()
+                    }
+                } catch {
                     continuation.resume()
                 }
-            } catch {
-                continuation.resume()
-                return
             }
         }
     }
@@ -75,7 +73,10 @@ public class AsyncTask {
         iterator = try py.retain(py.iter(generator.reference))
 
         let id = UUID()
-        self.task = Task {
+        // Child tasks created in the loop must not inherit this generator's
+        // context, otherwise they would resume its continuation a second time.
+        self.task = AsyncContext.$current.withValue(nil) {
+            Task {
             do {
                 while let task = AsyncTask.tasks[id], task.isDone == false {
                     guard let iterator = task.iterator else {
@@ -89,10 +90,7 @@ public class AsyncTask {
                         if let task = AsyncTask(next) {
                             Interpreter.output.view(task.body())
                             _ = await task.task.value
-                            
-                            if AsyncContext.current == nil {
-                                task.isDone = true
-                            }
+                            task.isDone = true
                         } else {
                             try await Task.sleep(nanoseconds: 1)
                         }
@@ -108,6 +106,7 @@ public class AsyncTask {
             }
             
             AsyncTask.tasks[id] = nil
+            }
         }
         
         AsyncTask.tasks[id] = self

@@ -8,8 +8,8 @@
 import Foundation
 
 @MainActor
-struct AsyncContext {
-    static var current: AsyncContext?
+struct AsyncContext: @unchecked Sendable {
+    @TaskLocal static var current: AsyncContext?
     
     let code: String
     let continuationCode: String?
