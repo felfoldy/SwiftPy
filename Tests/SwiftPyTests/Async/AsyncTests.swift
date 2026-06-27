@@ -8,6 +8,7 @@
 import Testing
 @testable import SwiftPy
 
+@MainActor
 func profile(_ name: StaticString) -> SignpostProfiler {
     let profiler = SignpostProfiler(name)
     profiler.begin()
@@ -20,29 +21,29 @@ struct AsyncTests {
     let main = py.main
     let profiler = profile("AsyncTests")
     
-    @Test func codeToRun() throws {
+    @Test func codeToRun() {
         profiler.event("AsyncTests.codeToRun")
 
-        let decoder = try AsyncContext("""
+        let parsed = AsyncParser("""
         await URL.download()
         print('finished')
-        """, filename: "<string>", mode: .execution)
-        
-        #expect(decoder.code == "URL.download()")
-        #expect(decoder.continuationCode == "print('finished')")
+        """)
+
+        #expect(parsed.code == "URL.download()")
+        #expect(parsed.continuationCode == "print('finished')")
     }
     
-    @Test func result() throws {
+    @Test func result() {
         profiler.event("AsyncTests.result")
 
-        let decoder = try AsyncContext("""
+        let parsed = AsyncParser("""
         result = await async_func()
         print(result)
-        """, filename: "<string>", mode: .evaluation)
+        """)
 
-        #expect(decoder.code == "async_func()")
-        #expect(decoder.continuationCode == "print(result)")
-        #expect(decoder.resultName == "result")
+        #expect(parsed.code == "async_func()")
+        #expect(parsed.continuationCode == "print(result)")
+        #expect(parsed.call == .awaiting(resultName: "result"))
     }
     
     @Test func asyncRun() async {

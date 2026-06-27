@@ -12,10 +12,10 @@ typealias TaskResult = PythonConvertible & Sendable
 
 extension Interpreter {
     /// Parses async-aware source and compiles it into a reusable
-    /// ``AsyncContext`` without running it. Execute it later with
+    /// ``AsyncCode`` without running it. Execute it later with
     /// ``asyncExecute(_:)``.
-    func asyncCompile(_ code: String, filename: String, mode: CompileMode) throws(PythonError) -> AsyncContext {
-        try AsyncContext(code, filename: filename, mode: mode)
+    func asyncCompile(_ code: String, filename: String, mode: CompileMode) throws(PythonError) -> AsyncCode {
+        try AsyncCompiler.compile(code, filename: filename, mode: mode)
     }
 
     func asyncExecute(_ code: String, filename: String, mode: CompileMode) async {
@@ -25,19 +25,18 @@ extension Interpreter {
         await asyncExecute(context)
     }
 
-    func asyncExecute(_ context: AsyncContext) async {
+    func asyncExecute(_ context: AsyncCode) async {
         await withCheckedContinuation { continuation in
-            var context = context
             // Only the awaited path resumes through the context; the unmatched
             // path resumes directly below, so its completion stays a no-op to
             // avoid resuming the continuation twice.
-            context.completion = context.didMatch ? { continuation.resume() } : {}
+            context.completion = context.call.isAwaiting ? { continuation.resume() } : {}
 
-            AsyncContext.$current.withValue(context) {
+            AsyncCode.$current.withValue(context) {
                 do {
-                    try Interpreter.shared.execute(context.compiledCode, mode: context.mode)
+                    try Interpreter.shared.execute(context.compiledCode)
 
-                    if !context.didMatch {
+                    if !context.call.isAwaiting {
                         continuation.resume()
                     }
                 } catch {
@@ -75,12 +74,12 @@ public class AsyncTask {
     }
 
     init(generator: PyObject) throws {
-        let context = AsyncContext.current
+        let context = AsyncCode.current
         iterator = try py.retain(py.iter(generator.reference))
 
         // Child tasks created in the loop must not inherit this generator's
         // context, otherwise they would resume its continuation a second time.
-        self.task = AsyncContext.$current.withValue(nil) {
+        self.task = AsyncCode.$current.withValue(nil) {
             Task { [self] in
                 do {
                     while !isDone {
@@ -139,7 +138,7 @@ public class AsyncTask {
 
 extension AsyncTask {
     public convenience init(_ task: @escaping () async throws -> Void) {
-        let context = AsyncContext.current
+        let context = AsyncCode.current
         
         self.init {
             do {
@@ -153,7 +152,7 @@ extension AsyncTask {
     }
     
     public convenience init<T: PythonConvertible>(_ task: @escaping () async throws -> T) where T: Sendable {
-        let context = AsyncContext.current
+        let context = AsyncCode.current
 
         self.init(returns: { () async -> T? in
             do {

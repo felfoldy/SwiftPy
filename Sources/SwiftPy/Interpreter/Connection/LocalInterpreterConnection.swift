@@ -9,7 +9,7 @@ import Foundation
 
 struct CompiledCode: Sendable {
     let id: UInt64
-    let code: AsyncContext
+    let code: AsyncCode
 }
 
 public actor LocalInterpreterConnection: InterpreterConnection {
