@@ -48,13 +48,9 @@ public actor LocalInterpreterConnection: InterpreterConnection {
 
         case let .run(id):
             guard let compiled, compiled.id == id else { return }
-            let time = DispatchTime.now().uptimeNanoseconds
-            await Interpreter.shared.asyncExecute(compiled.code)
-            let delta = DispatchTime.now().uptimeNanoseconds - time
-            let executionTime = Duration.nanoseconds(delta)
-                .formatted(.units(allowed: [.milliseconds, .seconds],
-                                  fractionalPart: .show(length: 2, rounded: .up)))
-            send(id: id, .attachment(items: [.image(name: "timer"), .text(text: executionTime)]))
+            await time(id: id) {
+                await Interpreter.shared.asyncExecute(compiled.code)
+            }
         }
     }
     
@@ -76,6 +72,16 @@ public actor LocalInterpreterConnection: InterpreterConnection {
         for continuation in continuations.values {
             continuation.finish()
         }
+    }
+    
+    private func time(id: UInt64, _ call: () async -> Void) async {
+        let time = DispatchTime.now().uptimeNanoseconds
+        await call()
+        let delta = DispatchTime.now().uptimeNanoseconds - time
+        let executionTime = Duration.nanoseconds(delta)
+            .formatted(.units(allowed: [.milliseconds, .seconds],
+                              fractionalPart: .show(length: 2, rounded: .up)))
+        send(id: id, .attachment(items: [.image(name: "timer"), .text(text: executionTime)]))
     }
     
     private func complete(id: UInt64, lastComponent: String) async {

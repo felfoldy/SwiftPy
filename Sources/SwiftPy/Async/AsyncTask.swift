@@ -25,20 +25,18 @@ extension Interpreter {
         await asyncExecute(context)
     }
 
-    func asyncExecute(_ context: AsyncCode) async {
+    func asyncExecute(_ code: AsyncCode) async {
+        guard code.call.isAwaiting else {
+            try? Interpreter.shared.execute(code.compiledCode)
+            return
+        }
+
         await withCheckedContinuation { continuation in
-            // Only the awaited path resumes through the context; the unmatched
-            // path resumes directly below, so its completion stays a no-op to
-            // avoid resuming the continuation twice.
-            context.completion = context.call.isAwaiting ? { continuation.resume() } : {}
+            code.completion = { continuation.resume() }
 
-            AsyncCode.$current.withValue(context) {
+            AsyncCode.$current.withValue(code) {
                 do {
-                    try Interpreter.shared.execute(context.compiledCode)
-
-                    if !context.call.isAwaiting {
-                        continuation.resume()
-                    }
+                    try Interpreter.shared.execute(code.compiledCode)
                 } catch {
                     continuation.resume()
                 }
