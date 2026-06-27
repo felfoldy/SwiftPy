@@ -26,14 +26,6 @@ public actor LocalInterpreterConnection: InterpreterConnection {
         Task { await processEvents(stream) }
     }
 
-    private func processEvents(_ stream: AsyncStream<InterpreterEvent>) async {
-        for await event in stream {
-            for continuation in continuations.values {
-                continuation.yield(event)
-            }
-        }
-    }
-
     public func perform(_ command: ConsoleCommand) async {
         switch command {
         case .createContext:
@@ -51,6 +43,15 @@ public actor LocalInterpreterConnection: InterpreterConnection {
             await time(id: id) {
                 try await Interpreter.execute(compiled.code)
             }
+        }
+    }
+    
+    @MainActor
+    func display(viewObject: PyRef?) {
+        if let view = viewObject?.view {
+            Interpreter.onDisplay(view)
+        } else if let repr = try? py.repr(viewObject) {
+            print(repr)
         }
     }
     
@@ -73,7 +74,15 @@ public actor LocalInterpreterConnection: InterpreterConnection {
             continuation.finish()
         }
     }
-    
+
+    private func processEvents(_ stream: AsyncStream<InterpreterEvent>) async {
+        for await event in stream {
+            for continuation in continuations.values {
+                continuation.yield(event)
+            }
+        }
+    }
+
     private func time(id: UInt64, _ call: () async throws -> Void) async {
         do {
             let time = DispatchTime.now().uptimeNanoseconds
@@ -107,6 +116,8 @@ public actor LocalInterpreterConnection: InterpreterConnection {
         log.trace("compile: \(id)")
         guard id > latestCompileId else { return }
         latestCompileId = id
+
+        send(id: id, .inputSource(text: source))
 
         do {
             let code = try await Interpreter.shared.compile(source, filename: "<stdin>", mode: .single)

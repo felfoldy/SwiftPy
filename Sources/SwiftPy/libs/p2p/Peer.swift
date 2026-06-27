@@ -75,7 +75,7 @@ extension Peer: MCNearbyServiceAdvertiserDelegate {
         // Allways accepts invitations.
         invitationHandler(true, session)
         Task { @MainActor in
-            Interpreter.output.stdout("Connected to \(peerID.displayName)")
+            print("Connected to \(peerID.displayName)")
         }
     }
 }

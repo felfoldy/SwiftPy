@@ -55,7 +55,7 @@ public class AsyncTask {
 
                             // Fix a loop if any child task fails.
                             if let child = AsyncTask(next) {
-                                Interpreter.output.view(child.body())
+                                Interpreter.onDisplay(child.body())
                                 _ = await child.task?.value
                                 child.isDone = true
                             } else {
@@ -125,7 +125,7 @@ extension AsyncTask {
 
                 return result
             } catch {
-                Interpreter.output.stderr(error.localizedDescription)
+                Interpreter.shared.connection.send(id: 0, .stderr(text: error.localizedDescription))
                 context?.completion?()
 
                 return nil

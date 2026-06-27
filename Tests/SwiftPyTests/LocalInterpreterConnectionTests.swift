@@ -69,8 +69,15 @@ struct LocalInterpreterConnectionTests {
         await connection.perform(.compile(id: 1, source: "1 + 1"))
 
         var iterator = stream.makeAsyncIterator()
-        let event = await iterator.next()
 
+        let inputEvent = await iterator.next()
+        guard case .inputSource(let text) = inputEvent?.payload else {
+            Issue.record("Expected .inputSource payload")
+            return
+        }
+        #expect(text == "1 + 1")
+
+        let event = await iterator.next()
         guard case .isExecutable(let value) = event?.payload else {
             Issue.record("Expected .isExecutable payload")
             return
@@ -85,6 +92,7 @@ struct LocalInterpreterConnectionTests {
         await connection.perform(.compile(id: 1, source: "def f("))
 
         var iterator = stream.makeAsyncIterator()
+        _ = await iterator.next() // inputSource
         let event = await iterator.next()
 
         guard case .isExecutable(let value) = event?.payload else {
@@ -117,6 +125,7 @@ struct LocalInterpreterConnectionTests {
         await connection.perform(.compile(id: 1, source: "_test_run_x = 42"))
 
         var iterator = stream.makeAsyncIterator()
+        _ = await iterator.next() // inputSource
         let executableEvent = await iterator.next()
 
         guard case .isExecutable(let isExec) = executableEvent?.payload, isExec else {

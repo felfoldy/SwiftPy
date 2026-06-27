@@ -8,7 +8,7 @@
 import Foundation
 
 /// A compiled unit of async-aware Python: the code to run now plus the
-/// continuation to run once it completes. Produced by ``AsyncCompiler``.
+/// continuation to run once it completes.
 @MainActor
 public final class AsyncCode: @unchecked Sendable {
     @TaskLocal static var current: AsyncCode?

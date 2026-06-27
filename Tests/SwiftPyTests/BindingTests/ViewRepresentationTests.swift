@@ -18,33 +18,22 @@ class CustomView {
 
 @MainActor
 struct ViewRepresentationTests {
-    class TestIOStream: IOStream {
-        var view: AnyView?
-        
-        func input(_ str: String) {}
-        func stdout(_ str: String) {}
-        func stderr(_ str: String) {}
-        func executionTime(_ time: UInt64) {}
-        
-        func view(_ view: AnyView) {
-            self.view = view
-        }
-    }
-    
     @Test
     func customView() {
         let main = py.main
-        let io = TestIOStream()
-        Interpreter.output = io
-        
+
+        var displayed: AnyView?
+        Interpreter.onDisplay = { displayed = $0 }
+        defer { Interpreter.onDisplay = { _ in } }
+
         _ = AnyView.pyType
         _ = CustomView.pyType
-        
+
         let customView = CustomView()
         main.custom_view = customView
 
         Interpreter.run("custom_view", mode: .single)
 
-        #expect(io.view != nil)
+        #expect(displayed != nil)
     }
 }

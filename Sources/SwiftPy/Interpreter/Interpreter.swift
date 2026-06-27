@@ -6,6 +6,7 @@
 //
 
 import Foundation
+import SwiftUI
 #if canImport(UIKit)
 import UIKit
 #endif
@@ -28,8 +29,8 @@ import UIKit
 ///
 @MainActor
 public final class Interpreter {
-    /// IO stream for console output.
-    public static var output: any IOStream = DefaultIOStream()
+    /// Presents a SwiftUI view in the local console, one view at a time.
+    public static var onDisplay: (AnyView) -> Void = { _ in }
 
     /// Bundles to import from python scripts.
     public static var bundles = [Bundle.module]
@@ -72,10 +73,6 @@ public final class Interpreter {
         bindStorages()
 
         relays = OutputRelays(interpreter: self)
-
-        Task {
-            await connectionIOBridge()
-        }
     }
     
     func execute(_ code: String, filename: String, mode: CompileMode = .execution) throws {

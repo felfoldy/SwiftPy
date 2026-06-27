@@ -36,15 +36,8 @@ extension Interpreter {
         
         py.callbacks.displayhook = { obj in
             if py.istype(obj, type: .None) { return true }
-            
-            if let view = obj?.view {
-                Interpreter.output.view(view)
-                return true
-            }
 
-            do {
-                try print(py.repr(obj))
-            } catch {}
+            Interpreter.shared.connection.display(viewObject: obj)
             return true
         }
     }

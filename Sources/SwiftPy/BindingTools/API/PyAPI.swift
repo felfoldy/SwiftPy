@@ -576,7 +576,7 @@ public extension PyRef {
         pointee = newValue.pointee
     }
     
-    /// Returns an `AnyView` if the bounded object implements `ViewRepresentable`.
+    /// Returns an `AnyView` if the object is a view.
     @inlinable
     var view: AnyView? {
         // Try AnyView. AnyView cannot be subclassed.
@@ -590,15 +590,6 @@ public extension PyRef {
            let body = try? py.getattr(self, name: "body") {
             let view = try? py.call(body)
             return view?.view
-        }
-
-        // Try self.__view__.
-        // TODO: Depricate.
-        let view = try? Interpreter.silenceErrors {
-            try py.getattr(self, name: "__view__")
-        }
-        if let view {
-            return AnyView(view)
         }
 
         return nil

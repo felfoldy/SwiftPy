@@ -1,5 +1,5 @@
 //
-//  StdOutputRelayIOStream.swift
+//  OutputRelays.swift
 //  SwiftPy
 //
 //  Created by Tibor Felföldy on 2026-04-29.

@@ -24,6 +24,7 @@ public struct InterpreterEvent: Codable, Sendable {
 
     public enum Payload: Codable, Sendable {
         case contextCreated
+        case inputSource(text: String)
         case completions(suggestions: [String])
         case isExecutable(value: Bool)
 
