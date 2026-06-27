@@ -13,7 +13,7 @@ struct PyAPITests {
     @Test func setAttribute() throws {
         let main = py.main
 
-        Interpreter.execute("class Test: ...")
+        Interpreter.run("class Test: ...")
 
         let Test = main.Test
 
@@ -26,7 +26,7 @@ struct PyAPITests {
             }
         }
         
-        Interpreter.execute("""
+        Interpreter.run("""
         x = Test('secret value')
         """)
 

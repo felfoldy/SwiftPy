@@ -138,23 +138,53 @@ public final class Interpreter {
 }
 
 public extension Interpreter {
-    /// Runs a code in execution mode.
+    /// Compiles and runs source synchronously.
     ///
-    /// Does not output the input to the console.
-    /// - Parameter code: Code to execute.
-    static func execute(
-        _ code: String,
-        filename: String = "<string>",
-        mode: CompileMode = .execution
-    ) {
-        do {
-            let code = try shared.compile(code, filename: filename, mode: mode)
-            if case let .plain(code, _) = code {
-                try shared.execute(code, mode: mode)
-            }
-        } catch {}
+    /// Only plain code is run; source with top-level async is ignored.
+    /// Compilation and execution failures are silently ignored.
+    /// - Parameters:
+    ///   - source: The Python source to execute.
+    ///   - filename: Name used to identify the source in tracebacks. Defaults to `"<string>"`.
+    ///   - mode: The compilation mode to use. Defaults to `.execution`.
+    static func run(_ source: String, filename: String = "<string>", mode: CompileMode = .execution) {
+        guard let code = try? compile(source, filename: filename, mode: mode) else { return }
+        try? execute(code)
     }
 
+    /// Compiles and runs source, awaiting top-level async.
+    ///
+    /// Source with top-level async is awaited; other source runs synchronously.
+    /// Compilation and execution failures are silently ignored.
+    ///
+    /// ### Example:
+    /// Run a script that uses top-level `await`:
+    /// ```swift
+    /// await Interpreter.run("""
+    /// import asyncio
+    ///
+    /// await asyncio.sleep(3)
+    /// print("Ran for at least 3 seconds")
+    /// """)
+    /// ```
+    /// - Parameters:
+    ///   - source: The Python source to execute.
+    ///   - filename: Name used to identify the source in tracebacks. Defaults to `"<string>"`.
+    ///   - mode: The compilation mode to use. Defaults to `.execution`.
+    static func run(_ source: String, filename: String = "<string>", mode: CompileMode = .execution) async {
+        guard let code: CompiledCode = try? compile(source, filename: filename, mode: mode) else {
+            return
+        }
+        try? await execute(code)
+    }
+    
+    /// Compiles Python source into reusable ``CompiledCode``.
+    ///
+    /// - Parameters:
+    ///   - source: The Python source to compile.
+    ///   - filename: Name used to identify the source in tracebacks. Defaults to `"<string>"`.
+    ///   - mode: The compilation mode to use. Defaults to `.execution`.
+    /// - Returns: The compiled code, ready to be executed.
+    /// - Throws: A ``PythonError`` if the source fails to compile.
     static func compile(
         _ source: String,
         filename: String = "<string>",
@@ -162,7 +192,29 @@ public extension Interpreter {
     ) throws(PythonError) -> CompiledCode {
         try shared.compile(source, filename: filename, mode: mode)
     }
+    
+    /// Executes compiled code synchronously.
+    ///
+    /// Only plain code can be run synchronously; passing asynchronous code
+    /// throws an error. Use the `async` overload to run async code.
+    /// Use ``compile(_:filename:mode:)`` to produce the ``CompiledCode``.
+    ///
+    /// - Parameter code: The compiled code to execute.
+    /// - Throws: A ``PythonError`` if the code is asynchronous or execution fails.
+    static func execute(_ code: CompiledCode) throws(PythonError) {
+        if case let .plain(code, mode) = code {
+            try shared.execute(code, mode: mode)
+        }
+        throw .AssertionError("Cannot execute async code")
+    }
 
+    /// Executes compiled code, awaiting asynchronous code.
+    ///
+    /// Plain code runs synchronously, while asynchronous code is awaited.
+    /// Use ``compile(_:filename:mode:)`` to produce the ``CompiledCode``.
+    ///
+    /// - Parameter code: The compiled code to execute.
+    /// - Throws: A ``PythonError`` if execution fails.
     static func execute(_ code: CompiledCode) async throws {
         switch code {
         case let .plain(code, mode):
@@ -171,37 +223,6 @@ public extension Interpreter {
         case let .async(code):
             try await shared.execute(code)
         }
-    }
-
-    /// Executes a block with Python error output suppressed.
-    ///
-    /// - Parameter block: A throwing closure to execute with errors silenced.
-    /// - Returns: The value returned by `block`.
-    /// - Throws: Any error thrown by `block`.
-    @discardableResult
-    static func silenceErrors<Result, Failure: Error>(
-        block: () throws(Failure) -> Result
-    ) throws(Failure) -> Result {
-        silenceErrors = true
-        defer { silenceErrors = false }
-        return try block()
-    }
-
-    /// Runs a code in execution mode.
-    /// 
-    /// Performs profiling and outputs the input to the console.
-    /// - Parameter source: Code to execute.
-    static func run(_ source: String, filename: String = "<string>", mode: CompileMode = .execution) {
-        output.input(source)
-        execute(source, filename: filename, mode: mode)
-    }
-
-    static func asyncRun(_ code: String, filename: String = "<string>", mode: CompileMode = .execution) async {
-        output.input(code)
-        guard let code: CompiledCode = try? compile(code, filename: filename, mode: mode) else {
-            return
-        }
-        try? await Interpreter.execute(code)
     }
 
     /// Evaluates the expression, casts to the given type and returns the result.
@@ -228,6 +249,20 @@ public extension Interpreter {
     static func complete(_ text: String) -> [String] {
         let result: [String]? = try? py.module("interpreter")?.completions?(text)
         return result ?? []
+    }
+
+    /// Executes a block with Python error output suppressed.
+    ///
+    /// - Parameter block: A throwing closure to execute with errors silenced.
+    /// - Returns: The value returned by `block`.
+    /// - Throws: Any error thrown by `block`.
+    @discardableResult
+    static func silenceErrors<Result, Failure: Error>(
+        block: () throws(Failure) -> Result
+    ) throws(Failure) -> Result {
+        silenceErrors = true
+        defer { silenceErrors = false }
+        return try block()
     }
 
     static var connection: any InterpreterConnection {

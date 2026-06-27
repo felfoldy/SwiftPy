@@ -55,7 +55,7 @@ struct AsyncTests {
             }
         }
 
-        await Interpreter.asyncRun("""
+        await Interpreter.run("""
         await async_func()
         finished = True
         """)
@@ -70,7 +70,7 @@ struct AsyncTests {
             PyAPI.return { AsyncTask { 42 } }
         }
 
-        await Interpreter.asyncRun("""
+        await Interpreter.run("""
         asyncRunWithResult_result = await asyncRunWithResult()
         """)
 
@@ -84,11 +84,11 @@ struct AsyncTests {
             PyAPI.return { AsyncTask { 42 } }
         }
         
-        await Interpreter.asyncRun("""
+        await Interpreter.run("""
         result = await async_func()
         """)
         
-        await Interpreter.asyncRun("""
+        await Interpreter.run("""
         new_result = result + 3
         """)
         
@@ -100,7 +100,7 @@ struct AsyncTests {
             PyAPI.return { AsyncTask { 42 } }
         }
         
-        await Interpreter.asyncRun("""
+        await Interpreter.run("""
         result = async_func()
         """)
         
@@ -119,7 +119,7 @@ struct AsyncTests {
             }
         }
 
-        await Interpreter.asyncRun("""
+        await Interpreter.run("""
         def async_generator():
             a = await async_func()
             return a
@@ -144,7 +144,7 @@ struct AsyncTests {
     
     @Test
     func asyncTaskFromGenerator() async throws {
-        Interpreter.run("""
+        await Interpreter.run("""
         import asyncio
         
         async def asyncTaskFromGenerator_make():
@@ -152,7 +152,7 @@ struct AsyncTests {
             return 2
         """)
         
-        await Interpreter.asyncRun("asyncTaskFromGenerator_result = await asyncTaskFromGenerator_make()")
+        await Interpreter.run("asyncTaskFromGenerator_result = await asyncTaskFromGenerator_make()")
         
         #expect(Interpreter.evaluate("asyncTaskFromGenerator_result") == 2)
     }
@@ -167,7 +167,7 @@ struct AsyncTests {
             PyAPI.return { AsyncTask { 4 } }
         }
         
-        Interpreter.run("""
+        await Interpreter.run("""
         async def chainAsyncTasks_make():
             a = await chainAsyncTasks_task1()
             print(f'a: {a}')
@@ -176,13 +176,13 @@ struct AsyncTests {
             return a * b
         """)
         
-        await Interpreter.asyncRun("chainAsyncTasks_result = await chainAsyncTasks_make()")
+        await Interpreter.run("chainAsyncTasks_result = await chainAsyncTasks_make()")
         
         #expect(Interpreter.evaluate("chainAsyncTasks_result") == 12)
     }
 
     @Test func childFailing() async {
-        await Interpreter.asyncRun("""
+        await Interpreter.run("""
         childFailing_result = 0
 
         async def childFailing_child():
@@ -195,14 +195,14 @@ struct AsyncTests {
             childFailing_result = 1
         """)
         
-        await Interpreter.asyncRun("await childFailing_parent()")
+        await Interpreter.run("await childFailing_parent()")
         
         #expect(main.childFailing_result == 0)
     }
     
     @Test
     func asyncNotAGenerator() async throws {
-        await Interpreter.asyncRun("""
+        await Interpreter.run("""
         async def not_generator() -> str:
             return 'success'
         result = await not_generator()
@@ -220,7 +220,7 @@ struct AsyncTests {
             PyAPI.return { AsyncTask { 42 } }
         }
 
-        await Interpreter.asyncRun("""
+        await Interpreter.run("""
         async def gcCollectAfterAwait_something() -> int:
             import gc; gc.collect()
             result = await gcCollectAfterAwait_some_other()

@@ -102,21 +102,21 @@ struct ScriptableTests {
     
     @Test func staticmethodTests() async throws {
         main.TestClass2 = PyObject(TestClassWithProperties.pyType)
-        Interpreter.run("TestClass2.log('asd')")
+        await Interpreter.run("TestClass2.log('asd')")
         
-        Interpreter.run("staticmethodTests = TestClass2.create()")
+        await Interpreter.run("staticmethodTests = TestClass2.create()")
         #expect(TestClassWithProperties(main.staticmethodTests) != nil)
 
-        Interpreter.run("staticmethodTests = TestClass2.map('map')")
+        await Interpreter.run("staticmethodTests = TestClass2.map('map')")
         #expect(main.staticmethodTests?.content == "map")
 
-        Interpreter.run("staticmethodTests = TestClass2.map(None)")
+        await Interpreter.run("staticmethodTests = TestClass2.map(None)")
         #expect(main.staticmethodTests?.content == "")
 
-        Interpreter.run("staticmethodTests = TestClass2.map(content='content')")
+        await Interpreter.run("staticmethodTests = TestClass2.map(content='content')")
         #expect(main.staticmethodTests?.content == "content")
         
-        await Interpreter.asyncRun("staticmethodTestsAsync = await TestClass2.async_create()")
+        await Interpreter.run("staticmethodTestsAsync = await TestClass2.async_create()")
         #expect(TestClassWithProperties(main.staticmethodTestsAsync) != nil)
     }
     
@@ -124,7 +124,7 @@ struct ScriptableTests {
         let type = PyObject(TestClassWithProperties.pyType)
         py.main.TestClass2 = type.reference
 
-        await Interpreter.asyncRun("""
+        await Interpreter.run("""
         tc8 = TestClass2.create()
         number = await tc8.fetch('4')
         number2 = await tc8.fetch()

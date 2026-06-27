@@ -35,7 +35,7 @@ struct ConversionTests {
         profiler.event("ConversionTests.strArrayToPython")
         let array: [String] = ["Hello", "World"]
         
-        Interpreter.execute("x = []")
+        Interpreter.run("x = []")
         py.main.x = array
         
         #expect(py.main.x == ["Hello", "World"])

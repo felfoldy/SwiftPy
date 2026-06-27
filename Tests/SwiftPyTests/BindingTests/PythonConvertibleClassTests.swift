@@ -189,7 +189,7 @@ struct PythonConvertibleClassTests {
     }
     
     @Test func asyncStaticFunc() async throws {
-        await Interpreter.asyncRun("""
+        await Interpreter.run("""
         test9 = await TestClass.async_create()
         """)
 

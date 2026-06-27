@@ -148,7 +148,7 @@ struct FunctionOverloadTests {
     }
     
     @Test func asyncFunctionOverload() async throws {
-        await Interpreter.asyncRun("""
+        await Interpreter.run("""
         asyncFunctionOverload = SUT()
         await asyncFunctionOverload.update(True)
         """)

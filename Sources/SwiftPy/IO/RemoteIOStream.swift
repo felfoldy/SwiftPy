@@ -22,7 +22,7 @@ public final class RemoteIOStream: IOStream {
             if str.starts(with: "[RUN]") {
                 Task {
                     let code = String(str.dropFirst(5))
-                    await Interpreter.asyncRun(code, filename: "<stdin>", mode: .single)
+                    await Interpreter.run(code, filename: "<stdin>", mode: .single)
                 }
             }
         }

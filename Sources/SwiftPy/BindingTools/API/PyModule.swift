@@ -77,21 +77,22 @@ extension PyModule: PythonConvertible {
     }
 }
 
-public extension PyModule {
-    @available(*, deprecated, renamed: "py.module")
+extension PyModule {
     init?(_ name: String) {
-        self.init(Interpreter.shared.module(name))
-    }
-    
-    @available(*, deprecated, renamed: "py.main")
-    static var main: PyModule {
-        PyModule("__main__")!
+        if let module = py.getmodule(name) {
+            self.init(module)
+            return
+        }
+        guard let imported = try? py.import(name) else {
+            return nil
+        }
+        self.init(imported)
     }
 }
 
 public extension PyAPI {
     func module(_ name: String) -> PyModule? {
-        PyModule(Interpreter.shared.module(name))
+        PyModule(name)
     }
     
     var main: PyModule {

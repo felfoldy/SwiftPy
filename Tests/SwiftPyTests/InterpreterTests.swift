@@ -11,7 +11,7 @@ import Testing
 @MainActor
 struct InterpreterTests {
     @Test func loadBundleModule() {
-        Interpreter.execute("from rlcompleter import Completer")
+        Interpreter.run("from rlcompleter import Completer")
         #expect(py.main.Completer != nil)
     }
     
@@ -20,7 +20,7 @@ struct InterpreterTests {
     }
 
     @Test func dirIsNotNone() {
-        Interpreter.execute("import interpreter")
+        Interpreter.run("import interpreter")
 
         #expect(Interpreter.evaluate("dir is None") == false)
     }

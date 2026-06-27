@@ -14,7 +14,7 @@ A fast and lightweight Python interpreter with Swift macro binding tools.
 
 ### Scriptable
 
-- ``Scriptable(_:base:)``
+- ``Scriptable(_:base:convertsToSnakeCase:)``
 
 ### Binding tools
 

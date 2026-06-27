@@ -10,16 +10,6 @@ import Foundation
 extension Interpreter {
     /// Sets print output, importhook, importfile.
     func setCallbacks() {
-        // TODO: Check if Apple accepts redirection.
-        // py.callbacks.print = { str in
-        //     guard let str else { return }
-        //     let content = String(cString: str)
-        //     Task {
-        //         await Interpreter.shared.connection
-        //             .send(id: 0, .stdout(text: content))
-        //     }
-        // }
-        
         py.callbacks.lazyimport = { cName in
             guard let cName else { return nil }
             let name = String(cString: cName)

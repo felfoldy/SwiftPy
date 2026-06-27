@@ -544,16 +544,6 @@ public extension PyAPI {
     }
 }
 
-public extension Interpreter {
-    @inlinable func module(_ name: String) -> PyRef? {
-        if let module = py.getmodule(name) {
-            return module
-        }
-
-        return try? py.import(name)
-    }
-}
-
 // MARK: - PyType
 
 /// `Int16`
