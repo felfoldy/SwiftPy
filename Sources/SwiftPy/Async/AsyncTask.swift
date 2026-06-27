@@ -10,41 +10,6 @@ import SwiftUI
 
 typealias TaskResult = PythonConvertible & Sendable
 
-extension Interpreter {
-    /// Parses async-aware source and compiles it into a reusable
-    /// ``AsyncCode`` without running it. Execute it later with
-    /// ``asyncExecute(_:)``.
-    func asyncCompile(_ code: String, filename: String, mode: CompileMode) throws(PythonError) -> AsyncCode {
-        try AsyncCompiler.compile(code, filename: filename, mode: mode)
-    }
-
-    func asyncExecute(_ code: String, filename: String, mode: CompileMode) async {
-        guard let context = try? asyncCompile(code, filename: filename, mode: mode) else {
-            return
-        }
-        await asyncExecute(context)
-    }
-
-    func asyncExecute(_ code: AsyncCode) async {
-        guard code.call.isAwaiting else {
-            try? Interpreter.shared.execute(code.compiledCode)
-            return
-        }
-
-        await withCheckedContinuation { continuation in
-            code.completion = { continuation.resume() }
-
-            AsyncCode.$current.withValue(code) {
-                do {
-                    try Interpreter.shared.execute(code.compiledCode)
-                } catch {
-                    continuation.resume()
-                }
-            }
-        }
-    }
-}
-
 @Scriptable(base: .View)
 @MainActor
 public class AsyncTask {

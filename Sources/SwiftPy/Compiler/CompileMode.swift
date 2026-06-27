@@ -7,7 +7,7 @@
 
 import pocketpy
 
-public enum CompileMode {
+public enum CompileMode: Sendable {
     case execution, evaluation, single
 
     @usableFromInline

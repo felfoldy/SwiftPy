@@ -170,26 +170,26 @@ public extension PythonBindable {
         return true
     }
     
-    @inlinable
-    static func __init__<each Arg: PythonConvertible>(
-        _ argc: Int32, _ argv: PyRef?,
-        _ initializer: @MainActor (repeat each Arg) throws -> Self
-    ) -> Bool {
-        var result: (repeat each Arg)
-        do {
-            result = try PyBind.castArgs(argc: argc, argv: argv, from: 1) as (repeat each Arg)
-            do {
-                try initializer(repeat (each result)).storeInPython(argv)
-            } catch {
-                // TODO: Should throw the error.
-                return false
-            }
-        } catch {
-            return false
-        }
-        
-        return PyAPI.return { .none }
-    }
+//    @inlinable
+//    static func __init__<each Arg: PythonConvertible>(
+//        _ argc: Int32, _ argv: PyRef?,
+//        _ initializer: @MainActor (repeat each Arg) throws -> Self
+//    ) -> Bool {
+//        var result: (repeat each Arg)
+//        do {
+//            result = try PyBind.castArgs(argc: argc, argv: argv, from: 1) as (repeat each Arg)
+//            do {
+//                try initializer(repeat (each result)).storeInPython(argv)
+//            } catch {
+//                // TODO: Should throw the error.
+//                return false
+//            }
+//        } catch {
+//            return false
+//        }
+//        
+//        return PyAPI.return { .none }
+//    }
     
     @inlinable
     static func _bind_setter<Value: PythonConvertible>(_ keypath: ReferenceWritableKeyPath<Self, Value>, _ argv: PyRef?) -> Bool {

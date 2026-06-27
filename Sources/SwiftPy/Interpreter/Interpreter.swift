@@ -80,29 +80,16 @@ public final class Interpreter {
     
     func execute(_ code: String, filename: String, mode: CompileMode = .execution) throws {
         let code = try py.compile(source: code, filename: filename, mode: mode)
-        
-        try PyAPI.convertRetval(code) { code in
-            let function = mode == .evaluation ? builtinEval : builtinExec
-
-            profiler.begin()
-            let isExecuted = function(1, code)
-            profiler.end()
-
-            Interpreter.output.executionTime(profiler.executionTime)
-
-            return isExecuted
-        }
+        try execute(py.retain(code), mode: mode)
     }
 
-    func execute(_ code: PyObject, mode: CompileMode = .execution) throws {
+    func execute(_ code: PyObject, mode: CompileMode = .execution) throws(PythonError) {
         try PyAPI.convertRetval(code.reference) { code in
             let function = mode == .evaluation ? builtinEval : builtinExec
 
             profiler.begin()
             let isExecuted = function(1, code)
             profiler.end()
-
-            Interpreter.output.executionTime(profiler.executionTime)
 
             return isExecuted
         }
@@ -148,14 +135,6 @@ public final class Interpreter {
         }
         return nil
     }
-    
-    @inlinable
-    static func ignoreErrors(_ call: () -> Bool) -> Bool {
-        let p0 = py.peek()
-        if call() { return true }
-        py.clearexc(p0)
-        return false
-    }
 }
 
 public extension Interpreter {
@@ -163,19 +142,37 @@ public extension Interpreter {
     ///
     /// Does not output the input to the console.
     /// - Parameter code: Code to execute.
-    static func execute(_ code: String, filename: String = "<string>", mode: CompileMode = .execution) {
-        try? shared.execute(code, filename: filename, mode: mode)
+    static func execute(
+        _ code: String,
+        filename: String = "<string>",
+        mode: CompileMode = .execution
+    ) {
+        do {
+            let code = try shared.compile(code, filename: filename, mode: mode)
+            if case let .plain(code, _) = code {
+                try shared.execute(code, mode: mode)
+            }
+        } catch {}
     }
 
-    /// Executes a pre-compiled code object.
-    ///
-    /// - Parameters:
-    ///   - code: A compiled ``PyObject`` returned by ``compile(_:filename:mode:)``.
-    ///   - mode: The mode the code was compiled with.
-    static func execute(_ code: PyObject, mode: CompileMode = .execution) {
-        try? shared.execute(code, mode: mode)
+    static func compile(
+        _ source: String,
+        filename: String = "<string>",
+        mode: CompileMode = .execution
+    ) throws(PythonError) -> CompiledCode {
+        try shared.compile(source, filename: filename, mode: mode)
     }
-    
+
+    static func execute(_ code: CompiledCode) async throws {
+        switch code {
+        case let .plain(code, mode):
+            try shared.execute(code, mode: mode)
+
+        case let .async(code):
+            try await shared.execute(code)
+        }
+    }
+
     /// Executes a block with Python error output suppressed.
     ///
     /// - Parameter block: A throwing closure to execute with errors silenced.
@@ -196,12 +193,15 @@ public extension Interpreter {
     /// - Parameter source: Code to execute.
     static func run(_ source: String, filename: String = "<string>", mode: CompileMode = .execution) {
         output.input(source)
-        try? shared.execute(source, filename: filename, mode: mode)
+        execute(source, filename: filename, mode: mode)
     }
 
     static func asyncRun(_ code: String, filename: String = "<string>", mode: CompileMode = .execution) async {
         output.input(code)
-        await shared.asyncExecute(code, filename: filename, mode: mode)
+        guard let code: CompiledCode = try? compile(code, filename: filename, mode: mode) else {
+            return
+        }
+        try? await Interpreter.execute(code)
     }
 
     /// Evaluates the expression, casts to the given type and returns the result.
@@ -210,7 +210,10 @@ public extension Interpreter {
     /// - Returns: The result of the expression.
     static func evaluate<Result: PythonConvertible>(_ expression: String) -> Result? {
         do {
-            try shared.execute(expression, filename: "<string>", mode: .evaluation)
+            let code = try shared.compile(expression, mode: .evaluation)
+            if case let .plain(code, _) = code {
+                try shared.execute(code, mode: .evaluation)
+            }
             let result = py.retain(py.retval)
             return try Result.cast(result.reference)
         } catch {
@@ -225,25 +228,6 @@ public extension Interpreter {
     static func complete(_ text: String) -> [String] {
         let result: [String]? = try? py.module("interpreter")?.completions?(text)
         return result ?? []
-    }
-
-    /// Compiles Python source code into a code object without executing it.
-    ///
-    /// This is equivalent to Python's built-in `compile()` function.
-    ///
-    /// - Parameters:
-    ///   - source: The Python source code to compile.
-    ///   - filename: The filename used in error messages and tracebacks.
-    ///   - mode: Determines how the source is compiled.
-    /// - Returns: A ``PyObject`` representing the compiled code object.
-    /// - Throws: ``PythonError`` if the source contains a syntax error or cannot be compiled.
-    static func compile(
-        _ source: String,
-        filename: String = "<string>",
-        mode: CompileMode = .execution
-    ) throws(PythonError) -> PyObject {
-        let codeRef = try py.compile(source: source, filename: filename, mode: mode)
-        return PyObject(codeRef)
     }
 
     static var connection: any InterpreterConnection {

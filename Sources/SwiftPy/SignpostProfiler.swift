@@ -53,13 +53,7 @@ final class Signposter: Profiler {
 
 public class SignpostProfiler: Profiler {
     @usableFromInline
-    var executionTime: UInt64 = 0
-
-    @usableFromInline
     let signposter: Profiler?
-    
-    @usableFromInline
-    var startTime: DispatchTime = .now()
     
     @usableFromInline
     var isProfiling: Bool = false
@@ -74,7 +68,6 @@ public class SignpostProfiler: Profiler {
     
     @inlinable
     public func begin() {
-        startTime = .now()
         signposter?.begin()
         isProfiling = true
     }
@@ -82,8 +75,6 @@ public class SignpostProfiler: Profiler {
     @inlinable
     public func end() {
         signposter?.end()
-        let time = DispatchTime.now().uptimeNanoseconds - startTime.uptimeNanoseconds
-        executionTime = time
         isProfiling = false
     }
     

@@ -7,16 +7,16 @@
 
 import Foundation
 
-struct CompiledCode: Sendable {
+struct CompileResult: Sendable {
     let id: UInt64
-    let code: AsyncCode
+    let code: CompiledCode
 }
 
 public actor LocalInterpreterConnection: InterpreterConnection {
     var currentContextId: UInt64 = 0
     var continuations: [UUID: AsyncStream<InterpreterEvent>.Continuation] = [:]
     var latestCompileId: UInt64 = 0
-    var compiled: CompiledCode?
+    var compiled: CompileResult?
 
     private let _sendContinuation: AsyncStream<InterpreterEvent>.Continuation
 
@@ -49,7 +49,7 @@ public actor LocalInterpreterConnection: InterpreterConnection {
         case let .run(id):
             guard let compiled, compiled.id == id else { return }
             await time(id: id) {
-                await Interpreter.shared.asyncExecute(compiled.code)
+                try await Interpreter.execute(compiled.code)
             }
         }
     }
@@ -74,14 +74,25 @@ public actor LocalInterpreterConnection: InterpreterConnection {
         }
     }
     
-    private func time(id: UInt64, _ call: () async -> Void) async {
-        let time = DispatchTime.now().uptimeNanoseconds
-        await call()
-        let delta = DispatchTime.now().uptimeNanoseconds - time
-        let executionTime = Duration.nanoseconds(delta)
-            .formatted(.units(allowed: [.milliseconds, .seconds],
-                              fractionalPart: .show(length: 2, rounded: .up)))
-        send(id: id, .attachment(items: [.image(name: "timer"), .text(text: executionTime)]))
+    private func time(id: UInt64, _ call: () async throws -> Void) async {
+        do {
+            let time = DispatchTime.now().uptimeNanoseconds
+            
+            try await call()
+            
+            let delta = DispatchTime.now().uptimeNanoseconds - time
+            let executionTime = Duration.nanoseconds(delta)
+                .formatted(
+                    .units(
+                        allowed: [.milliseconds, .seconds],
+                        fractionalPart: .show(length: 2, rounded: .up)
+                    )
+                )
+            
+            send(id: id, .attachment(items: [.image(name: "checkmark.circle"), .text(text: executionTime)]))
+        } catch {
+            send(id: id, .attachment(items: [.image(name: "xmark.app")]))
+        }
     }
     
     private func complete(id: UInt64, lastComponent: String) async {
@@ -98,14 +109,15 @@ public actor LocalInterpreterConnection: InterpreterConnection {
         latestCompileId = id
 
         do {
-            let code = try await Interpreter.shared.asyncCompile(source, filename: "<stdin>", mode: .single)
+            let code = try await Interpreter.shared.compile(source, filename: "<stdin>", mode: .single)
 
             guard latestCompileId == id else { return }
-            compiled = CompiledCode(id: id, code: code)
+            compiled = CompileResult(id: id, code: code)
             send(id: id, .isExecutable(value: true))
         } catch {
             guard latestCompileId == id else { return }
             send(id: id, .isExecutable(value: false))
+            send(id: id, .attachment(items: [.image(name: "xmark.square")]))
         }
     }
 }

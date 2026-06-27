@@ -6,7 +6,7 @@ private var freeSlots: [Int32] = []
 
 @MainActor
 @dynamicMemberLookup
-public final class PyObject: @MainActor PyReferencing {
+public final class PyObject: @MainActor PyReferencing, Sendable {
     public let reference: PyRef
     private let cacheID: Int32
 

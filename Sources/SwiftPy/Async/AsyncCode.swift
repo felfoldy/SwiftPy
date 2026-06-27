@@ -10,7 +10,7 @@ import Foundation
 /// A compiled unit of async-aware Python: the code to run now plus the
 /// continuation to run once it completes. Produced by ``AsyncCompiler``.
 @MainActor
-final class AsyncCode: @unchecked Sendable {
+public final class AsyncCode: @unchecked Sendable {
     @TaskLocal static var current: AsyncCode?
 
     /// The compiled Python code object, ready to run.
@@ -21,17 +21,17 @@ final class AsyncCode: @unchecked Sendable {
 
     /// The deferred code after the awaited call, already compiled and ready to
     /// run once this code completes.
-    let continuation: AsyncCode?
+    let nextCode: CompiledCode?
 
     var completion: (() -> Void)?
 
     init(
         compiledCode: PyObject,
-        continuation: AsyncCode?,
+        continuation: CompiledCode?,
         call: AsyncCall,
     ) {
         self.compiledCode = compiledCode
-        self.continuation = continuation
+        self.nextCode = continuation
         self.call = call
     }
 
@@ -40,10 +40,53 @@ final class AsyncCode: @unchecked Sendable {
             py.main[dynamicMember: resultName] = result
         }
 
-        if let continuation {
-            await Interpreter.shared.asyncExecute(continuation)
+        if let nextCode {
+            try? await Interpreter.execute(nextCode)
         }
 
         completion?()
+    }
+}
+
+extension Interpreter {
+    func compile(
+        _ source: String,
+        filename: String = "<string>",
+        mode: CompileMode = .execution
+    ) throws(PythonError) -> CompiledCode {
+        let parsed = AsyncParser(source)
+        
+        let compiledCode = PyObject(try py.compile(source: parsed.code, filename: filename, mode: mode))
+
+        guard parsed.call.isAwaiting else {
+            return .plain(compiledCode, mode: mode)
+        }
+
+        let continuation: CompiledCode?
+        if let continuationCode = parsed.continuationCode {
+            continuation = try compile(continuationCode, filename: filename, mode: mode)
+        } else {
+            continuation = nil
+        }
+
+        return .async(AsyncCode(
+            compiledCode: compiledCode,
+            continuation: continuation,
+            call: parsed.call,
+        ))
+    }
+    
+    func execute(_ code: AsyncCode) async throws {
+        try await withCheckedThrowingContinuation { continuation in
+            code.completion = { continuation.resume() }
+
+            AsyncCode.$current.withValue(code) {
+                do {
+                    try Interpreter.shared.execute(code.compiledCode)
+                } catch {
+                    continuation.resume(throwing: error)
+                }
+            }
+        }
     }
 }
