@@ -106,7 +106,7 @@ public class AsyncTask {
                         }
                     }
                 } catch {
-                    context?.completion()
+                    context?.completion?()
                 }
             }
         }
@@ -146,7 +146,7 @@ extension AsyncTask {
                 await context?.complete(result: nil)
             } catch {
                 log.critical("\(error.localizedDescription)")
-                context?.completion()
+                context?.completion?()
             }
         }
     }
@@ -163,7 +163,7 @@ extension AsyncTask {
                 return result
             } catch {
                 Interpreter.output.stderr(error.localizedDescription)
-                context?.completion()
+                context?.completion?()
 
                 return nil
             }

@@ -13,19 +13,17 @@ import Foundation
 final class AsyncCode: @unchecked Sendable {
     @TaskLocal static var current: AsyncCode?
 
-    /// The deferred code after the awaited call, already compiled and ready to
-    /// run once this code completes.
-    let continuation: AsyncCode?
+    /// The compiled Python code object, ready to run.
+    let compiledCode: PyObject
 
     /// Whether this is an awaited call and what it binds its result to.
     let call: AsyncCall
 
-    /// The compiled Python code object, ready to run.
-    let compiledCode: PyObject
+    /// The deferred code after the awaited call, already compiled and ready to
+    /// run once this code completes.
+    let continuation: AsyncCode?
 
-    /// Bound at execution time by `asyncExecute(_:)`; a no-op until then so
-    /// compiled code can be reused across executions.
-    var completion: () -> Void = {}
+    var completion: (() -> Void)?
 
     init(
         compiledCode: PyObject,
@@ -46,6 +44,6 @@ final class AsyncCode: @unchecked Sendable {
             await Interpreter.shared.asyncExecute(continuation)
         }
 
-        completion()
+        completion?()
     }
 }

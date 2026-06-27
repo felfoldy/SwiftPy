@@ -48,7 +48,13 @@ public actor LocalInterpreterConnection: InterpreterConnection {
 
         case let .run(id):
             guard let compiled, compiled.id == id else { return }
+            let time = DispatchTime.now().uptimeNanoseconds
             await Interpreter.shared.asyncExecute(compiled.code)
+            let delta = DispatchTime.now().uptimeNanoseconds - time
+            let executionTime = Duration.nanoseconds(delta)
+                .formatted(.units(allowed: [.milliseconds, .seconds],
+                                  fractionalPart: .show(length: 2, rounded: .up)))
+            send(id: id, .attachment(items: [.image(name: "timer"), .text(text: executionTime)]))
         }
     }
     
