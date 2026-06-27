@@ -19,8 +19,6 @@ struct AsyncContext: @unchecked Sendable {
     /// The matched ``code`` compiled into a Python code object, ready to run.
     let compiledCode: PyObject
 
-    // Bound at execution time by `asyncExecute(_:)`; a compiled context carries
-    // a no-op until then so it can be reused across executions.
     var completion: () -> Void = {}
     let filename: String
     let mode: CompileMode
@@ -81,7 +79,7 @@ struct AsyncContext: @unchecked Sendable {
             didMatch = false
         }
 
-        compiledCode = PyObject(try py.compile(source: self.code, filename: filename, mode: mode))
+        compiledCode = PyObject(try py.compile(source: match?.code ?? code, filename: filename, mode: mode))
     }
     
     static func joinRest(_ lines: [String], from i: Int) -> String? {

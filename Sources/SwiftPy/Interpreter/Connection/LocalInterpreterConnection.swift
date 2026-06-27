@@ -9,7 +9,7 @@ import Foundation
 
 struct CompiledCode: Sendable {
     let id: UInt64
-    let code: PyObject
+    let code: AsyncContext
 }
 
 public actor LocalInterpreterConnection: InterpreterConnection {
@@ -23,7 +23,7 @@ public actor LocalInterpreterConnection: InterpreterConnection {
     public init() {
         let (stream, continuation) = AsyncStream<InterpreterEvent>.makeStream()
         _sendContinuation = continuation
-        Task { await self.processEvents(stream) }
+        Task { await processEvents(stream) }
     }
 
     private func processEvents(_ stream: AsyncStream<InterpreterEvent>) async {
@@ -48,8 +48,7 @@ public actor LocalInterpreterConnection: InterpreterConnection {
 
         case let .run(id):
             guard let compiled, compiled.id == id else { return }
-
-            await Interpreter.execute(compiled.code, mode: .single)
+            await Interpreter.shared.asyncExecute(compiled.code)
         }
     }
     
@@ -87,11 +86,7 @@ public actor LocalInterpreterConnection: InterpreterConnection {
         latestCompileId = id
 
         do {
-            let code = try await MainActor.run {
-                Interpreter.silenceErrors = true
-                defer { Interpreter.silenceErrors = false }
-                return try Interpreter.compile(source, filename: "<stdin>", mode: .single)
-            }
+            let code = try await Interpreter.shared.asyncCompile(source, filename: "<stdin>", mode: .single)
 
             guard latestCompileId == id else { return }
             compiled = CompiledCode(id: id, code: code)

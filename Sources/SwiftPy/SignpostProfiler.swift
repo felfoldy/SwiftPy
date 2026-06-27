@@ -8,6 +8,7 @@
 import OSLog
 import Foundation
 
+@MainActor
 public protocol Profiler {
     func begin()
     func end()
@@ -67,7 +68,7 @@ public class SignpostProfiler: Profiler {
         signposter = Signposter(name: name)
     }
     
-    deinit {
+    @MainActor deinit {
         if isProfiling { end() }
     }
     
