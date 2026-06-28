@@ -4,6 +4,7 @@
 ![Platform](https://img.shields.io/badge/platform-iOS%20%7C%20macOS%20%7C%20visionOS-blue.svg)
 [![Release](https://img.shields.io/github/v/tag/felfoldy/SwiftPy?sort=semver&label=release&color=blue)](https://github.com/felfoldy/SwiftPy/releases)
 [![License](https://img.shields.io/github/license/felfoldy/SwiftPy)](LICENSE)
+[![Tests](https://github.com/felfoldy/SwiftPy/actions/workflows/tests.yml/badge.svg)](https://github.com/felfoldy/SwiftPy/actions/workflows/tests.yml)
 [![Documentation](https://img.shields.io/badge/docs-latest-blue.svg)](https://felfoldy.github.io/SwiftPy/documentation/swiftpy/)
 [![Docs Build](https://github.com/felfoldy/SwiftPy/actions/workflows/docs.yml/badge.svg)](https://github.com/felfoldy/SwiftPy/actions/workflows/docs.yml)
 
