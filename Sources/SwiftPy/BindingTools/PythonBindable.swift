@@ -200,8 +200,9 @@ public extension PythonBindable {
         _ argv: PyRef?,
         _ fn: (Self) -> () throws -> Void
     ) -> Bool {
-        PyAPI.`return` {
+        PyAPI.return {
             try fn(cast(argv))()
+            return .none
         }
     }
 

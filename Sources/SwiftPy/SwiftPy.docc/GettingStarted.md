@@ -35,8 +35,15 @@ import SwiftPy
 
 ## Run a script
 
-The simplest way to run a script is with the ``Interpreter/run(_:)`` function:
+The simplest way to run a script is with the ``Interpreter/run(_:filename:mode:)`` function:
 ```swift
 Interpreter.run("print('Hello from Python')")
 ```
 The Python virtual machine will be initialized at the first usage.
+
+## Next steps
+
+Now that scripts are running, expose your own Swift functionality to Python:
+
+- <doc:CreatingModules>
+- <doc:WorkingWithPyObjects>
