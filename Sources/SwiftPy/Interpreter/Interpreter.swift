@@ -17,7 +17,7 @@ import UIKit
 /// bind Swift types as Python modules, and handle REPL input.
 ///
 /// ### Examples:
-/// Execute a script with ``run(_:)``:
+/// Execute a script with ``run(_:filename:mode:)-1ohhm``:
 /// ```swift
 /// Interpreter.run("print('Hello from Python')")
 /// ```

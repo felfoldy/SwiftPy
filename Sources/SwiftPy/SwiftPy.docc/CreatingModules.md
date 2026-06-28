@@ -44,7 +44,7 @@ print(counter.count)   # 5
 
 ## Add a function
 
-Modules can also expose standalone functions. Use ``PyModule/def(_:docstring:function:)`` with a signature written in Python syntax, including type annotations; an optional docstring shows up in Python's `help()`. Inside the body, ``PyBind/function(_:_:_:)`` bridges the arguments to Swift types and converts your return value back to Python:
+Modules can also expose standalone functions. Use ``PyModule/def(_:docstring:function:)`` with a signature written in Python syntax, including type annotations; an optional docstring shows up in Python's `help()`. Inside the body, ``PyBind/function(_:_:_:)-78px8`` bridges the arguments to Swift types and converts your return value back to Python:
 ```swift
 PyBind.module("greetings") { module in
     module.def(

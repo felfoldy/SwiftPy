@@ -35,7 +35,7 @@ import SwiftPy
 
 ## Run a script
 
-The simplest way to run a script is with the ``Interpreter/run(_:filename:mode:)`` function:
+The simplest way to run a script is with the ``Interpreter/run(_:filename:mode:)-1ohhm`` function:
 ```swift
 Interpreter.run("print('Hello from Python')")
 ```
