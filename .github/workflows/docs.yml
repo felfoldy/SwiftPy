@@ -29,6 +29,8 @@ jobs:
           xcode-version: latest-stable
 
       - name: Build DocC static site
+        env:
+          SWIFTPY_BUILD_DOCS: "1"
         run: |
           swift package --allow-writing-to-directory ./docs \
             generate-documentation \
