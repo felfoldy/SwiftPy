@@ -9,3 +9,6 @@ DerivedData/
 
 # Generated DocC site (built & deployed by GitHub Actions)
 /docs
+
+# SPM resolved versions — not meaningful for a library; consumers resolve their own.
+/Package.resolved
