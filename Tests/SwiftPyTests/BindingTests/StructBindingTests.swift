@@ -20,7 +20,15 @@ struct StructView: View {
     init() {
         value = "default"
     }
-    
+
+    static func make(value: String) -> StructView {
+        StructView(value: value)
+    }
+
+    static func make() -> StructView {
+        StructView()
+    }
+
     var body: some View {
         Text(value)
     }
@@ -40,6 +48,12 @@ extension StructView: PythonValueBindable {
         }
         type.function("__init__(self) -> None") {
             __init__($1, StructView.init)
+        }
+        type.staticmethod("make(value: str) -> StructView") {
+            PyBind.function($0, $1, StructView.make(value:))
+        }
+        type.staticmethod("make() -> StructView") {
+            PyBind.function($0, $1) { StructView.make() }
         }
         type.property(
             "value",
@@ -78,5 +92,16 @@ struct StructBindingTests {
         
         let value: String = try #require(py.main.view?.value)
         #expect(value == "new content")
+    }
+
+    @Test
+    func staticMethodOverload() throws {
+        Interpreter.run("""
+        a = StructView.make('content')
+        b = StructView.make()
+        """)
+
+        #expect(py.main.a?.value == "content")
+        #expect(py.main.b?.value == "default")
     }
 }

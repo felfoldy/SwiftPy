@@ -177,15 +177,13 @@ struct FunctionOverloadTests {
     }
 
     @Test(arguments: [
-        // ("result = SUT.make(7)", "number 7"),
+        ("result = SUT.make(7)", "number 7"),
         ("result = SUT.make(member='hello')", "hello"),
         ("result = SUT.make('hello')", "hello"),
         ("result = SUT.make()", "none"),
     ])
     func staticMethodOverload(script: String, result: String) throws {
-        withKnownIssue("static method overloading is not supported yet") {
-            Interpreter.run(script)
-            #expect(py.main.result == result)
-        }
+        Interpreter.run(script)
+        #expect(py.main.result == result)
     }
 }

@@ -84,16 +84,44 @@ public extension PyType {
 
     @inlinable
     func staticmethod(_ signature: String, _ docstring: String? = nil, function: PyAPI.CFunction) {
-        // Create a function.
-        let ref = PyRef.allocate(capacity: 1)
-        ref.initialize(to: py_TValue())
-        let name = py.newfunction(ref, signature: signature, docstring: docstring, function: function)
+        let typeObject = py.tpobject(self)!
 
-        // Create staticmethod
-        let staticmethod: PyRef = try! py.call(py.tpobject(.staticmethod)!, args: ref)
+        // Create the underlying function.
+        let functionRef = py.pushtmp()
+        defer { py.pop() }
+        let name = py.newfunction(functionRef, signature: signature, docstring: docstring, function: function)
 
-        // Sets staticmethod to type.
-        py.setdict(py.tpobject(self), name: name, value: staticmethod)
+        // Overload an existing static method of the same name.
+        if let existing = py.getdict(typeObject, name: name) {
+            // The wrapped callable lives in the staticmethod's only slot.
+            let underlying = py_getslot(existing, 0)!
+
+            // Already a dispatcher: just append the new overload.
+            if let overloads = py.getdict(underlying, name: "_overloads") {
+                py.list.append(overloads, value: functionRef)
+                return
+            }
+
+            // Build a dispatcher wrapping the existing and the new function.
+            let dispatcher = py.pushtmp()
+            defer { py.pop() }
+            functionRef.makeFunctionOverload(dispatcher, name: name, isInstance: false)
+
+            let list = py.pushtmp()
+            defer { py.pop() }
+            py.newlist(list)
+            py.list.append(list, value: underlying)
+            py.list.append(list, value: functionRef)
+            py.setdict(dispatcher, name: "_overloads", value: list)
+
+            let staticmethod = try! py.call(py.tpobject(.staticmethod)!, args: dispatcher)
+            py.setdict(typeObject, name: name, value: staticmethod)
+            return
+        }
+
+        // First binding for this name.
+        let staticmethod = try! py.call(py.tpobject(.staticmethod)!, args: functionRef)
+        py.setdict(typeObject, name: name, value: staticmethod)
     }
 
     @inlinable
