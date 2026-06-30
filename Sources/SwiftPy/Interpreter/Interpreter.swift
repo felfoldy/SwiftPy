@@ -7,9 +7,7 @@
 
 import Foundation
 import SwiftUI
-#if canImport(UIKit)
-import UIKit
-#endif
+import OSLog
 
 /// A Swift interface for interacting with the embedded Python interpreter.
 ///
@@ -42,7 +40,11 @@ public final class Interpreter {
     /// Python source registered from bundles, keyed by file name (e.g. `"module.py"`).
     var registeredSources: [String: String] = [:]
 
-    let profiler = SignpostProfiler("Python")
+    let profiler = OSSignposter(logger: Logger(
+        OSLog(subsystem: "com.felfoldy.SwiftPy",
+              category: .pointsOfInterest)
+    ))
+
     private var relays: OutputRelays?
     let builtinExec: PyAPI.CFunction
     let builtinEval: PyAPI.CFunction
@@ -83,10 +85,9 @@ public final class Interpreter {
     func execute(_ code: PyObject, mode: CompileMode = .execution) throws(PythonError) -> PyObject {
         let retval = try PyAPI.convertRetval(code.reference) { code in
             let function = mode == .evaluation ? builtinEval : builtinExec
-
-            profiler.begin()
-            let isExecuted = function(1, code)
-            profiler.end()
+            let isExecuted = profiler.withIntervalSignpost("Python") {
+                function(1, code)
+            }
 
             return isExecuted
         }

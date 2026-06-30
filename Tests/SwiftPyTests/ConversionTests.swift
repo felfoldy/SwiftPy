@@ -11,8 +11,6 @@ import Foundation
 
 @MainActor
 struct ConversionTests {
-    let profiler = profile("ConversionTests")
-    
     @Test func dataToPython() {
         py.main.test_bytes = "Hello".data(using: .utf8)
         #expect(Interpreter.evaluate("test_bytes.decode()") == "Hello")
@@ -32,7 +30,6 @@ struct ConversionTests {
     }
     
     @Test func strArrayToPython() {
-        profiler.event("ConversionTests.strArrayToPython")
         let array: [String] = ["Hello", "World"]
         
         Interpreter.run("x = []")
@@ -42,8 +39,6 @@ struct ConversionTests {
     }
     
     @Test func dictionaryToPython() {
-        profiler.event("ConversionTests.dictionaryToPython")
-
         let dictionary: [String: Any] = ["Hello": 1, "World": Int64(2)]
         
         py.main.dictionary = dictionary
@@ -53,8 +48,6 @@ struct ConversionTests {
     }
 
     @Test func dictionaryFromPython() throws {
-        profiler.event("ConversionTests.dictionaryFromPython")
-        
         Interpreter.run(#"dictionary = {"topic": "dict", "task": "iterate"}"#)
         
         let result: [String: String] = try #require(py.main.dictionary)
@@ -64,8 +57,6 @@ struct ConversionTests {
     }
     
     @Test func jsonDictionaryFromPython() throws {
-        profiler.event("ConversionTests.jsonDictionaryFromPython")
-        
         Interpreter.run("""
         dictionary = {
             "string": "hello",
@@ -100,9 +91,7 @@ struct ConversionTests {
     
     static var casted: Double?
     
-    @Test func castFloatFromInt() {
-        profiler.event("ConversionTests.castFloatFromInt")
-        
+    @Test func castFloatFromInt() {        
         py.main.def("will_cast(x: float) -> None") { argc, argv in
             PyBind.function(argc, argv) { (x: Double) in
                 ConversionTests.casted = x

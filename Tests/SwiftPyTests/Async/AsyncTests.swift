@@ -8,21 +8,12 @@
 import Testing
 @testable import SwiftPy
 
-@MainActor
-func profile(_ name: StaticString) -> SignpostProfiler {
-    let profiler = SignpostProfiler(name)
-    profiler.begin()
-    return profiler
-}
-
 @Suite("Async tests", .serialized)
 @MainActor
 struct AsyncTests {
     let main = py.main
-    let profiler = profile("AsyncTests")
     
     @Test func codeToRun() {
-        profiler.event("AsyncTests.codeToRun")
 
         let parsed = AsyncParser("""
         await URL.download()
@@ -34,8 +25,6 @@ struct AsyncTests {
     }
     
     @Test func result() {
-        profiler.event("AsyncTests.result")
-
         let parsed = AsyncParser("""
         result = await async_func()
         print(result)
@@ -47,8 +36,6 @@ struct AsyncTests {
     }
     
     @Test func asyncRun() async {
-        profiler.event("AsyncTests.asyncRun")
-        
         main.def("async_func() -> AsyncTask") { argc, argv in
             PyBind.function(argc, argv) {
                 AsyncTask {}
@@ -64,8 +51,6 @@ struct AsyncTests {
     }
     
     @Test func asyncRunWithResult() async {
-        profiler.event("AsyncTest.asyncRunWithResult")
-
         main.def("asyncRunWithResult() -> AsyncTask") { _, _ in
             PyAPI.return { AsyncTask { 42 } }
         }
@@ -78,8 +63,6 @@ struct AsyncTests {
     }
     
     @Test func chainingAsyncRun() async {
-        profiler.event("AsyncTests.chainingAsyncRun")
-        
         main.def("async_func() -> AsyncTask") { _, _ in
             PyAPI.return { AsyncTask { 42 } }
         }
@@ -215,8 +198,6 @@ struct AsyncTests {
     }
     
     @Test func sleep() async {
-        profiler.event("AsyncTests.sleep")
-
         await Interpreter.run("""
         from asyncio import sleep
         await sleep(0)
