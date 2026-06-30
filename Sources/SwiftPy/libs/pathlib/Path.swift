@@ -77,9 +77,4 @@ extension Path: CustomStringConvertible {
     public var description: String {
         url.path
     }
-    
-    @available(*, deprecated, renamed: "init(_:)")
-    public convenience init(path: String) {
-        self.init(path)
-    }
 }

@@ -31,9 +31,6 @@ import UIKit
 public final class Interpreter {
     /// Presents a SwiftUI view in the local console, one view at a time.
     public static var onDisplay: (AnyView) -> Void = { _ in }
-
-    @available(*, deprecated, message: "Use PyBind.module(_:in:) instead")
-    public static var bundles = [Bundle]()
     
     public static var silenceErrors = false
 

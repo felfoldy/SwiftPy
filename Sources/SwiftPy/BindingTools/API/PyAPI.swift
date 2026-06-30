@@ -630,16 +630,6 @@ public extension PyRef {
             }
         }
     }
-
-    @available(*, deprecated, renamed: "py.istype")
-    @inlinable func isType<T: PythonConvertible>(_ type: T.Type) -> Bool {
-        py.istype(self, type: T.pyType)
-    }
-    
-    @available(*, deprecated, renamed: "py.isinstance")
-    @inlinable func isInstance(of type: PyType) -> Bool {
-        py.isinstance(self, type: type)
-    }
     
     @inlinable
     func canCast(to type: PyType) -> Bool {
