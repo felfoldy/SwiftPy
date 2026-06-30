@@ -77,18 +77,22 @@ extension Interpreter {
     }
     
     func execute(_ code: AsyncCode) async throws(PythonError) {
-        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, PythonError>) in
-            code.completion = { continuation.resume() }
+        do {
+            try await withCheckedThrowingContinuation { continuation in
+                code.completion = { continuation.resume() }
 
-            do {
-                try AsyncCode.$current.withValue(code) {
-                    try Interpreter.shared.execute(code.compiledCode)
+                do {
+                    try AsyncCode.$current.withValue(code) {
+                        try Interpreter.shared.execute(code.compiledCode)
+                    }
+                } catch {
+                    continuation.resume(throwing: error)
                 }
-            } catch let error as PythonError {
-                continuation.resume(throwing: error)
-            } catch {
-                // Shouldn't happen, but necessary for the compiler.
             }
+        } catch let error as PythonError {
+            throw error
+        } catch {
+            // This shouldn't happen :)
         }
     }
 }
