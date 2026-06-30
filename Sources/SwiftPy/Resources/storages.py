@@ -1,4 +1,5 @@
 import json
+from storages.native import *
 
 def _model__init__(self, *args, **kwargs):
     cls = type(self)

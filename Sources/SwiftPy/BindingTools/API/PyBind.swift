@@ -16,20 +16,60 @@ extension Interpreter {
 
             block(module)
 
-            if let content = Interpreter.importFromSource(name: name + ".py") {
-                _ = try? py.exec(source: content, filename: name, mode: .execution, module: module.reference)
-            }
-
             // Add module.__doc__.
             _ = try? py.module("interpreter")?.bind_interfaces?(module.reference)
         }
+    }
+
+    func bindModule(_ name: String, in bundle: Bundle) {
+        guard let path = bundle.path(forResource: name, ofType: "py"),
+              let content = try? String(contentsOfFile: path, encoding: .utf8) else {
+            log.error("Could not find \(name).py in bundle \(bundle.bundlePath)")
+            return
+        }
+
+        registeredSources[name + ".py"] = content
     }
 }
 
 @MainActor
 public enum PyBind {
+    /// Registers a native module that is configured in Swift when the module
+    /// is first imported.
+    ///
+    /// Use the `block` to populate the module with functions, types, and
+    /// other bindings.
+    ///
+    /// ```swift
+    /// PyBind.module("module") { module in
+    ///     // Bind classes.
+    ///     module.class(MyClass.self)
+    ///
+    ///     // Bind functions.
+    ///     module.def("add(a: float, b: float) -> float") { argc, argv in
+    ///         PyBind.function(argc, argv, add)
+    ///     }
+    ///
+    ///     // Bind attributes.
+    ///     module.VERSION = "1.0.1"
+    /// }
+    /// ```
+    ///
+    /// - Parameters:
+    ///   - name: The name the module is imported under in Python.
+    ///   - block: A closure that configures the ``PyModule`` with its bindings.
     public static func module(_ name: String, block: @escaping (PyModule) -> Void) {
         Interpreter.shared.bindModule(name, block: block)
+    }
+
+    /// Registers a source-only module whose body is loaded from `<name>.py`
+    /// in the given bundle when the module is first imported.
+    ///
+    /// ```swift
+    /// PyBind.module("module", in: .module)
+    /// ```
+    public static func module(_ name: String, in bundle: Bundle) {
+        Interpreter.shared.bindModule(name, in: bundle)
     }
 
     /// `() -> Void`
@@ -208,32 +248,6 @@ extension PyBind {
         let result = try (repeat (each Arg).cast(argv, index()))
         try checkArgCount(argc, expected: i)
         return result
-    }
-}
-
-// MARK: - Legacy PyBind
-
-extension PyBind {
-    @available(*, deprecated, renamed: "module(_:block:)")
-    public static func module(_ name: String, _ types: [PythonBindable.Type], block: @escaping (PyRef?) -> Void = { _ in }) {
-        Interpreter.shared.moduleFactory[name] = { module in
-            guard let module = PyModule(module) else { return }
-            // Set types.
-            for type in types {
-                let pyType = type.pyType
-                module[dynamicMember: pyType.name] = py.tpobject(pyType)
-            }
-
-            // Load source.
-            if let content = Interpreter.importFromSource(name: name + ".py") {
-                _ = try? py.exec(source: content, filename: name, mode: .execution, module: module.reference)
-            }
-
-            block(module.reference)
-            
-            // Add module.__doc__.
-            _ = try? py.module("interpreter")?.bind_interfaces?(module.reference)
-        }
     }
 }
 

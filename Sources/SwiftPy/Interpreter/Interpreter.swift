@@ -32,8 +32,8 @@ public final class Interpreter {
     /// Presents a SwiftUI view in the local console, one view at a time.
     public static var onDisplay: (AnyView) -> Void = { _ in }
 
-    /// Bundles to import from python scripts.
-    public static var bundles = [Bundle.module]
+    @available(*, deprecated, message: "Use PyBind.module(_:in:) instead")
+    public static var bundles = [Bundle]()
     
     public static var silenceErrors = false
 
@@ -41,6 +41,9 @@ public final class Interpreter {
     static let shared = Interpreter()
 
     var moduleFactory: [String: (PyRef?) -> Void] = [:]
+
+    /// Python source registered from bundles, keyed by file name (e.g. `"module.py"`).
+    var registeredSources: [String: String] = [:]
 
     let profiler = SignpostProfiler("Python")
     private var relays: OutputRelays?
@@ -63,6 +66,8 @@ public final class Interpreter {
         let documentsPath = URL.documentsDirectory.path
         FileManager.default.changeCurrentDirectoryPath(documentsPath)
 
+        relays = OutputRelays(interpreter: self)
+        
         bindBuiltins()
         bindOS()
         bindAsyncio()
@@ -72,16 +77,14 @@ public final class Interpreter {
         bindP2P()
         bindStorages()
 
-        relays = OutputRelays(interpreter: self)
-    }
-    
-    func execute(_ code: String, filename: String, mode: CompileMode = .execution) throws {
-        let code = try py.compile(source: code, filename: filename, mode: mode)
-        try execute(py.retain(code), mode: mode)
+        // Register bundled source-only modules.
+        bindModule("keyword", in: .module)
+        bindModule("rlcompleter", in: .module)
     }
 
-    func execute(_ code: PyObject, mode: CompileMode = .execution) throws(PythonError) {
-        try PyAPI.convertRetval(code.reference) { code in
+    @discardableResult
+    func execute(_ code: PyObject, mode: CompileMode = .execution) throws(PythonError) -> PyObject {
+        let retval = try PyAPI.convertRetval(code.reference) { code in
             let function = mode == .evaluation ? builtinEval : builtinExec
 
             profiler.begin()
@@ -90,47 +93,8 @@ public final class Interpreter {
 
             return isExecuted
         }
-    }
 
-    static func importFromSource(name: String) -> String? {
-        // Read from current working directory...
-        if let content = try? String(contentsOf: Path.cwd().url.appending(path: name), encoding: .utf8) {
-            return content
-        }
-        
-        // Check bundles.
-        for bundle in bundles {
-            if let path = bundle.path(forResource: name, ofType: nil) {
-                do {
-                    return try String(contentsOfFile: path, encoding: .utf8)
-                } catch {
-                    log.error("Loading bundle failed with: \(error)")
-                }
-            }
-        }
-
-        // Read from documents/site-packages/...
-        guard let sitePackages = try? Path.sitePackages().url else {
-            return nil
-        }
-
-        // Direct child of site-packages.
-        if let content = try? String(contentsOf: sitePackages.appending(path: name), encoding: .utf8) {
-            return content
-        }
-
-        // One level deep: /site-packages/*/name
-        let contents = try? FileManager.default.contentsOfDirectory(
-            at: sitePackages,
-            includingPropertiesForKeys: [.isDirectoryKey]
-        )
-
-        for url in contents ?? [] {
-            if let content = try? String(contentsOf: url.appending(path: name), encoding: .utf8) {
-                return content
-            }
-        }
-        return nil
+        return py.retain(retval)
     }
 }
 
@@ -143,9 +107,9 @@ public extension Interpreter {
     ///   - source: The Python source to execute.
     ///   - filename: Name used to identify the source in tracebacks. Defaults to `"<string>"`.
     ///   - mode: The compilation mode to use. Defaults to `.execution`.
-    static func run(_ source: String, filename: String = "<string>", mode: CompileMode = .execution) {
+    static func run(_ source: String, filename: String = "<string>", mode: CompileMode = .single) {
         guard let code = try? compile(source, filename: filename, mode: mode) else { return }
-        try? execute(code)
+        _ = try? execute(code)
     }
 
     /// Compiles and runs source, awaiting top-level async.
@@ -167,11 +131,11 @@ public extension Interpreter {
     ///   - source: The Python source to execute.
     ///   - filename: Name used to identify the source in tracebacks. Defaults to `"<string>"`.
     ///   - mode: The compilation mode to use. Defaults to `.execution`.
-    static func run(_ source: String, filename: String = "<string>", mode: CompileMode = .execution) async {
+    static func run(_ source: String, filename: String = "<string>", mode: CompileMode = .single) async {
         guard let code: CompiledCode = try? compile(source, filename: filename, mode: mode) else {
             return
         }
-        try? await execute(code)
+        _ = try? await execute(code)
     }
     
     /// Compiles Python source into reusable ``CompiledCode``.
@@ -198,9 +162,9 @@ public extension Interpreter {
     ///
     /// - Parameter code: The compiled code to execute.
     /// - Throws: A ``PythonError`` if the code is asynchronous or execution fails.
-    static func execute(_ code: CompiledCode) throws(PythonError) {
+    static func execute(_ code: CompiledCode) throws(PythonError) -> PyObject? {
         if case let .plain(code, mode) = code {
-            try shared.execute(code, mode: mode)
+            return try shared.execute(code, mode: mode)
         }
         throw .AssertionError("Cannot execute async code")
     }
@@ -212,13 +176,15 @@ public extension Interpreter {
     ///
     /// - Parameter code: The compiled code to execute.
     /// - Throws: A ``PythonError`` if execution fails.
-    static func execute(_ code: CompiledCode) async throws {
+    @discardableResult
+    static func execute(_ code: CompiledCode) async throws(PythonError) -> PyObject? {
         switch code {
         case let .plain(code, mode):
-            try shared.execute(code, mode: mode)
+            return try shared.execute(code, mode: mode)
 
         case let .async(code):
             try await shared.execute(code)
+            return nil
         }
     }
 

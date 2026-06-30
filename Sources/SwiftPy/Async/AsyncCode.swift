@@ -41,7 +41,7 @@ public final class AsyncCode: @unchecked Sendable {
         }
 
         if let nextCode {
-            try? await Interpreter.execute(nextCode)
+            _ = try? await Interpreter.execute(nextCode)
         }
 
         completion?()
@@ -76,16 +76,18 @@ extension Interpreter {
         ))
     }
     
-    func execute(_ code: AsyncCode) async throws {
-        try await withCheckedThrowingContinuation { continuation in
+    func execute(_ code: AsyncCode) async throws(PythonError) {
+        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, PythonError>) in
             code.completion = { continuation.resume() }
 
-            AsyncCode.$current.withValue(code) {
-                do {
+            do {
+                try AsyncCode.$current.withValue(code) {
                     try Interpreter.shared.execute(code.compiledCode)
-                } catch {
-                    continuation.resume(throwing: error)
                 }
+            } catch let error as PythonError {
+                continuation.resume(throwing: error)
+            } catch {
+                // Shouldn't happen, but necessary for the compiler.
             }
         }
     }

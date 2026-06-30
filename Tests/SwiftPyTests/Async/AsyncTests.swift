@@ -214,6 +214,19 @@ struct AsyncTests {
         }
     }
     
+    @Test func sleep() async {
+        profiler.event("AsyncTests.sleep")
+
+        await Interpreter.run("""
+        from asyncio import sleep
+        await sleep(0)
+        sleep_finished = True
+        """)
+
+        // Awaiting a sleep resolves to None and runs the continuation.
+        #expect(main.sleep_finished == true)
+    }
+
     @Test
     func awaitedResultSurvivesGarbageCollection() async throws {
         main.def("gcCollectAfterAwait_some_other() -> AsyncTask") { _, _ in

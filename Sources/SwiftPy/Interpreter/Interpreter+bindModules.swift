@@ -13,7 +13,7 @@ import SwiftUI
 
 extension Interpreter {
     func bindBuiltins() {
-        let builtins = py.getmodule("builtins")
+        let builtins = py.module("builtins")
 
         // Add async decorator.
         let asyncSource = """
@@ -29,11 +29,12 @@ extension Interpreter {
             source: asyncSource,
             filename: "<stdin>",
             mode: .execution,
-            module: builtins
+            module: builtins?.reference
         )
 
+        builtins?.View = py.tpobject(.View)
         // Add View type.
-        py.setdict(builtins, name: "View", value:  py.tpobject(.View))
+//        py.setdict(builtins, name: "View", value:  py.tpobject(.View))
     }
 
     func bindOS() {
@@ -77,7 +78,7 @@ extension Interpreter {
     }
     
     func bindSys() {
-        guard let sys = py.getmodule("sys") else { return }
+//        guard /**/ sys = py.getmodule("sys") else { return }
 
         #if os(visionOS)
         let osName = "visionos"
@@ -89,12 +90,15 @@ extension Interpreter {
         let osName = "unknown"
         #endif
 
-        let osNameRef = py.retain(osName)
-        _ = try? py.setattr(
-            sys,
-            name: "os",
-            value: osNameRef?.reference
-        )
+        let sys = py.module("sys")
+        sys?.os = osName
+        
+//        let osNameRef = py.retain(osName)
+//        _ = try? py.setattr(
+//            sys,
+//            name: "os",
+//            value: osNameRef?.reference
+//        )
     }
     
     func bindInterpreter() {
@@ -107,6 +111,8 @@ extension Interpreter {
                 }
             }
         }
+
+        bindModule("interpreter", in: .module)
     }
     
     func bindPathlib() {
@@ -122,7 +128,7 @@ extension Interpreter {
     }
     
     func bindStorages() {
-        bindModule("storages") { module in
+        bindModule("storages.native") { module in
             if #available(macOS 15, iOS 18, visionOS 2, *) {
                 module.classes(
                     ModelContainer.self,
@@ -131,5 +137,7 @@ extension Interpreter {
                 )
             }
         }
+
+        bindModule("storages", in: .module)
     }
 }

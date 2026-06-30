@@ -10,6 +10,7 @@ import SwiftPy
 
 /// The TestClass.
 @Scriptable("TestClass2", base: .object)
+@MainActor
 class TestClassWithProperties: PythonBindable {
     typealias TestClass2 = TestClassWithProperties
     
@@ -23,6 +24,12 @@ class TestClassWithProperties: PythonBindable {
     static let staticProperty: String = "static"
     
     init() {}
+    
+    init(args: Unpack) {
+        content = args.values
+            .compactMap { arg in String(arg) }
+            .joined(separator: "\n")
+    }
     
     func changeContent(value: String) { content = value }
     func getContent() -> String { content }
@@ -137,7 +144,15 @@ struct ScriptableTests {
     @Test func staticProperty() {
         let testClass = TestClassWithProperties()
         main.tc3 = testClass
-        
+
         #expect(main.tc3?.static_property == TestClassWithProperties.staticProperty)
+    }
+
+    @Test func initWithUnpack() {
+        main.TestClass2 = PyObject(TestClassWithProperties.pyType)
+
+        Interpreter.run("tc9 = TestClass2('a', 'b', 'c')")
+
+        #expect(main.tc9?.content == "a\nb\nc")
     }
 }

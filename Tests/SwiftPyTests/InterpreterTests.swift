@@ -25,6 +25,13 @@ struct InterpreterTests {
         #expect(Interpreter.evaluate("dir is None") == false)
     }
 
+    #if os(macOS)
+    @Test func sysOS() throws {
+        Interpreter.run("import sys")
+        #expect(Interpreter.evaluate("sys.os") == "macos")
+    }
+    #endif
+
     @Test(
         .disabled("Performance benchmark")
     )
