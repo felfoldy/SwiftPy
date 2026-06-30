@@ -33,8 +33,6 @@ extension Interpreter {
         )
 
         builtins?.View = py.tpobject(.View)
-        // Add View type.
-//        py.setdict(builtins, name: "View", value:  py.tpobject(.View))
     }
 
     func bindOS() {
@@ -78,8 +76,6 @@ extension Interpreter {
     }
     
     func bindSys() {
-//        guard /**/ sys = py.getmodule("sys") else { return }
-
         #if os(visionOS)
         let osName = "visionos"
         #elseif os(iOS)
@@ -92,13 +88,6 @@ extension Interpreter {
 
         let sys = py.module("sys")
         sys?.os = osName
-        
-//        let osNameRef = py.retain(osName)
-//        _ = try? py.setattr(
-//            sys,
-//            name: "os",
-//            value: osNameRef?.reference
-//        )
     }
     
     func bindInterpreter() {
