@@ -1,13 +1,12 @@
 # SwiftPy
 
-![Swift Version](https://img.shields.io/badge/Swift-6.2-orange.svg)
-![Platform](https://img.shields.io/badge/platform-iOS%20%7C%20macOS%20%7C%20visionOS-blue.svg)
+[![Swift Versions](https://img.shields.io/endpoint?url=https%3A%2F%2Fswiftpackageindex.com%2Fapi%2Fpackages%2Ffelfoldy%2FSwiftPy%2Fbadge%3Ftype%3Dswift-versions)](https://swiftpackageindex.com/felfoldy/SwiftPy)
+[![Platforms](https://img.shields.io/endpoint?url=https%3A%2F%2Fswiftpackageindex.com%2Fapi%2Fpackages%2Ffelfoldy%2FSwiftPy%2Fbadge%3Ftype%3Dplatforms)](https://swiftpackageindex.com/felfoldy/SwiftPy)
 [![Release](https://img.shields.io/github/v/tag/felfoldy/SwiftPy?sort=semver&label=release&color=blue)](https://github.com/felfoldy/SwiftPy/releases)
 [![License](https://img.shields.io/github/license/felfoldy/SwiftPy)](LICENSE)
 [![Tests](https://github.com/felfoldy/SwiftPy/actions/workflows/tests.yml/badge.svg)](https://github.com/felfoldy/SwiftPy/actions/workflows/tests.yml)
 [![Coverage](https://codecov.io/gh/felfoldy/SwiftPy/graph/badge.svg)](https://codecov.io/gh/felfoldy/SwiftPy)
 [![Documentation](https://img.shields.io/badge/docs-latest-blue.svg)](https://felfoldy.github.io/SwiftPy/documentation/swiftpy/)
-[![Docs Build](https://github.com/felfoldy/SwiftPy/actions/workflows/docs.yml/badge.svg)](https://github.com/felfoldy/SwiftPy/actions/workflows/docs.yml)
 
 SwiftPy is a fast and lightweight Python interpreter built on [pocketpy](https://github.com/pocketpy/pocketpy) with Swift macro binding tools.
 
