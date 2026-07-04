@@ -1,4 +1,4 @@
-from models import model
+from modeling import model
 
 @model
 class Item:

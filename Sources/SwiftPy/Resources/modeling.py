@@ -1,3 +1,10 @@
+@classmethod
+def _model_from_json(cls, json_str: str):
+    import json
+    fields = list(cls.__annotations__.keys())
+    data = json.loads(json_str)
+    return cls(**{k: v for k, v in data.items() if k in fields})
+
 def _model__init__(self, *args, **kwargs):
     cls = type(self)
     annotations = cls.__annotations__
@@ -48,15 +55,37 @@ def _make_property(field: str):
 
     return property(fget, fset)
 
+def _make_schema(cls: type):
+    cls_d = cls.__dict__
+    properties = []
+
+    for field, annotation in cls.__annotations__.items():
+        property_schema = {
+            "name": field,
+            "type": annotation,
+        }
+
+        if field in cls_d:
+            property_schema["default"] = cls_d[field]
+
+        properties.append(property_schema)
+
+    return {
+        "name": cls.__name__,
+        "properties": properties,
+    }
+
 def model(cls: type):
     assert type(cls) is type
     cls.__init__ = _model__init__
     cls.__repr__ = _model__repr__
     cls._did_change = _model_did_change
+    cls._from_json = _model_from_json
 
     fields = cls.__annotations__.keys()
     cls_d = cls.__dict__
 
+    cls._schema = _make_schema(cls)
     cls._defaults = {}
 
     for field in fields:

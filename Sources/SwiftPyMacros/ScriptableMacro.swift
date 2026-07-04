@@ -332,11 +332,16 @@ struct FunctionExtractor: MemberExtractor {
             metadata.functionSyntax.append(functionSyntax + " ...")
         }
 
+        let labels = signature.parameterClause.parameters
+            .map { "\($0.firstName.text):" }
+            .joined()
+        let swiftReference = labels.isEmpty ? identifier : "\(identifier)(\(labels))"
+
         if isStatic {
             metadata.bindings.append(
             """
             type.staticmethod("\(pySignature)") { argc, argv in
-                PyBind.function(argc, argv, \(identifier))
+                PyBind.function(argc, argv, \(swiftReference))
             }
             """
             )
@@ -344,7 +349,7 @@ struct FunctionExtractor: MemberExtractor {
             metadata.bindings.append(
             """
             type.function("\(pySignature)") {
-                _bind_function($1, \(identifier))
+                _bind_function($1, \(swiftReference))
             }
             """
             )

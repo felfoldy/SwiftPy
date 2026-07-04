@@ -67,15 +67,12 @@ extension [LookupKeyValue] {
 @available(macOS 15, iOS 18, *)
 @MainActor
 @Scriptable
-class ModelContainer: PythonBindable {
-    typealias object = PyRef
-    
+class Container: PythonBindable {    
     internal let container: SwiftData.ModelContainer
     internal let context: SwiftData.ModelContext
-    internal static var inMemoryOnly: Bool = false
-    internal static var containers = [ModelContainer]()
+    internal static var containers = [Container]()
     
-    init(name: String) throws {
+    init(name: String, inMemoryOnly: Bool = false) throws {
         let schema = Schema([ModelData.self,
                              LookupKeyValue.self,
                              ModelMetadata.self],
@@ -84,7 +81,7 @@ class ModelContainer: PythonBindable {
         let configuration = ModelConfiguration(
             name,
             schema: schema,
-            isStoredInMemoryOnly: Self.inMemoryOnly,
+            isStoredInMemoryOnly: inMemoryOnly,
             groupContainer: .automatic,
             cloudKitDatabase: .automatic
         )
@@ -98,7 +95,7 @@ class ModelContainer: PythonBindable {
         
         context = container.mainContext
         
-        ModelContainer.containers.append(self)
+        Container.containers.append(self)
     }
     
     func insert(model: PyObject) throws {
@@ -106,7 +103,7 @@ class ModelContainer: PythonBindable {
         let typeName = type.name
         let typeObject = PyObject(type)
         
-        try py.module("storages")?._extend?(typeObject)
+        try py.module("storage")?._extend?(typeObject)
 
         guard let json: String = try py.module("json")?.dumps?(model._fields) else {
             throw PythonError.ValueError("Failed to serialize model fields")
@@ -125,7 +122,7 @@ class ModelContainer: PythonBindable {
 
     func fetch(_ type: PyObject) throws -> PyObject? {
         let typeName = py.totype(type.reference).name
-        try py.module("storages")?._extend?(type)
+        try py.module("storage")?._extend?(type)
         let models = try context.fetch(.models(name: typeName))
         let result = try type._makemodels?(models)
         return result
@@ -138,9 +135,7 @@ class ModelContainer: PythonBindable {
         context.delete(modelData)
     }
     
-    static func inMemory(inMemory: Bool) {
-        inMemoryOnly = inMemory
-    }
+
 }
 
 @available(macOS 15, iOS 18, *)

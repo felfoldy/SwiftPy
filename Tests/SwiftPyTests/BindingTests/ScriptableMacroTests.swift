@@ -76,8 +76,8 @@ class ScriptableMacroTests: XCTestCase {
         
         extension TestClass: PythonBindable {
             @MainActor public static let pyType: PyType = .make("TestClass", base: .object) { type in
-                \(function("testMethod", "test_method(self, arg: int | None = None, arg2: str = '1') -> None"))
-                \(function("testFunction", "test_function(self, value: str, val2: int) -> int"))
+                \(function("testMethod(arg:arg2:)", "test_method(self, arg: int | None = None, arg2: str = '1') -> None"))
+                \(function("testFunction(_:val2:)", "test_function(self, value: str, val2: int) -> int"))
                 \(function("testAsync", "test_async(self) -> int"))
                 \(newAndRepr)
                 \(interfaceBegin)
@@ -368,7 +368,7 @@ class ScriptableMacroTests: XCTestCase {
         extension TestClass: PythonBindable {
             @MainActor static let pyType: PyType = .make("TestClass", base: .object) { type in
                 type.staticmethod("map(content: str | None = None) -> TestClass") { argc, argv in
-                    PyBind.function(argc, argv, map)
+                    PyBind.function(argc, argv, map(content:))
                 }
                 \(newAndRepr)
                 \(interfaceBegin)
@@ -415,6 +415,41 @@ class ScriptableMacroTests: XCTestCase {
                 \(interfaceBegin)
                 class TestClass(View):
                     def update(self) -> None: ...
+                \(interfaceEnd)
+            }
+        }
+        """,
+        macros: testMacros)
+    }
+
+    func testOverloadedFunctionBinding() {
+        assertMacroExpansion("""
+        @Scriptable
+        class TestClass {
+            func respond(_ prompt: String) -> String { "" }
+            func respond(_ prompt: String, schema: PyObject) -> PyObject { prompt }
+        }
+        """, expandedSource: """
+        class TestClass {
+            func respond(_ prompt: String) -> String { "" }
+            func respond(_ prompt: String, schema: PyObject) -> PyObject { prompt }
+
+            var _pythonCache = PythonBindingCache()
+        }
+
+        extension TestClass: PythonBindable {
+            @MainActor static let pyType: PyType = .make("TestClass", base: .object) { type in
+                type.function("respond(self, prompt: str) -> str") {
+                    _bind_function($1, respond(_:))
+                }
+                type.function("respond(self, prompt: str, schema: Any) -> Any") {
+                    _bind_function($1, respond(_:schema:))
+                }
+                \(newAndRepr)
+                \(interfaceBegin)
+                class TestClass:
+                    def respond(self, prompt: str) -> str: ...
+                    def respond(self, prompt: str, schema: Any) -> Any: ...
                 \(interfaceEnd)
             }
         }

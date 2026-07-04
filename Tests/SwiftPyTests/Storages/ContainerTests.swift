@@ -1,5 +1,5 @@
 //
-//  ModelContainerTests.swift
+//  ContainerTests.swift
 //  SwiftPy
 //
 //  Created by Tibor Felföldy on 2025-05-03.
@@ -12,14 +12,12 @@ import SwiftData
 
 @MainActor
 @Suite
-struct ModelContainerTests {
+struct ContainerTests {
     init() {
         Interpreter.run("""
-        from models import model
-        from storages import ModelContainer
+        from modeling import model
+        from storage import Container
 
-        ModelContainer.in_memory(True)
-        
         @model
         class Item:
             name: str = ''
@@ -31,7 +29,7 @@ struct ModelContainerTests {
     @available(macOS 15, *)
     @Test func insert() throws {
         Interpreter.run("""
-        container = ModelContainer('insert_testing')
+        container = Container('insert_testing', True)
         sword = Item(name='Sword')
         container.insert(sword)
         """)
@@ -42,7 +40,7 @@ struct ModelContainerTests {
         #expect(data.keys?["__name__"] == "Item")
         
         // Is inserted?
-        let container: SwiftPy.ModelContainer? = py.main.container
+        let container: SwiftPy.Container? = py.main.container
         let models = try container?.context.fetch(FetchDescriptor<ModelData>())
         #expect(models == [data])
     }
@@ -50,7 +48,7 @@ struct ModelContainerTests {
     @available(macOS 15, *)
     @Test func fetch() throws {
         Interpreter.run("""
-        container = ModelContainer('fetch_testing')
+        container = Container('fetch_testing', True)
         container.insert(Item(name='Sword'))
         items = container.fetch(Item)
         print(items)
@@ -66,7 +64,7 @@ struct ModelContainerTests {
     @available(macOS 15, *)
     @Test func update() throws {
         Interpreter.run("""
-        container = ModelContainer('update_testing')
+        container = Container('update_testing', True)
         sword = Item(name='Sword')
         container.insert(sword)
         """)
@@ -86,7 +84,7 @@ struct ModelContainerTests {
     @available(macOS 15, *)
     @Test func delete() throws {
         Interpreter.run("""
-        container = ModelContainer('delete_testing')
+        container = Container('delete_testing', True)
         sword = Item(name='Sword')
         container.insert(sword)
         """)

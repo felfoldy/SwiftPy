@@ -1,16 +1,17 @@
-import json
-from storages.native import *
+from storage.native import *
+
+Store = Container
 
 def _did_change(self):
     if getattr(self, '_data', None) is not None:
+        import json
         self._data.json = json.dumps(self._fields)
 
 @classmethod
 def _makemodels(cls, models: list):
     elements = []
     for model in models:
-        args = json.loads(model.json)
-        element = cls(**args)
+        element = cls._from_json(model.json)
         element._data = model
         elements.append(element)
     return elements

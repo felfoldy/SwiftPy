@@ -118,18 +118,18 @@ extension Interpreter {
     
 
     
-    func bindStorages() {
-        bindModule("storages.native") { module in
+    func bindStorage() {
+        bindModule("storage.native") { module in
             if #available(macOS 15, iOS 18, visionOS 2, *) {
                 module.classes(
-                    ModelContainer.self,
+                    Container.self,
                     ModelData.self,
                     LookupKeyValue.self,
                 )
             }
         }
 
-        bindModule("models", in: .module)
-        bindModule("storages", in: .module)
+        bindModule("modeling", in: .module)
+        bindModule("storage", in: .module)
     }
 }
