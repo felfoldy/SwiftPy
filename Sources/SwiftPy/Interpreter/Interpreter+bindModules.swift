@@ -116,6 +116,8 @@ extension Interpreter {
         }
     }
     
+
+    
     func bindStorages() {
         bindModule("storages.native") { module in
             if #available(macOS 15, iOS 18, visionOS 2, *) {

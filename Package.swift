@@ -67,10 +67,7 @@ let package = Package(
     ]
 )
 
-// Only pull in swift-docc-plugin when explicitly building documentation
-// (the CI docs workflow sets SWIFTPY_BUILD_DOCS). This keeps the plugin and
-// its SymbolKit dependency out of SwiftPy's default graph, so packages that
-// depend on SwiftPy don't resolve them transitively.
+// Only pull in swift-docc-plugin when explicitly building documentation.
 if ProcessInfo.processInfo.environment["SWIFTPY_BUILD_DOCS"] != nil {
     package.dependencies.append(
         .package(url: "https://github.com/swiftlang/swift-docc-plugin", from: "1.0.0")

@@ -74,6 +74,7 @@ public final class Interpreter {
         bindInterpreter()
         bindPathlib()
         bindP2P()
+        bindKeyring()
         bindStorages()
 
         // Register bundled source-only modules.
