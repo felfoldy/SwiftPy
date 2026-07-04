@@ -129,6 +129,7 @@ extension Interpreter {
             }
         }
 
+        bindModule("models", in: .module)
         bindModule("storages", in: .module)
     }
 }

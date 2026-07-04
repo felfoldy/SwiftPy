@@ -15,7 +15,8 @@ import SwiftData
 struct ModelContainerTests {
     init() {
         Interpreter.run("""
-        from storages import model, ModelContainer
+        from models import model
+        from storages import ModelContainer
 
         ModelContainer.in_memory(True)
         

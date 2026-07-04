@@ -102,21 +102,30 @@ class ModelContainer: PythonBindable {
     }
     
     func insert(model: PyObject) throws {
-        // TODO: Update metadata if needed.
-        guard let modelData = ModelData(model._data),
-              let keys = modelData.keys,
-              let name = keys.first(where: { $0.key == "__name__" })?.value else {
-            throw PythonError.ValueError("Invalid model data")
+        let type = py.typeof(model.reference)
+        let typeName = type.name
+        let typeObject = PyObject(type)
+        
+        try py.module("storages")?._extend?(typeObject)
+
+        guard let json: String = try py.module("json")?.dumps?(model._fields) else {
+            throw PythonError.ValueError("Failed to serialize model fields")
         }
-        
-        let count = try context.fetchCount(.models(name: name))
+
+        let nameKey = LookupKeyValue(key: "__name__", value: typeName)
+        let modelData = ModelData(keys: [nameKey], json: json)
+
+        let count = try context.fetchCount(.models(name: typeName))
         modelData.persistentId = count
-        
+
+        model._data = modelData
+
         context.insert(modelData)
     }
-    
+
     func fetch(_ type: PyObject) throws -> PyObject? {
         let typeName = py.totype(type.reference).name
+        try py.module("storages")?._extend?(type)
         let models = try context.fetch(.models(name: typeName))
         let result = try type._makemodels?(models)
         return result
@@ -127,9 +136,6 @@ class ModelContainer: PythonBindable {
             throw PythonError.ValueError("Invalid model data")
         }
         context.delete(modelData)
-        
-        // Recreate the underlying model data for the object so it can be inserted again.
-        try model._makedata?()
     }
     
     static func inMemory(inMemory: Bool) {

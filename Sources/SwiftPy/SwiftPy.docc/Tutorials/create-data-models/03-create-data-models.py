@@ -1,4 +1,5 @@
-from storages import model, ModelContainer
+from models import model
+from storages import ModelContainer
 
 @model
 class Item:

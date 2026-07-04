@@ -1,4 +1,4 @@
-from storages import model
+from models import model
 
 @model
 class Item:
