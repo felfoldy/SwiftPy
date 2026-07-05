@@ -128,8 +128,8 @@ void NameDict__clear(NameDict* self);
 typedef struct PyObject {
     py_Type type;  // we have a duplicated type here for convenience
     uint8_t size_8b;
-    bool gc_marked;
-    int slots;  // number of slots in the object
+    uint8_t gc_marked;  // lsb (self is marked), 2nd lsb (no recursively mark)
+    int slots;          // number of slots in the object
     char flex[];
 } PyObject;
 
@@ -147,14 +147,14 @@ void* PyObject__userdata(PyObject* self);
 
 void PyObject__dtor(PyObject* self);
 
-
 #define pk__mark_value(val)                                                                        \
-    if((val)->is_ptr && !(val)->_obj->gc_marked) {                                                 \
+    if((val)->is_ptr) {                                                                            \
         PyObject* obj = (val)->_obj;                                                               \
-        obj->gc_marked = true;                                                                     \
-        c11_vector__push(PyObject*, p_stack, obj);                                                 \
+        if(!(obj->gc_marked & 0b01)) {                                                             \
+            obj->gc_marked |= 0b01;                                                                \
+            if(!(obj->gc_marked & 0b10)) { c11_vector__push(PyObject*, p_stack, obj); }            \
+        }                                                                                          \
     }
-
 
 // common/_generated.h
 
@@ -170,7 +170,8 @@ extern const char kPythonLibs_dataclasses[];
 extern const char kPythonLibs_datetime[];
 extern const char kPythonLibs_functools[];
 extern const char kPythonLibs_heapq[];
-extern const char kPythonLibs_linalg[];
+extern const char kPythonLibs_inspect[];
+extern const char kPythonLibs_long_v1[];
 extern const char kPythonLibs_operator[];
 extern const char kPythonLibs_typing[];
 
@@ -5108,6 +5109,7 @@ c11_string* c11_sv__replace2(c11_sv self, c11_sv old, c11_sv new_);
 c11_vector /* T=c11_sv */ c11_sv__split(c11_sv self, char sep);
 c11_vector /* T=c11_sv */ c11_sv__split2(c11_sv self, c11_sv sep);
 c11_vector /* T=c11_sv */ c11_sv__splitwhitespace(c11_sv self);
+c11_vector /* T=c11_sv */ c11_sv__splitlines(c11_sv self, bool keepends);
 
 // misc
 int c11__unicode_index_to_byte(const char* data, int i);
@@ -6326,12 +6328,19 @@ typedef struct FuncDeclKwArg {
     py_TValue value;  // default value
 } FuncDeclKwArg;
 
+typedef struct FuncDeclAnnotation {
+    py_Name name;      // parameter name, or `return` for the return hint
+    c11_string* hint;  // source text of the type hint
+} FuncDeclAnnotation;
+
 typedef struct FuncDecl {
     RefCounted rc;
     CodeObject code;  // strong ref
 
     c11_vector /*T=int32_t*/ args;          // indices in co->varnames
     c11_vector /*T=FuncDeclKwArg*/ kwargs;  // indices in co->varnames
+
+    c11_vector /*T=FuncDeclAnnotation*/ annotations;
 
     int starred_arg;    // index in co->varnames, -1 if no *arg
     int starred_kwarg;  // index in co->varnames, -1 if no **kwarg
@@ -6351,6 +6360,7 @@ void FuncDecl__add_arg(FuncDecl* self, py_Name name);
 void FuncDecl__add_kwarg(FuncDecl* self, py_Name name, const py_TValue* value);
 void FuncDecl__add_starred_arg(FuncDecl* self, py_Name name);
 void FuncDecl__add_starred_kwarg(FuncDecl* self, py_Name name);
+void FuncDecl__add_annotation(FuncDecl* self, py_Name name, c11_sv hint);
 void FuncDecl__gc_mark(const FuncDecl* self, c11_vector* p_stack);
 void FuncDecl__dtor(FuncDecl* self);
 
@@ -6762,6 +6772,7 @@ typedef enum TokenIndex {
     TK_GE,
     TK_LE,
     TK_INVERT,
+    TK_WALRUS,
     /***************/
     TK_FALSE,
     TK_NONE,
@@ -6829,6 +6840,7 @@ typedef struct Token {
 // https://docs.python.org/3/reference/expressions.html#operator-precedence
 enum Precedence {
     PREC_LOWEST = 0,
+    PREC_NAMED_EXPR,   // :=
     PREC_LAMBDA,       // lambda
     PREC_TERNARY,      // ?:
     PREC_LOGICAL_OR,   // or
@@ -6899,16 +6911,16 @@ static int PoolArena__sweep_dealloc(PoolArena* self, int* out_types) {
             self->unused[self->unused_length] = i;
             self->unused_length++;
         } else {
-            if(!obj->gc_marked) {
+            if(obj->gc_marked & 0b01) {
+                // marked, clear mark
+                obj->gc_marked &= 0b10;
+            } else {
                 // not marked, need to free
                 if(out_types) out_types[obj->type]++;
                 PyObject__dtor(obj);
                 obj->type = 0;
                 self->unused[self->unused_length] = i;
                 self->unused_length++;
-            } else {
-                // marked, clear mark
-                obj->gc_marked = false;
             }
         }
     }
@@ -7269,8 +7281,8 @@ int ManagedHeap__sweep(ManagedHeap* self, ManagedHeapSwpetInfo* out_info) {
     int large_living_count = 0;
     for(int i = 0; i < self->large_objects.length; i++) {
         PyObject* obj = c11__getitem(PyObject*, &self->large_objects, i);
-        if(obj->gc_marked) {
-            obj->gc_marked = false;
+        if(obj->gc_marked & 0b01) {
+            obj->gc_marked &= 0b10;
             c11__setitem(PyObject*, &self->large_objects, large_living_count, obj);
             large_living_count++;
         } else {
@@ -7305,7 +7317,7 @@ PyObject* ManagedHeap__gcnew(ManagedHeap* self, py_Type type, int slots, int uds
     }
     obj->type = type;
     obj->size_8b = size_8b;
-    obj->gc_marked = false;
+    obj->gc_marked = 0;
     obj->slots = slots;
 
     // initialize slots or dict
@@ -7616,10 +7628,10 @@ void VM__ctor(VM* self) {
     pk__add_module_unicodedata();
 
     pk__add_module_conio();
-    pk__add_module_lz4();       // optional
-    pk__add_module_cute_png();  // optional
-    pk__add_module_msgpack();   // optional
-    py__add_module_periphery(); // optional
+    pk__add_module_lz4();        // optional
+    pk__add_module_cute_png();   // optional
+    pk__add_module_msgpack();    // optional
+    py__add_module_periphery();  // optional
     pk__add_module_pkpy();
     pk__add_module_picoterm();
 
@@ -8048,7 +8060,7 @@ void ManagedHeap__mark(ManagedHeap* self) {
         PyObject* obj = c11_vector__back(PyObject*, p_stack);
         c11_vector__pop(p_stack);
 
-        assert(obj->gc_marked);
+        assert(obj->gc_marked & 0b01);
 
         if(obj->slots > 0) {
             py_TValue* p = PyObject__slots(obj);
@@ -9001,11 +9013,15 @@ __NEXT_STEP:
             DISPATCH();
         }
         case OP_BUILD_TUPLE: {
+            bool need_track = false;
             py_TValue tmp;
             py_Ref p = py_newtuple(&tmp, byte.arg);
             py_TValue* begin = SP() - byte.arg;
-            for(int i = 0; i < byte.arg; i++)
+            for(int i = 0; i < byte.arg; i++) {
                 p[i] = begin[i];
+                if(p[i].is_ptr) need_track = true;
+            }
+            if(!need_track) tmp._obj->gc_marked |= 0b10;
             SP() = begin;
             PUSH(&tmp);
             DISPATCH();
@@ -10119,7 +10135,7 @@ SourceLocation Frame__source_location(py_Frame* self) {
 }
 
 // src/interpreter/dll.c
-#if PK_IS_DESKTOP_PLATFORM && PK_ENABLE_OS
+#if PK_IS_DESKTOP_PLATFORM && PK_ENABLE_OS && PK_ENABLE_DLL
 
 #ifdef _WIN32
 
@@ -10363,6 +10379,8 @@ void FuncDecl__dtor(FuncDecl* self) {
     CodeObject__dtor(&self->code);
     c11_vector__dtor(&self->args);
     c11_vector__dtor(&self->kwargs);
+    c11__foreach(FuncDeclAnnotation, &self->annotations, item) c11_string__delete(item->hint);
+    c11_vector__dtor(&self->annotations);
     c11_smallmap_n2d__dtor(&self->kw_to_index);
     if(self->docstring) py_free(self->docstring);
 }
@@ -10375,6 +10393,7 @@ FuncDecl_ FuncDecl__rcnew(SourceData_ src, c11_sv name) {
 
     c11_vector__ctor(&self->args, sizeof(int32_t));
     c11_vector__ctor(&self->kwargs, sizeof(FuncDeclKwArg));
+    c11_vector__ctor(&self->annotations, sizeof(FuncDeclAnnotation));
 
     self->starred_arg = -1;
     self->starred_kwarg = -1;
@@ -10430,6 +10449,12 @@ void FuncDecl__add_starred_arg(FuncDecl* self, py_Name name) {
 void FuncDecl__add_starred_kwarg(FuncDecl* self, py_Name name) {
     int index = CodeObject__add_varname(&self->code, name);
     self->starred_kwarg = index;
+}
+
+void FuncDecl__add_annotation(FuncDecl* self, py_Name name, c11_sv hint) {
+    FuncDeclAnnotation* item = c11_vector__emplace(&self->annotations);
+    item->name = name;
+    item->hint = c11_string__new2(hint.data, hint.size);
 }
 
 void CodeObject__ctor(CodeObject* self, SourceData_ src, c11_sv name) {
@@ -10883,8 +10908,8 @@ void NameDict__clear(NameDict* self) {
 // Magic number for CodeObject serialization: "CO" = 0x434F
 #define CODEOBJECT_MAGIC 0x434F
 #define CODEOBJECT_VER_MAJOR 1
-#define CODEOBJECT_VER_MINOR 0
-#define CODEOBJECT_VER_MINOR_MIN 0
+#define CODEOBJECT_VER_MINOR 1
+#define CODEOBJECT_VER_MINOR_MIN 1
 
 // Forward declarations
 static void FuncDecl__serialize(c11_serializer* s,
@@ -11195,6 +11220,16 @@ static void FuncDecl__serialize(c11_serializer* s,
 
     // type
     c11_serializer__write_i8(s, (int8_t)decl->type);
+
+    // annotations
+    c11_serializer__write_i32(s, decl->annotations.length);
+    c11_serializer__write_mark(s, '[');
+    for(int i = 0; i < decl->annotations.length; i++) {
+        FuncDeclAnnotation* item = c11__at(FuncDeclAnnotation, &decl->annotations, i);
+        c11_serializer__write_cstr(s, py_name2str(item->name));
+        c11_serializer__write_cstr(s, item->hint->data);
+    }
+    c11_serializer__write_mark(s, ']');
 }
 
 // Deserialize FuncDecl
@@ -11205,6 +11240,7 @@ static FuncDecl_ FuncDecl__deserialize(c11_deserializer* d, SourceData_ embedded
 
     c11_vector__ctor(&self->args, sizeof(int32_t));
     c11_vector__ctor(&self->kwargs, sizeof(FuncDeclKwArg));
+    c11_vector__ctor(&self->annotations, sizeof(FuncDeclAnnotation));
     c11_smallmap_n2d__ctor(&self->kw_to_index);
 
     // CodeObject (embedded)
@@ -11252,6 +11288,18 @@ static FuncDecl_ FuncDecl__deserialize(c11_deserializer* d, SourceData_ embedded
 
     // type
     self->type = (FuncType)c11_deserializer__read_i8(d);
+
+    // annotations
+    int annotations_len = c11_deserializer__read_i32(d);
+    c11_deserializer__consume_mark(d, '[');
+    for(int i = 0; i < annotations_len; i++) {
+        const char* name_str = c11_deserializer__read_cstr(d);
+        const char* hint_str = c11_deserializer__read_cstr(d);
+        FuncDeclAnnotation* item = c11_vector__emplace(&self->annotations);
+        item->name = py_name(name_str);
+        item->hint = c11_string__new(hint_str);
+    }
+    c11_deserializer__consume_mark(d, ']');
     return self;
 }
 
@@ -11299,9 +11347,10 @@ const char kPythonLibs_dataclasses[] = "def _get_annotations(cls: type):\n    in
 const char kPythonLibs_datetime[] = "from time import localtime\nimport operator\n\nclass timedelta:\n    def __init__(self, days=0, seconds=0):\n        self.days = days\n        self.seconds = seconds\n\n    def __repr__(self):\n        return f\"datetime.timedelta(days={self.days}, seconds={self.seconds})\"\n\n    def __eq__(self, other) -> bool:\n        if not isinstance(other, timedelta):\n            return NotImplemented\n        return (self.days, self.seconds) == (other.days, other.seconds)\n\n    def __ne__(self, other) -> bool:\n        if not isinstance(other, timedelta):\n            return NotImplemented\n        return (self.days, self.seconds) != (other.days, other.seconds)\n\n\nclass date:\n    def __init__(self, year: int, month: int, day: int):\n        self.year = year\n        self.month = month\n        self.day = day\n\n    @staticmethod\n    def today():\n        t = localtime()\n        return date(t.tm_year, t.tm_mon, t.tm_mday)\n    \n    def __cmp(self, other, op):\n        if not isinstance(other, date):\n            return NotImplemented\n        if self.year != other.year:\n            return op(self.year, other.year)\n        if self.month != other.month:\n            return op(self.month, other.month)\n        return op(self.day, other.day)\n\n    def __eq__(self, other) -> bool:\n        return self.__cmp(other, operator.eq)\n    \n    def __ne__(self, other) -> bool:\n        return self.__cmp(other, operator.ne)\n\n    def __lt__(self, other: 'date') -> bool:\n        return self.__cmp(other, operator.lt)\n\n    def __le__(self, other: 'date') -> bool:\n        return self.__cmp(other, operator.le)\n\n    def __gt__(self, other: 'date') -> bool:\n        return self.__cmp(other, operator.gt)\n\n    def __ge__(self, other: 'date') -> bool:\n        return self.__cmp(other, operator.ge)\n\n    def __str__(self):\n        return f\"{self.year}-{self.month:02}-{self.day:02}\"\n\n    def __repr__(self):\n        return f\"datetime.date({self.year}, {self.month}, {self.day})\"\n\n\nclass datetime(date):\n    def __init__(self, year: int, month: int, day: int, hour: int, minute: int, second: int):\n        super().__init__(year, month, day)\n        # Validate and set hour, minute, and second\n        if not 0 <= hour <= 23:\n            raise ValueError(\"Hour must be between 0 and 23\")\n        self.hour = hour\n        if not 0 <= minute <= 59:\n            raise ValueError(\"Minute must be between 0 and 59\")\n        self.minute = minute\n        if not 0 <= second <= 59:\n            raise ValueError(\"Second must be between 0 and 59\")\n        self.second = second\n\n    def date(self) -> date:\n        return date(self.year, self.month, self.day)\n\n    @staticmethod\n    def now():\n        t = localtime()\n        tm_sec = t.tm_sec\n        if tm_sec == 60:\n            tm_sec = 59\n        return datetime(t.tm_year, t.tm_mon, t.tm_mday, t.tm_hour, t.tm_min, tm_sec)\n\n    def __str__(self):\n        return f\"{self.year}-{self.month:02}-{self.day:02} {self.hour:02}:{self.minute:02}:{self.second:02}\"\n\n    def __repr__(self):\n        return f\"datetime.datetime({self.year}, {self.month}, {self.day}, {self.hour}, {self.minute}, {self.second})\"\n\n    def __cmp(self, other, op):\n        if not isinstance(other, datetime):\n            return NotImplemented\n        if self.year != other.year:\n            return op(self.year, other.year)\n        if self.month != other.month:\n            return op(self.month, other.month)\n        if self.day != other.day:\n            return op(self.day, other.day)\n        if self.hour != other.hour:\n            return op(self.hour, other.hour)\n        if self.minute != other.minute:\n            return op(self.minute, other.minute)\n        return op(self.second, other.second)\n\n    def __eq__(self, other) -> bool:\n        return self.__cmp(other, operator.eq)\n    \n    def __ne__(self, other) -> bool:\n        return self.__cmp(other, operator.ne)\n    \n    def __lt__(self, other) -> bool:\n        return self.__cmp(other, operator.lt)\n    \n    def __le__(self, other) -> bool:\n        return self.__cmp(other, operator.le)\n    \n    def __gt__(self, other) -> bool:\n        return self.__cmp(other, operator.gt)\n    \n    def __ge__(self, other) -> bool:\n        return self.__cmp(other, operator.ge)\n\n\n";
 const char kPythonLibs_functools[] = "class cache:\n    def __init__(self, f):\n        self.f = f\n        self.cache = {}\n\n    def __call__(self, *args):\n        if args not in self.cache:\n            self.cache[args] = self.f(*args)\n        return self.cache[args]\n    \nclass lru_cache:\n    def __init__(self, maxsize=128):\n        self.maxsize = maxsize\n        self.cache = {}\n\n    def __call__(self, f):\n        def wrapped(*args):\n            if args in self.cache:\n                res = self.cache.pop(args)\n                self.cache[args] = res\n                return res\n            \n            res = f(*args)\n            if len(self.cache) >= self.maxsize:\n                first_key = next(iter(self.cache))\n                self.cache.pop(first_key)\n            self.cache[args] = res\n            return res\n        return wrapped\n    \ndef reduce(function, sequence, initial=...):\n    it = iter(sequence)\n    if initial is ...:\n        try:\n            value = next(it)\n        except StopIteration:\n            raise TypeError(\"reduce() of empty sequence with no initial value\")\n    else:\n        value = initial\n    for element in it:\n        value = function(value, element)\n    return value\n\nclass partial:\n    def __init__(self, f, *args, **kwargs):\n        self.f = f\n        if not callable(f):\n            raise TypeError(\"the first argument must be callable\")\n        self.args = args\n        self.kwargs = kwargs\n\n    def __call__(self, *args, **kwargs):\n        kwargs.update(self.kwargs)\n        return self.f(*self.args, *args, **kwargs)\n\n";
 const char kPythonLibs_heapq[] = "# Heap queue algorithm (a.k.a. priority queue)\ndef heappush(heap, item):\n    \"\"\"Push item onto heap, maintaining the heap invariant.\"\"\"\n    heap.append(item)\n    _siftdown(heap, 0, len(heap)-1)\n\ndef heappop(heap):\n    \"\"\"Pop the smallest item off the heap, maintaining the heap invariant.\"\"\"\n    lastelt = heap.pop()    # raises appropriate IndexError if heap is empty\n    if heap:\n        returnitem = heap[0]\n        heap[0] = lastelt\n        _siftup(heap, 0)\n        return returnitem\n    return lastelt\n\ndef heapreplace(heap, item):\n    \"\"\"Pop and return the current smallest value, and add the new item.\n\n    This is more efficient than heappop() followed by heappush(), and can be\n    more appropriate when using a fixed-size heap.  Note that the value\n    returned may be larger than item!  That constrains reasonable uses of\n    this routine unless written as part of a conditional replacement:\n\n        if item > heap[0]:\n            item = heapreplace(heap, item)\n    \"\"\"\n    returnitem = heap[0]    # raises appropriate IndexError if heap is empty\n    heap[0] = item\n    _siftup(heap, 0)\n    return returnitem\n\ndef heappushpop(heap, item):\n    \"\"\"Fast version of a heappush followed by a heappop.\"\"\"\n    if heap and heap[0] < item:\n        item, heap[0] = heap[0], item\n        _siftup(heap, 0)\n    return item\n\ndef heapify(x):\n    \"\"\"Transform list into a heap, in-place, in O(len(x)) time.\"\"\"\n    n = len(x)\n    # Transform bottom-up.  The largest index there's any point to looking at\n    # is the largest with a child index in-range, so must have 2*i + 1 < n,\n    # or i < (n-1)/2.  If n is even = 2*j, this is (2*j-1)/2 = j-1/2 so\n    # j-1 is the largest, which is n//2 - 1.  If n is odd = 2*j+1, this is\n    # (2*j+1-1)/2 = j so j-1 is the largest, and that's again n//2-1.\n    for i in reversed(range(n//2)):\n        _siftup(x, i)\n\n# 'heap' is a heap at all indices >= startpos, except possibly for pos.  pos\n# is the index of a leaf with a possibly out-of-order value.  Restore the\n# heap invariant.\ndef _siftdown(heap, startpos, pos):\n    newitem = heap[pos]\n    # Follow the path to the root, moving parents down until finding a place\n    # newitem fits.\n    while pos > startpos:\n        parentpos = (pos - 1) >> 1\n        parent = heap[parentpos]\n        if newitem < parent:\n            heap[pos] = parent\n            pos = parentpos\n            continue\n        break\n    heap[pos] = newitem\n\ndef _siftup(heap, pos):\n    endpos = len(heap)\n    startpos = pos\n    newitem = heap[pos]\n    # Bubble up the smaller child until hitting a leaf.\n    childpos = 2*pos + 1    # leftmost child position\n    while childpos < endpos:\n        # Set childpos to index of smaller child.\n        rightpos = childpos + 1\n        if rightpos < endpos and not heap[childpos] < heap[rightpos]:\n            childpos = rightpos\n        # Move the smaller child up.\n        heap[pos] = heap[childpos]\n        pos = childpos\n        childpos = 2*pos + 1\n    # The leaf at pos is empty now.  Put newitem there, and bubble it up\n    # to its final resting place (by sifting its parents down).\n    heap[pos] = newitem\n    _siftdown(heap, startpos, pos)";
-const char kPythonLibs_linalg[] = "from vmath import *";
-const char kPythonLibs_operator[] = "# https://docs.python.org/3/library/operator.html#mapping-operators-to-functions\n\ndef le(a, b): return a <= b\ndef lt(a, b): return a < b\ndef ge(a, b): return a >= b\ndef gt(a, b): return a > b\ndef eq(a, b): return a == b\ndef ne(a, b): return a != b\n\ndef and_(a, b): return a & b\ndef or_(a, b): return a | b\ndef xor(a, b): return a ^ b\ndef invert(a): return ~a\ndef lshift(a, b): return a << b\ndef rshift(a, b): return a >> b\n\ndef is_(a, b): return a is b\ndef is_not(a, b): return a is not b\ndef not_(a): return not a\ndef truth(a): return bool(a)\ndef contains(a, b): return b in a\n\ndef add(a, b): return a + b\ndef sub(a, b): return a - b\ndef mul(a, b): return a * b\ndef truediv(a, b): return a / b\ndef floordiv(a, b): return a // b\ndef mod(a, b): return a % b\ndef pow(a, b): return a ** b\ndef neg(a): return -a\ndef matmul(a, b): return a @ b\n\ndef getitem(a, b): return a[b]\ndef setitem(a, b, c): a[b] = c\ndef delitem(a, b): del a[b]\n\ndef iadd(a, b): a += b; return a\ndef isub(a, b): a -= b; return a\ndef imul(a, b): a *= b; return a\ndef itruediv(a, b): a /= b; return a\ndef ifloordiv(a, b): a //= b; return a\ndef imod(a, b): a %= b; return a\n# def ipow(a, b): a **= b; return a\n# def imatmul(a, b): a @= b; return a\ndef iand(a, b): a &= b; return a\ndef ior(a, b): a |= b; return a\ndef ixor(a, b): a ^= b; return a\ndef ilshift(a, b): a <<= b; return a\ndef irshift(a, b): a >>= b; return a\n\nclass attrgetter:\n    def __init__(self, attr):\n        self.attr = attr\n    def __call__(self, obj):\n        return getattr(obj, self.attr)\n";
-const char kPythonLibs_typing[] = "class _Placeholder:\n    def __init__(self, *args, **kwargs):\n        pass\n    def __getitem__(self, *args):\n        return self\n    def __call__(self, *args, **kwargs):\n        return self\n    def __and__(self, other):\n        return self\n    def __or__(self, other):\n        return self\n    def __xor__(self, other):\n        return self\n\n\n_PLACEHOLDER = _Placeholder()\n\nSequence = _PLACEHOLDER\nList = _PLACEHOLDER\nDict = _PLACEHOLDER\nTuple = _PLACEHOLDER\nSet = _PLACEHOLDER\nAny = _PLACEHOLDER\nUnion = _PLACEHOLDER\nOptional = _PLACEHOLDER\nCallable = _PLACEHOLDER\nType = _PLACEHOLDER\nTypeAlias = _PLACEHOLDER\nNewType = _PLACEHOLDER\n\nClassVar = _PLACEHOLDER\n\nLiteral = _PLACEHOLDER\nLiteralString = _PLACEHOLDER\n\nIterable = _PLACEHOLDER\nGenerator = _PLACEHOLDER\nIterator = _PLACEHOLDER\n\nHashable = _PLACEHOLDER\n\nTypeVar = _PLACEHOLDER\nSelf = _PLACEHOLDER\n\nProtocol = object\nGeneric = object\nNever = object\n\nTYPE_CHECKING = False\n\n# decorators\noverload = lambda x: x\nfinal = lambda x: x\n\n# exhaustiveness checking\nassert_never = lambda x: x\n\nTypedDict = dict\nNotRequired = _PLACEHOLDER\n\ncast = lambda _, val: val\n";
+const char kPythonLibs_inspect[] = "class _empty:\n    pass\n\n\nclass Parameter:\n    POSITIONAL_ONLY = 0\n    POSITIONAL_OR_KEYWORD = 1\n    VAR_POSITIONAL = 2\n    KEYWORD_ONLY = 3\n    VAR_KEYWORD = 4\n\n    empty = _empty\n\n    def __init__(self, name, kind, *default, annotation=None):\n        self.name = name\n        self.kind = kind\n        # pocketpy only allows literal defaults, so use *default as sentinel\n        self.default = default[0] if default else _empty\n        self.annotation = _empty if annotation is None else annotation\n\n    def __str__(self):\n        res = self.name\n        if self.annotation is not _empty:\n            res += ': ' + self.annotation\n            if self.default is not _empty:\n                res += ' = ' + repr(self.default)\n        elif self.default is not _empty:\n            res += '=' + repr(self.default)\n        if self.kind == Parameter.VAR_POSITIONAL:\n            res = '*' + res\n        elif self.kind == Parameter.VAR_KEYWORD:\n            res = '**' + res\n        return res\n\n    def __repr__(self):\n        return '<Parameter \"' + str(self) + '\">'\n\n\nclass Signature:\n    empty = _empty\n\n    def __init__(self, parameters, return_annotation=None):\n        self.parameters = {p.name: p for p in parameters}\n        self.return_annotation = _empty if return_annotation is None else return_annotation\n\n    def __str__(self):\n        res = '(' + ', '.join([str(p) for p in self.parameters.values()]) + ')'\n        if self.return_annotation is not _empty:\n            res += ' -> ' + self.return_annotation\n        return res\n\n    def __repr__(self):\n        return '<Signature ' + str(self) + '>'\n\n\ndef _from_function(func, drop_first):\n    entries, return_annotation = _signature_data(func)\n    params = []\n    for name, kind, default, annotation in entries:\n        params.append(Parameter(name, kind, *default, annotation=annotation))\n    if drop_first:\n        params = params[1:]\n    return Signature(params, return_annotation)\n\n\ndef signature(obj):\n    if not callable(obj):\n        raise TypeError(repr(obj) + ' is not a callable object')\n    if isinstance(obj, type):\n        return _from_function(obj.__init__, True)\n    if hasattr(obj, '__func__'):\n        return _from_function(obj.__func__, True)\n    return _from_function(obj, False)\n";
+const char kPythonLibs_long_v1[] = "# after v1.2.2, int is always 64-bit\nPyLong_SHIFT = 60//2 - 1\n\nPyLong_BASE = 2 ** PyLong_SHIFT\nPyLong_MASK = PyLong_BASE - 1\nPyLong_DECIMAL_SHIFT = 4\nPyLong_DECIMAL_BASE = 10 ** PyLong_DECIMAL_SHIFT\n\n##############################################################\n\ndef ulong_fromint(x: int):\n    # return a list of digits and sign\n    if x == 0: return [0], 1\n    sign = 1 if x > 0 else -1\n    if sign < 0: x = -x\n    res = []\n    while x:\n        res.append(x & PyLong_MASK)\n        x >>= PyLong_SHIFT\n    return res, sign\n\ndef ulong_cmp(a: list, b: list) -> int:\n    # return 1 if a>b, -1 if a<b, 0 if a==b\n    if len(a) > len(b): return 1\n    if len(a) < len(b): return -1\n    for i in range(len(a)-1, -1, -1):\n        if a[i] > b[i]: return 1\n        if a[i] < b[i]: return -1\n    return 0\n\ndef ulong_pad_(a: list, size: int):\n    # pad leading zeros to have `size` digits\n    delta = size - len(a)\n    if delta > 0:\n        a.extend([0] * delta)\n\ndef ulong_unpad_(a: list):\n    # remove leading zeros\n    while len(a)>1 and a[-1]==0:\n        a.pop()\n\ndef ulong_add(a: list, b: list) -> list:\n    res = [0] * max(len(a), len(b))\n    ulong_pad_(a, len(res))\n    ulong_pad_(b, len(res))\n    carry = 0\n    for i in range(len(res)):\n        carry += a[i] + b[i]\n        res[i] = carry & PyLong_MASK\n        carry >>= PyLong_SHIFT\n    if carry > 0:\n        res.append(carry)\n    return res\n\ndef ulong_inc_(a: list):\n    a[0] += 1\n    for i in range(len(a)):\n        if a[i] < PyLong_BASE: break\n        a[i] -= PyLong_BASE\n        if i+1 == len(a):\n            a.append(1)\n        else:\n            a[i+1] += 1\n    \n\ndef ulong_sub(a: list, b: list) -> list:\n    # a >= b\n    res = []\n    borrow = 0\n    for i in range(len(b)):\n        tmp = a[i] - b[i] - borrow\n        if tmp < 0:\n            tmp += PyLong_BASE\n            borrow = 1\n        else:\n            borrow = 0\n        res.append(tmp)\n    for i in range(len(b), len(a)):\n        tmp = a[i] - borrow\n        if tmp < 0:\n            tmp += PyLong_BASE\n            borrow = 1\n        else:\n            borrow = 0\n        res.append(tmp)\n    ulong_unpad_(res)\n    return res\n\ndef ulong_divmodi(a: list, b: int):\n    # b > 0\n    res = []\n    carry = 0\n    for i in range(len(a)-1, -1, -1):\n        carry <<= PyLong_SHIFT\n        carry += a[i]\n        res.append(carry // b)\n        carry %= b\n    res.reverse()\n    ulong_unpad_(res)\n    return res, carry\n\n\ndef ulong_divmod(a: list, b: list):\n\n    if ulong_cmp(a, b) < 0:\n        return [0], a\n\n    if len(b) == 1:\n        q, r = ulong_divmodi(a, b[0])\n        r, _ = ulong_fromint(r)\n        return q, r\n\n    max = (len(a) - len(b)) * PyLong_SHIFT + \x5c\n        (a[-1].bit_length() - b[-1].bit_length())\n\n    low = [0]\n\n    high = (max // PyLong_SHIFT) * [0] + \x5c\n        [(2**(max % PyLong_SHIFT)) & PyLong_MASK]\n\n    while ulong_cmp(low, high) < 0:\n        ulong_inc_(high)\n        mid, r = ulong_divmodi(ulong_add(low, high), 2)\n        if ulong_cmp(a, ulong_mul(b, mid)) >= 0:\n            low = mid\n        else:\n            high = ulong_sub(mid, [1])\n\n    q = [0] * (len(a) - len(b) + 1)\n    while ulong_cmp(a, ulong_mul(b, low)) >= 0:\n        q = ulong_add(q, low)\n        a = ulong_sub(a, ulong_mul(b, low))\n    ulong_unpad_(q)\n    return q, a\n\ndef ulong_floordivi(a: list, b: int):\n    # b > 0\n    return ulong_divmodi(a, b)[0]\n\ndef ulong_muli(a: list, b: int):\n    # b >= 0\n    res = [0] * len(a)\n    carry = 0\n    for i in range(len(a)):\n        carry += a[i] * b\n        res[i] = carry & PyLong_MASK\n        carry >>= PyLong_SHIFT\n    if carry > 0:\n        res.append(carry)\n    return res\n\ndef ulong_mul(a: list, b: list):\n    N = len(a) + len(b)\n    # use grade-school multiplication\n    res = [0] * N\n    for i in range(len(a)):\n        carry = 0\n        for j in range(len(b)):\n            carry += res[i+j] + a[i] * b[j]\n            res[i+j] = carry & PyLong_MASK\n            carry >>= PyLong_SHIFT\n        res[i+len(b)] = carry\n    ulong_unpad_(res)\n    return res\n\ndef ulong_powi(a: list, b: int):\n    # b >= 0\n    if b == 0: return [1]\n    res = [1]\n    while b:\n        if b & 1:\n            res = ulong_mul(res, a)\n        a = ulong_mul(a, a)\n        b >>= 1\n    return res\n\ndef ulong_repr(x: list) -> str:\n    res = []\n    while len(x)>1 or x[0]>0:   # non-zero\n        x, r = ulong_divmodi(x, PyLong_DECIMAL_BASE)\n        res.append(str(r).zfill(PyLong_DECIMAL_SHIFT))\n    res.reverse()\n    s = ''.join(res)\n    if len(s) == 0: return '0'\n    if len(s) > 1: s = s.lstrip('0')\n    return s\n\ndef ulong_fromstr(s: str):\n    if s[-1] == 'L':\n        s = s[:-1]\n    res, base = [0], [1]\n    if s[0] == '-':\n        sign = -1\n        s = s[1:]\n    else:\n        sign = 1\n    s = s[::-1]\n    for c in s:\n        c = ord(c) - 48\n        assert 0 <= c <= 9\n        res = ulong_add(res, ulong_muli(base, c))\n        base = ulong_muli(base, 10)\n    return res, sign\n\nclass long:\n    def __init__(self, x):\n        if type(x) is tuple:\n            self.digits, self.sign = x\n        elif type(x) is int:\n            self.digits, self.sign = ulong_fromint(x)\n        elif type(x) is float:\n            self.digits, self.sign = ulong_fromint(int(x))\n        elif type(x) is str:\n            self.digits, self.sign = ulong_fromstr(x)\n        elif type(x) is long:\n            self.digits, self.sign = x.digits.copy(), x.sign\n        else:\n            raise TypeError('expected int or str')\n        \n    def __len__(self):\n        return len(self.digits)\n\n    def __add__(self, other):\n        if type(other) is int:\n            other = long(other)\n        elif type(other) is not long:\n            return NotImplemented\n        if self.sign == other.sign:\n            return long((ulong_add(self.digits, other.digits), self.sign))\n        else:\n            cmp = ulong_cmp(self.digits, other.digits)\n            if cmp == 0:\n                return long(0)\n            if cmp > 0:\n                return long((ulong_sub(self.digits, other.digits), self.sign))\n            else:\n                return long((ulong_sub(other.digits, self.digits), other.sign))\n            \n    def __radd__(self, other):\n        return self.__add__(other)\n    \n    def __sub__(self, other):\n        if type(other) is int:\n            other = long(other)\n        elif type(other) is not long:\n            return NotImplemented\n        if self.sign != other.sign:\n            return long((ulong_add(self.digits, other.digits), self.sign))\n        cmp = ulong_cmp(self.digits, other.digits)\n        if cmp == 0:\n            return long(0)\n        if cmp > 0:\n            return long((ulong_sub(self.digits, other.digits), self.sign))\n        else:\n            return long((ulong_sub(other.digits, self.digits), -other.sign))\n            \n    def __rsub__(self, other):\n        if type(other) is int:\n            other = long(other)\n        elif type(other) is not long:\n            return NotImplemented\n        return other.__sub__(self)\n    \n    def __mul__(self, other):\n        if type(other) is int:\n            return long((\n                ulong_muli(self.digits, abs(other)),\n                self.sign * (1 if other >= 0 else -1)\n            ))\n        elif type(other) is long:\n            return long((\n                ulong_mul(self.digits, other.digits),\n                self.sign * other.sign\n            ))\n        return NotImplemented\n    \n    def __rmul__(self, other):\n        return self.__mul__(other)\n    \n    #######################################################\n    def __divmod__(self, other):\n        if type(other) is int:\n            assert self.sign == 1 and other > 0\n            q, r = ulong_divmodi(self.digits, other)\n            return long((q, 1)), r\n        if type(other) is long:\n            assert self.sign == 1 and other.sign == 1\n            q, r = ulong_divmod(self.digits, other.digits)\n            assert len(other)>1 or other.digits[0]>0\n            return long((q, 1)), long((r, 1))\n        raise NotImplementedError\n\n    def __floordiv__(self, other):\n        return self.__divmod__(other)[0]\n\n    def __mod__(self, other):\n        return self.__divmod__(other)[1]\n\n    def __pow__(self, other: int):\n        assert type(other) is int and other >= 0\n        if self.sign == -1 and other & 1:\n            sign = -1\n        else:\n            sign = 1\n        return long((ulong_powi(self.digits, other), sign))\n    \n    def __lshift__(self, other: int):\n        assert type(other) is int and other >= 0\n        x = self.digits.copy()\n        q, r = divmod(other, PyLong_SHIFT)\n        x = [0]*q + x\n        for _ in range(r): x = ulong_muli(x, 2)\n        return long((x, self.sign))\n    \n    def __rshift__(self, other: int):\n        assert type(other) is int and other >= 0\n        x = self.digits.copy()\n        q, r = divmod(other, PyLong_SHIFT)\n        x = x[q:]\n        if not x: return long(0)\n        for _ in range(r): x = ulong_floordivi(x, 2)\n        return long((x, self.sign))\n    \n    def __neg__(self):\n        return long((self.digits, -self.sign))\n    \n    def __cmp__(self, other):\n        if type(other) is int:\n            other = long(other)\n        elif type(other) is not long:\n            return NotImplemented\n        if self.sign > other.sign:\n            return 1\n        elif self.sign < other.sign:\n            return -1\n        else:\n            return ulong_cmp(self.digits, other.digits)\n        \n    def __eq__(self, other):\n        return self.__cmp__(other) == 0\n    def __ne__(self, other):\n        return self.__cmp__(other) != 0\n    def __lt__(self, other):\n        return self.__cmp__(other) < 0\n    def __le__(self, other):\n        return self.__cmp__(other) <= 0\n    def __gt__(self, other):\n        return self.__cmp__(other) > 0\n    def __ge__(self, other):\n        return self.__cmp__(other) >= 0\n            \n    def __repr__(self):\n        prefix = '-' if self.sign < 0 else ''\n        return prefix + ulong_repr(self.digits) + 'L'";
+const char kPythonLibs_operator[] = "# https://docs.python.org/3/library/operator.html#mapping-operators-to-functions\n\ndef le(a, b): return a <= b\ndef lt(a, b): return a < b\ndef ge(a, b): return a >= b\ndef gt(a, b): return a > b\ndef eq(a, b): return a == b\ndef ne(a, b): return a != b\n\ndef and_(a, b): return a & b\ndef or_(a, b): return a | b\ndef xor(a, b): return a ^ b\ndef invert(a): return ~a\ndef lshift(a, b): return a << b\ndef rshift(a, b): return a >> b\n\ndef is_(a, b): return a is b\ndef is_not(a, b): return a is not b\ndef not_(a): return not a\ndef truth(a): return bool(a)\ndef contains(a, b): return b in a\n\ndef add(a, b): return a + b\ndef sub(a, b): return a - b\ndef mul(a, b): return a * b\ndef truediv(a, b): return a / b\ndef floordiv(a, b): return a // b\ndef mod(a, b): return a % b\ndef pow(a, b): return a ** b\ndef neg(a): return -a\ndef matmul(a, b): return a @ b\n\ndef getitem(a, b): return a[b]\ndef setitem(a, b, c): a[b] = c\ndef delitem(a, b): del a[b]\n\ndef iadd(a, b): a += b; return a\ndef isub(a, b): a -= b; return a\ndef imul(a, b): a *= b; return a\ndef itruediv(a, b): a /= b; return a\ndef ifloordiv(a, b): a //= b; return a\ndef imod(a, b): a %= b; return a\n# def ipow(a, b): a **= b; return a\n# def imatmul(a, b): a @= b; return a\ndef iand(a, b): a &= b; return a\ndef ior(a, b): a |= b; return a\ndef ixor(a, b): a ^= b; return a\ndef ilshift(a, b): a <<= b; return a\ndef irshift(a, b): a >>= b; return a\n\nclass attrgetter:\n    def __init__(self, attr):\n        self.attr = attr\n    def __call__(self, obj):\n        return getattr(obj, self.attr)\n\nclass itemgetter:\n    def __init__(self, item):\n        self.item = item\n    def __call__(self, obj):\n        return obj[self.item]\n";
+const char kPythonLibs_typing[] = "class _Placeholder:\n    def __init__(self, *args, **kwargs):\n        pass\n    def __getitem__(self, *args):\n        return self\n    def __call__(self, *args, **kwargs):\n        return self\n    def __and__(self, other):\n        return self\n    def __or__(self, other):\n        return self\n    def __xor__(self, other):\n        return self\n\n\n_PLACEHOLDER = _Placeholder()\n\nSequence = _PLACEHOLDER\nList = _PLACEHOLDER\nDict = _PLACEHOLDER\nTuple = _PLACEHOLDER\nSet = _PLACEHOLDER\nAny = _PLACEHOLDER\nUnion = _PLACEHOLDER\nOptional = _PLACEHOLDER\nCallable = _PLACEHOLDER\nType = _PLACEHOLDER\nTypeAlias = _PLACEHOLDER\nNewType = _PLACEHOLDER\n\nClassVar = _PLACEHOLDER\n\nLiteral = _PLACEHOLDER\nLiteralString = _PLACEHOLDER\n\nIterable = _PLACEHOLDER\nGenerator = _PLACEHOLDER\nIterator = _PLACEHOLDER\n\nHashable = _PLACEHOLDER\n\nTypeVar = _PLACEHOLDER\nSelf = _PLACEHOLDER\n\nProtocol = object\nGeneric = object\nNever = object\n\nTYPE_CHECKING = False\n\n# decorators\noverload = lambda x: x\noverride = lambda x: x\nfinal = lambda x: x\n\n# exhaustiveness checking\nassert_never = lambda x: x\n\nTypedDict = dict\nNotRequired = _PLACEHOLDER\nReadOnly = _PLACEHOLDER\nRequired = _PLACEHOLDER\nTypeIs = _PLACEHOLDER\nTypeGuard = _PLACEHOLDER\n\ncast = lambda _, val: val\n";
 
 const char* load_kPythonLib(const char* name) {
     if (strchr(name, '.') != NULL) return NULL;
@@ -11313,7 +11362,8 @@ const char* load_kPythonLib(const char* name) {
     if (strcmp(name, "datetime") == 0) return kPythonLibs_datetime;
     if (strcmp(name, "functools") == 0) return kPythonLibs_functools;
     if (strcmp(name, "heapq") == 0) return kPythonLibs_heapq;
-    if (strcmp(name, "linalg") == 0) return kPythonLibs_linalg;
+    if (strcmp(name, "inspect") == 0) return kPythonLibs_inspect;
+    if (strcmp(name, "long_v1") == 0) return kPythonLibs_long_v1;
     if (strcmp(name, "operator") == 0) return kPythonLibs_operator;
     if (strcmp(name, "typing") == 0) return kPythonLibs_typing;
     return NULL;
@@ -11621,8 +11671,10 @@ c11_sv c11_sv__slice(c11_sv sv, int start) { return c11_sv__slice2(sv, start, sv
 
 c11_sv c11_sv__slice2(c11_sv sv, int start, int stop) {
     if(start < 0) start = 0;
-    if(stop < start) stop = start;
+    if(start > sv.size) start = sv.size;
+    if(stop < 0) stop = 0;
     if(stop > sv.size) stop = sv.size;
+    if(stop < start) stop = start;
     return (c11_sv){sv.data + start, stop - start};
 }
 
@@ -11730,6 +11782,47 @@ c11_vector /* T=c11_sv */ c11_sv__splitwhitespace(c11_sv self) {
     if(i <= self.size) {
         c11_sv tmp = {data + i, self.size - i};
         c11_vector__push(c11_sv, &retval, tmp);
+    }
+    return retval;
+}
+
+c11_vector /* T=c11_sv */ c11_sv__splitlines(c11_sv self, bool keepends) {
+    c11_vector retval;
+    c11_vector__ctor(&retval, sizeof(c11_sv));
+    const char* data = self.data;
+    int i = 0;
+    int eol = 0;
+    int eol_size = 1;
+    for(int j = 0; j < self.size; ) {
+        while(j < self.size) {
+            const char c = data[j];
+            eol_size = c11__u8_header(c, false);
+            if(c == '\n' || c == '\r' || c == '\v' || c == '\f' || c == '\x1c' || c == '\x1d' || c == '\x1e')
+                break;
+            else if(eol_size == 2 && j + 1 < self.size) {
+                if(c == '\xc2' && data[j+1] == '\x85')
+                    break;
+            }
+            else if(eol_size == 3 && j + 2 < self.size) {
+                if(c == '\xe2' && data[j+1] == '\x80' && (data[j+2] == '\xa8' || data[j+2] == '\xa9'))
+                    break;
+            }
+            j += eol_size;
+        }
+
+        eol = j;
+        if(j < self.size) {
+            // CRLF treated as one line break
+            if(data[j] == '\r' && j + 1 < self.size && data[j+1] == '\n')
+                j += 2;
+            else
+                j += eol_size;
+            if(keepends)
+                eol = j;
+        }
+        c11_sv tmp = {data + i, eol - i};
+        c11_vector__push(c11_sv, &retval, tmp);
+        i = j;
     }
     return retval;
 }
@@ -12514,7 +12607,6 @@ const static c11_u32_range kLoRanges[] = {
 // clang-format on
 
 bool c11__is_unicode_Lo_char(int c) {
-    if(c == 0x1f955) return true;
     const char* data =
         c11__search_u32_ranges(c, kLoRanges, sizeof(kLoRanges) / sizeof(c11_u32_range));
     return data != NULL;
@@ -13262,6 +13354,7 @@ int c11_socket_get_last_error(){
 #include <stdarg.h>
 #include <assert.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <ctype.h>
 
 void c11_sbuf__ctor(c11_sbuf* self) {
@@ -13308,21 +13401,23 @@ void c11_sbuf__write_f64(c11_sbuf* self, double val, int precision) {
     char b[32];
     int size;
     if(precision < 0) {
-        int prec = 17 - 1;  // std::numeric_limits<double>::max_digits10 == 17
-        size = snprintf(b, sizeof(b), "%.*g", prec, val);
-    } else {
-        int prec = precision;
-        size = snprintf(b, sizeof(b), "%.*f", prec, val);
-    }
-    c11_sbuf__write_cstr(self, b);
-    bool all_is_digit = true;
-    for(int i = 1; i < size; i++) {
-        if(!isdigit(b[i])) {
-            all_is_digit = false;
-            break;
+        for(int g = 15; g <= 17; g++) {
+            size = snprintf(b, sizeof(b), "%.*g", g, val);
+            if(strtod(b, NULL) == val) break;
         }
+        c11_sbuf__write_cstr(self, b);
+        bool all_is_digit = true;
+        for(int i = 1; i < size; i++) {
+            if(!isdigit(b[i])) {
+                all_is_digit = false;
+                break;
+            }
+        }
+        if(all_is_digit) c11_sbuf__write_cstr(self, ".0");
+    } else {
+        size = snprintf(b, sizeof(b), "%.*f", precision, val);
+        c11_sbuf__write_cstr(self, b);
     }
-    if(all_is_digit) c11_sbuf__write_cstr(self, ".0");
 }
 
 void c11_sbuf__write_sv(c11_sbuf* self, c11_sv sv) {
@@ -14350,10 +14445,11 @@ double dmath_log10(double x) {
 }
 
 double dmath_pow(double base, double exp) {
-    int exp_int = (int)exp;
+    int64_t exp_int = (int64_t)exp;
     if(exp_int == exp) {
         if(exp_int == 0) return 1;
         if(exp_int < 0) {
+			if(base == 0) return DMATH_NAN;
             base = 1 / base;
             exp_int = -exp_int;
         }
@@ -14366,6 +14462,7 @@ double dmath_pow(double base, double exp) {
         return res;
     }
     if (base > 0) {
+		if(base == 1.0) return 1.0;
         return dmath_exp(exp * dmath_log(base));
     }
     if (base == 0) {
@@ -14686,6 +14783,7 @@ static double zig_r64(double z) {
 
 // https://github.com/ziglang/zig/blob/master/lib/std/math/asin.zig
 double dmath_asin(double x) {
+	if(!(x >= -1 && x <= 1)) return DMATH_NAN;
     const double pio2_hi = 1.57079632679489655800e+00;
     const double pio2_lo = 6.12323399573676603587e-17;
 
@@ -14750,20 +14848,78 @@ double dmath_atan(double x) {
     return dmath_asin(x / dmath_sqrt(1 + x * x));
 }
 
-double dmath_atan2(double y, double x) {
-    if (x > 0) {
-        return dmath_atan(y / x);
-    } else if (x < 0 && y >= 0) {
-        return dmath_atan(y / x) + DMATH_PI;
-    } else if (x < 0 && y < 0) {
-        return dmath_atan(y / x) - DMATH_PI;
-    } else if (x == 0 && y > 0) {
-        return DMATH_PI / 2;
-    } else if (x == 0 && y < 0) {
-        return -DMATH_PI / 2;
-    } else {
-        return DMATH_NAN;
-    }
+double dmath_atan2(double y, double x)
+{
+	const double
+	pi     = 3.1415926535897931160E+00, /* 0x400921FB, 0x54442D18 */
+	pi_lo  = 1.2246467991473531772E-16; /* 0x3CA1A626, 0x33145C07 */
+
+	double z;
+	uint32_t m,lx,ly,ix,iy;
+
+	if (dmath_isnan(x) || dmath_isnan(y))
+		return x+y;
+
+	// EXTRACT_WORDS(ix, lx, x);
+	// EXTRACT_WORDS(iy, ly, y);
+	union Float64Bits ux = { .f = x }, uy = { .f = y };
+	ix = (uint32_t)(ux.i >> 32);
+	iy = (uint32_t)(uy.i >> 32);
+	lx = (uint32_t)(ux.i & 0xFFFFFFFF);
+	ly = (uint32_t)(uy.i & 0xFFFFFFFF);
+
+	if ((ix-0x3ff00000 | lx) == 0)  /* x = 1.0 */
+		return dmath_atan(y);
+	m = ((iy>>31)&1) | ((ix>>30)&2);  /* 2*sign(x)+sign(y) */
+	ix = ix & 0x7fffffff;
+	iy = iy & 0x7fffffff;
+
+	/* when y = 0 */
+	if ((iy|ly) == 0) {
+		switch(m) {
+		case 0:
+		case 1: return y;   /* atan(+-0,+anything)=+-0 */
+		case 2: return  pi; /* atan(+0,-anything) = pi */
+		case 3: return -pi; /* atan(-0,-anything) =-pi */
+		}
+	}
+	/* when x = 0 */
+	if ((ix|lx) == 0)
+		return m&1 ? -pi/2 : pi/2;
+	/* when x is INF */
+	if (ix == 0x7ff00000) {
+		if (iy == 0x7ff00000) {
+			switch(m) {
+			case 0: return  pi/4;   /* atan(+INF,+INF) */
+			case 1: return -pi/4;   /* atan(-INF,+INF) */
+			case 2: return  3*pi/4; /* atan(+INF,-INF) */
+			case 3: return -3*pi/4; /* atan(-INF,-INF) */
+			}
+		} else {
+			switch(m) {
+			case 0: return  0.0; /* atan(+...,+INF) */
+			case 1: return -0.0; /* atan(-...,+INF) */
+			case 2: return  pi;  /* atan(+...,-INF) */
+			case 3: return -pi;  /* atan(-...,-INF) */
+			}
+		}
+	}
+	/* |y/x| > 0x1p64 */
+	if (ix+(64<<20) < iy || iy == 0x7ff00000)
+		return m&1 ? -pi/2 : pi/2;
+
+	/* z = atan(|y/x|) without spurious underflow */
+	if ((m&2) && iy+(64<<20) < ix)  /* |y/x| < 0x1p-64, x<0 */
+		z = 0;
+	else
+		z = dmath_atan(dmath_fabs(y/x));
+	switch (m) {
+	case 0: return z;              /* atan(+,+) */
+	case 1: return -z;             /* atan(-,+) */
+	case 2: return pi - (z-pi_lo); /* atan(+,-) */
+	default: /* case 3 */
+		return (z-pi_lo) - pi; /* atan(-,-) */
+	}
 }
 
 ////////////////////////////////////////////////////////////////////
@@ -14790,6 +14946,8 @@ int dmath_isfinite(double x) {
 
 // https://github.com/kraj/musl/blob/kraj/master/src/math/fmod.c
 double dmath_fmod(double x, double y) {
+	if(y == 0) return DMATH_NAN;
+	
 	union Float64Bits ux = { .f = x }, uy = { .f = y };
 	int ex = ux.i>>52 & 0x7ff;
 	int ey = uy.i>>52 & 0x7ff;
@@ -14868,7 +15026,7 @@ double dmath_fabs(double x) {
 
 double dmath_ceil(double x) {
 	if(!dmath_isfinite(x)) return x;
-    int int_part = (int)x;
+    int64_t int_part = (int64_t)x;
     if (x > 0 && x != (double)int_part) {
         return (double)(int_part + 1);
     }
@@ -14877,7 +15035,7 @@ double dmath_ceil(double x) {
 
 double dmath_floor(double x) {
 	if(!dmath_isfinite(x)) return x;
-    int int_part = (int)x;
+    int64_t int_part = (int64_t)x;
     if (x < 0 && x != (double)int_part) {
         return (double)(int_part - 1);
     }
@@ -14885,7 +15043,7 @@ double dmath_floor(double x) {
 }
 
 double dmath_trunc(double x) {
-    return (double)((int)x);
+    return (double)((int64_t)x);
 }
 
 // https://github.com/kraj/musl/blob/kraj/master/src/math/modf.c
@@ -17011,7 +17169,9 @@ bool py_execo(const void* data, int size, const char* filename, py_Ref module) {
         CodeObject__dtor(&co);
         return ok;
     } else {
-        return RuntimeError("bad code object %s: %s", filename, err);
+        bool ok = RuntimeError("bad code object %s: %s", filename, err);
+        PK_FREE(err);
+        return ok;
     }
 }
 
@@ -18444,7 +18604,10 @@ static bool list_insert(int argc, py_Ref argv) {
     return true;
 }
 
-static int lt_with_key(py_TValue* a, py_TValue* b, py_TValue* key) {
+static int lt_with_key(const void* a_, const void* b_, void* extra) {
+    py_TValue* a = (py_TValue*)a_;
+    py_TValue* b = (py_TValue*)b_;
+    py_TValue* key = (py_TValue*)extra;
     if(!key) return py_less(a, b);
     VM* vm = pk_current_vm;
     // project a
@@ -18476,7 +18639,7 @@ static bool list_sort(int argc, py_Ref argv) {
     bool ok = c11__stable_sort(self->data,
                                self->length,
                                sizeof(py_TValue),
-                               (int (*)(const void*, const void*, void*))lt_with_key,
+                               lt_with_key,
                                key);
     if(!ok) return false;
 
@@ -18649,6 +18812,7 @@ void c11_dap_handle_setBreakpoints(py_Ref arguments, c11_sbuf* buffer) {
     const char* sourcename = c11_strdup(py_tostr(py_retval()));
     if(!py_smarteval("[bp['line'] for bp in _0['breakpoints']]", NULL, arguments)) {
         py_printexc();
+        PK_FREE((void*)sourcename);
         return;
     }
     int bp_numbers = c11_debugger_reset_breakpoints_by_source(sourcename);
@@ -20157,7 +20321,7 @@ static bool number__pow__(int argc, py_Ref argv) {
 
 static py_i64 i64_abs(py_i64 x) { return x < 0 ? -x : x; }
 
-static py_i64 cpy11__fast_floor_div(py_i64 a, py_i64 b) {
+py_i64 cpy11__int_floordiv(py_i64 a, py_i64 b) {
     assert(b != 0);
     if(a == 0) return 0;
     if((a < 0) == (b < 0)) {
@@ -20167,7 +20331,7 @@ static py_i64 cpy11__fast_floor_div(py_i64 a, py_i64 b) {
     }
 }
 
-static py_i64 cpy11__fast_mod(py_i64 a, py_i64 b) {
+py_i64 cpy11__int_mod(py_i64 a, py_i64 b) {
     assert(b != 0);
     if(a == 0) return 0;
     py_i64 res;
@@ -20180,7 +20344,7 @@ static py_i64 cpy11__fast_mod(py_i64 a, py_i64 b) {
 }
 
 // https://github.com/python/cpython/blob/3.11/Objects/floatobject.c#L677
-static void cpy11__float_div_mod(double vx, double wx, double *floordiv, double *mod)
+void cpy11__float_divmod(double vx, double wx, double *floordiv, double *mod)
 {
     double div;
     *mod = dmath_fmod(vx, wx);
@@ -20223,7 +20387,7 @@ static bool int__floordiv__(int argc, py_Ref argv) {
     if(py_isint(&argv[1])) {
         py_i64 rhs = py_toint(&argv[1]);
         if(rhs == 0) return ZeroDivisionError("integer division by zero");
-        py_newint(py_retval(), cpy11__fast_floor_div(lhs, rhs));
+        py_newint(py_retval(), cpy11__int_floordiv(lhs, rhs));
     } else {
         py_newnotimplemented(py_retval());
     }
@@ -20236,7 +20400,7 @@ static bool int__mod__(int argc, py_Ref argv) {
     if(py_isint(&argv[1])) {
         py_i64 rhs = py_toint(&argv[1]);
         if(rhs == 0) return ZeroDivisionError("integer modulo by zero");
-        py_newint(py_retval(), cpy11__fast_mod(lhs, rhs));
+        py_newint(py_retval(), cpy11__int_mod(lhs, rhs));
     } else {
         py_newnotimplemented(py_retval());
     }
@@ -20250,7 +20414,7 @@ static bool float__floordiv__(int argc, py_Ref argv) {
     if(try_castfloat(&argv[1], &rhs)) {
         if(rhs == 0.0) return ZeroDivisionError("float modulo by zero");
         double q, r;
-        cpy11__float_div_mod(lhs, rhs, &q, &r);
+        cpy11__float_divmod(lhs, rhs, &q, &r);
         py_newfloat(py_retval(), q);
         return true;
     }
@@ -20265,7 +20429,7 @@ static bool float__rfloordiv__(int argc, py_Ref argv) {
     if(try_castfloat(&argv[1], &lhs)) {
         if(rhs == 0.0) return ZeroDivisionError("float modulo by zero");
         double q, r;
-        cpy11__float_div_mod(lhs, rhs, &q, &r);
+        cpy11__float_divmod(lhs, rhs, &q, &r);
         py_newfloat(py_retval(), q);
         return true;
     }
@@ -20280,7 +20444,7 @@ static bool float__mod__(int argc, py_Ref argv) {
     if(try_castfloat(&argv[1], &rhs)) {
         if(rhs == 0.0) return ZeroDivisionError("float modulo by zero");
         double q, r;
-        cpy11__float_div_mod(lhs, rhs, &q, &r);
+        cpy11__float_divmod(lhs, rhs, &q, &r);
         py_newfloat(py_retval(), r);
         return true;
     }
@@ -20295,7 +20459,7 @@ static bool float__rmod__(int argc, py_Ref argv) {
     if(try_castfloat(&argv[1], &lhs)) {
         if(rhs == 0.0) return ZeroDivisionError("float modulo by zero");
         double q, r;
-        cpy11__float_div_mod(lhs, rhs, &q, &r);
+        cpy11__float_divmod(lhs, rhs, &q, &r);
         py_newfloat(py_retval(), r);
         return true;
     }
@@ -20310,7 +20474,7 @@ static bool float__divmod__(int argc, py_Ref argv) {
     if(try_castfloat(&argv[1], &rhs)) {
         if(rhs == 0.0) return ZeroDivisionError("float modulo by zero");
         double q, r;
-        cpy11__float_div_mod(lhs, rhs, &q, &r);
+        cpy11__float_divmod(lhs, rhs, &q, &r);
         py_Ref p = py_newtuple(py_retval(), 2);
         py_newfloat(&p[0], q);
         py_newfloat(&p[1], r);
@@ -20326,8 +20490,8 @@ static bool int__divmod__(int argc, py_Ref argv) {
     py_i64 rhs = py_toint(&argv[1]);
     if(rhs == 0) return ZeroDivisionError("integer division or modulo by zero");
     py_Ref p = py_newtuple(py_retval(), 2);
-    py_newint(&p[0], cpy11__fast_floor_div(lhs, rhs));
-    py_newint(&p[1], cpy11__fast_mod(lhs, rhs));
+    py_newint(&p[0], cpy11__int_floordiv(lhs, rhs));
+    py_newint(&p[1], cpy11__int_mod(lhs, rhs));
     return true;
 }
 
@@ -21115,7 +21279,8 @@ static bool str__getitem__(int argc, py_Ref argv) {
     py_Ref _1 = py_arg(1);
     if(_1->type == tp_int) {
         int index = py_toint(py_arg(1));
-        if(!pk__normalize_index(&index, self.size)) return false;
+        int u8_len = c11_sv__u8_length(self);
+        if(!pk__normalize_index(&index, u8_len)) return false;
         c11_sv res = c11_sv__u8_getitem(self, index);
         py_newstrv(py_retval(), res);
         return true;
@@ -21264,6 +21429,25 @@ static bool str_split(int argc, py_Ref argv) {
     for(int i = 0; i < res.length; i++) {
         c11_sv part = c11__getitem(c11_sv, &res, i);
         if(discard_empty && part.size == 0) continue;
+        py_newstrv(py_list_emplace(py_retval()), part);
+    }
+    c11_vector__dtor(&res);
+    return true;
+}
+
+static bool str_splitlines(int argc, py_Ref argv) {
+    c11_sv self = c11_string__sv(pk_tostr(&argv[0]));
+    c11_vector res;
+    bool keepends = false;
+    if(argc > 2) return TypeError("splitlines() takes at most 2 arguments");
+    if(argc == 2) {
+        if(!py_checkbool(&argv[1])) return false;
+        keepends = py_tobool(&argv[1]);
+    }
+    res = c11_sv__splitlines(self, keepends);
+    py_newlist(py_retval());
+    for(int i = 0; i < res.length; i++) {
+        c11_sv part = c11__getitem(c11_sv, &res, i);
         py_newstrv(py_list_emplace(py_retval()), part);
     }
     c11_vector__dtor(&res);
@@ -21526,6 +21710,7 @@ py_Type pk_str__register() {
     py_bindmethod(tp_str, "join", str_join);
     py_bindmethod(tp_str, "replace", str_replace);
     py_bindmethod(tp_str, "split", str_split);
+    py_bindmethod(tp_str, "splitlines", str_splitlines);
     py_bindmethod(tp_str, "count", str_count);
     py_bindmethod(tp_str, "strip", str_strip);
     py_bindmethod(tp_str, "lstrip", str_lstrip);
@@ -21701,6 +21886,7 @@ py_Type pk_bytes__register() {
 }
 
 #undef DEF_STR_CMP_OP
+
 // src/modules/json.c
 static bool json_loads(int argc, py_Ref argv) {
     PY_CHECK_ARGC(1);
@@ -21798,7 +21984,7 @@ static bool json__write_namedict_kv(py_Name k, py_Ref v, void* ctx_) {
 static bool json__write_object(c11_sbuf* buf, py_TValue* obj, int indent, int depth) {
     switch(obj->type) {
         case tp_NoneType: c11_sbuf__write_cstr(buf, "null"); return true;
-        case tp_int: c11_sbuf__write_int(buf, obj->_i64); return true;
+        case tp_int: c11_sbuf__write_i64(buf, obj->_i64); return true;
         case tp_float: {
             if(dmath_isnan(obj->_f64)) {
                 c11_sbuf__write_cstr(buf, "NaN");
@@ -22774,12 +22960,19 @@ static bool stdc_free(int argc, py_Ref argv) {
 
 static bool stdc_memcpy(int argc, py_Ref argv) {
     PY_CHECK_ARGC(3);
-    PY_CHECK_ARG_TYPE(0, tp_int);
-    PY_CHECK_ARG_TYPE(1, tp_int);
-    PY_CHECK_ARG_TYPE(2, tp_int);
+    PY_CHECK_ARG_TYPE(0, tp_int);   // dst
     void* dst = (void*)(intptr_t)py_toint(&argv[0]);
-    void* src = (void*)(intptr_t)py_toint(&argv[1]);
+    PY_CHECK_ARG_TYPE(2, tp_int);   // n
     py_i64 n = py_toint(&argv[2]);
+    void* src;
+    if(py_istype(&argv[1], tp_bytes)) {
+        int size;
+        src = py_tobytes(&argv[1], &size);
+        if(size < n) n = size;
+    } else {
+        PY_CHECK_ARG_TYPE(1, tp_int);   // src
+        src = (void*)(intptr_t)py_toint(&argv[1]);
+    }
     memcpy(dst, src, (size_t)n);
     py_newnone(py_retval());
     return true;
@@ -23597,6 +23790,15 @@ py_Type pk_super__register() {
         return true;                                                                               \
     }
 
+#define ONE_ARG_INT_FUNC(name, func)                                                               \
+    static bool math_##name(int argc, py_Ref argv) {                                               \
+        PY_CHECK_ARGC(1);                                                                          \
+        double x;                                                                                  \
+        if(!py_castfloat(py_arg(0), &x)) return false;                                             \
+        py_newint(py_retval(), (py_i64)func(x));                                                   \
+        return true;                                                                               \
+    }
+
 #define ONE_ARG_BOOL_FUNC(name, func)                                                              \
     static bool math_##name(int argc, py_Ref argv) {                                               \
         PY_CHECK_ARGC(1);                                                                          \
@@ -23616,10 +23818,10 @@ py_Type pk_super__register() {
         return true;                                                                               \
     }
 
-ONE_ARG_FUNC(ceil, dmath_ceil)
+ONE_ARG_INT_FUNC(ceil, dmath_ceil)
+ONE_ARG_INT_FUNC(floor, dmath_floor)
+ONE_ARG_INT_FUNC(trunc, dmath_trunc)
 ONE_ARG_FUNC(fabs, dmath_fabs)
-ONE_ARG_FUNC(floor, dmath_floor)
-ONE_ARG_FUNC(trunc, dmath_trunc)
 
 static bool math_fsum(int argc, py_Ref argv) {
     PY_CHECK_ARGC(1);
@@ -23675,6 +23877,10 @@ ONE_ARG_FUNC(exp, dmath_exp)
 static bool math_log(int argc, py_Ref argv) {
     double x;
     if(!py_castfloat(py_arg(0), &x)) return false;
+    if(x < 0) {
+        py_newfloat(py_retval(), DMATH_NAN);
+        return true;
+    }
     if(argc == 1) {
         py_newfloat(py_retval(), dmath_log(x));
     } else if(argc == 2) {
@@ -23689,9 +23895,7 @@ static bool math_log(int argc, py_Ref argv) {
 
 ONE_ARG_FUNC(log2, dmath_log2)
 ONE_ARG_FUNC(log10, dmath_log10)
-
 TWO_ARG_FUNC(pow, dmath_pow)
-
 ONE_ARG_FUNC(sqrt, dmath_sqrt)
 
 ONE_ARG_FUNC(acos, dmath_acos)
@@ -23720,8 +23924,8 @@ static bool math_radians(int argc, py_Ref argv) {
     return true;
 }
 
-TWO_ARG_FUNC(fmod, dmath_fmod)
 TWO_ARG_FUNC(copysign, dmath_copysign)
+TWO_ARG_FUNC(fmod, dmath_fmod)
 
 static bool math_modf(int argc, py_Ref argv) {
     PY_CHECK_ARGC(1);
@@ -23795,6 +23999,7 @@ void pk__add_module_math() {
 
 #undef ONE_ARG_FUNC
 #undef ONE_ARG_BOOL_FUNC
+#undef ONE_ARG_INT_FUNC
 #undef TWO_ARG_FUNC
 
 // src/modules/pickle.c
@@ -24293,10 +24498,10 @@ bool py_pickle_loads_body(const unsigned char* p, int memo_length, c11_smallmap_
 bool py_pickle_loads(const unsigned char* data, int size) {
     const unsigned char* p = data;
 
-    // \xf0\x9f\xa5\x95
-    if(size < 4 || p[0] != 240 || p[1] != 159 || p[2] != 165 || p[3] != 149)
+    // PK
+    if(size < 2 || p[0] != 'P' || p[1] != 'K')
         return ValueError("invalid pickle data");
-    p += 4;
+    p += 2;
 
     c11_smallmap_d2d type_mapping;
     c11_smallmap_d2d__ctor(&type_mapping);
@@ -24572,7 +24777,7 @@ bool py_pickle_loads_body(const unsigned char* p, int memo_length, c11_smallmap_
 static bool PickleObject__py_submit(PickleObject* self, py_OutRef out) {
     c11_sbuf cleartext;
     c11_sbuf__ctor(&cleartext);
-    c11_sbuf__write_cstr(&cleartext, "\xf0\x9f\xa5\x95");
+    c11_sbuf__write_cstr(&cleartext, "PK");
     // line 1: type mapping
     for(py_Type type = 0; type < self->used_types_length; type++) {
         if(self->used_types[type]) {
@@ -24654,15 +24859,90 @@ static bool inspect_is_user_defined_type(int argc, py_Ref argv) {
     return true;
 }
 
+static void set_annotation(py_OutRef out, const FuncDecl* decl, py_Name name) {
+    for(int i = 0; i < decl->annotations.length; i++) {
+        FuncDeclAnnotation* item = c11__at(FuncDeclAnnotation, (c11_vector*)&decl->annotations, i);
+        if(item->name == name) {
+            py_newstrv(out, c11_string__sv(item->hint));
+            return;
+        }
+    }
+    py_newnone(out);
+}
+
+// Fills a (name, kind, defaults, annotation) entry where `defaults`
+// is a 0- or 1-tuple and `annotation` is a str or None.
+static void set_param_entry(py_OutRef out,
+                            const FuncDecl* decl,
+                            py_Name name,
+                            int kind,
+                            const py_TValue* default_value) {
+    py_TValue* entry = py_newtuple(out, 4);
+    py_newstr(&entry[0], py_name2str(name));
+    py_newint(&entry[1], kind);
+    py_TValue* defaults = py_newtuple(&entry[2], default_value != NULL);
+    if(default_value) defaults[0] = *default_value;
+    set_annotation(&entry[3], decl, name);
+}
+
+// Returns ((name, kind, defaults, annotation), ...), return_annotation.
+static bool inspect__signature_data(int argc, py_Ref argv) {
+    PY_CHECK_ARGC(1);
+    if(!py_istype(argv, tp_function)) {
+        return ValueError("no signature found for '%t' object", argv->type);
+    }
+    Function* fn = py_touserdata(argv);
+    FuncDecl* decl = fn->decl;
+    const CodeObject* co = &decl->code;
+
+    bool has_starred_arg = decl->starred_arg != -1;
+    bool has_starred_kwarg = decl->starred_kwarg != -1;
+    int total = decl->args.length + decl->kwargs.length + (int)has_starred_arg +
+                (int)has_starred_kwarg;
+
+    py_TValue* result = py_newtuple(py_retval(), 2);
+    py_TValue* items = py_newtuple(&result[0], total);
+    int j = 0;
+    for(int i = 0; i < decl->args.length; i++) {
+        int32_t index = c11__getitem(int32_t, &decl->args, i);
+        py_Name name = c11__getitem(py_Name, &co->varnames, index);
+        set_param_entry(&items[j++], decl, name, 1, NULL);
+    }
+    if(has_starred_arg) {
+        py_Name name = c11__getitem(py_Name, &co->varnames, decl->starred_arg);
+        set_param_entry(&items[j++], decl, name, 2, NULL);
+    }
+    for(int i = 0; i < decl->kwargs.length; i++) {
+        FuncDeclKwArg* kv = c11__at(FuncDeclKwArg, &decl->kwargs, i);
+        // defaults after *args can only be passed by keyword
+        set_param_entry(&items[j++], decl, kv->key, has_starred_arg ? 3 : 1, &kv->value);
+    }
+    if(has_starred_kwarg) {
+        py_Name name = c11__getitem(py_Name, &co->varnames, decl->starred_kwarg);
+        set_param_entry(&items[j++], decl, name, 4, NULL);
+    }
+    set_annotation(&result[1], decl, py_name("return"));
+    return true;
+}
+
 void pk__add_module_inspect() {
     py_Ref mod = py_newmodule("inspect");
 
     py_bindfunc(mod, "isgeneratorfunction", inspect_isgeneratorfunction);
     py_bindfunc(mod, "is_user_defined_type", inspect_is_user_defined_type);
+    py_bindfunc(mod, "_signature_data", inspect__signature_data);
+
+    if(!py_exec(kPythonLibs_inspect, "inspect.py", EXEC_MODE, mod)) {
+        py_printexc();
+        c11__abort("failed to execute inspect.py");
+    }
 }
 
 // src/modules/vmath.c
 static bool isclose(float a, float b) { return dmath_fabs(a - b) < 1e-4; }
+
+py_i64 cpy11__int_floordiv(py_i64 a, py_i64 b);
+py_i64 cpy11__int_mod(py_i64 a, py_i64 b);
 
 #define DEFINE_VEC_FIELD(name, T, Tc, field)                                                       \
     static bool name##__##field(int argc, py_Ref argv) {                                           \
@@ -24860,7 +25140,7 @@ static py_Ref _const(py_Type type, const char* name) {
         float sum = 0;                                                                             \
         for(int i = 0; i < D; i++)                                                                 \
             sum += v.data[i] * v.data[i];                                                          \
-        py_newfloat(py_retval(), dmath_sqrt(sum));                                                \
+        py_newfloat(py_retval(), dmath_sqrt(sum));                                                 \
         return true;                                                                               \
     }                                                                                              \
     static bool vec##D##_length_squared(int argc, py_Ref argv) {                                   \
@@ -24890,7 +25170,7 @@ static py_Ref _const(py_Type type, const char* name) {
         for(int i = 0; i < D; i++)                                                                 \
             len += self.data[i] * self.data[i];                                                    \
         if(isclose(len, 0)) return ZeroDivisionError("cannot normalize zero vector");              \
-        len = dmath_sqrt(len);                                                                          \
+        len = dmath_sqrt(len);                                                                     \
         c11_vec##D res;                                                                            \
         for(int i = 0; i < D; i++)                                                                 \
             res.data[i] = self.data[i] / len;                                                      \
@@ -24970,7 +25250,17 @@ DEF_VECTOR_OPS(3)
         c11_vec##D##i a = py_tovec##D##i(&argv[0]);                                                \
         py_i64 b = py_toint(&argv[1]);                                                             \
         for(int i = 0; i < D; i++)                                                                 \
-            a.data[i] /= b;                                                                        \
+            a.data[i] = cpy11__int_floordiv(a.data[i], b);                                       \
+        py_newvec##D##i(py_retval(), a);                                                           \
+        return true;                                                                               \
+    }                                                                                              \
+    static bool vec##D##i##__mod__(int argc, py_Ref argv) {                                        \
+        PY_CHECK_ARGC(2);                                                                          \
+        PY_CHECK_ARG_TYPE(1, tp_int);                                                              \
+        c11_vec##D##i a = py_tovec##D##i(&argv[0]);                                                \
+        py_i64 b = py_toint(&argv[1]);                                                             \
+        for(int i = 0; i < D; i++)                                                                 \
+            a.data[i] = cpy11__int_mod(a.data[i], b);                                             \
         py_newvec##D##i(py_retval(), a);                                                           \
         return true;                                                                               \
     }
@@ -25037,7 +25327,8 @@ static bool vec2_angle_STATIC(int argc, py_Ref argv) {
     PY_CHECK_ARGC(2);
     PY_CHECK_ARG_TYPE(0, tp_vec2);
     PY_CHECK_ARG_TYPE(1, tp_vec2);
-    float val = dmath_atan2(argv[1]._vec2.y, argv[1]._vec2.x) - dmath_atan2(argv[0]._vec2.y, argv[0]._vec2.x);
+    float val = dmath_atan2(argv[1]._vec2.y, argv[1]._vec2.x) -
+                dmath_atan2(argv[0]._vec2.y, argv[0]._vec2.x);
     if(val > DMATH_PI) val -= 2 * (float)DMATH_PI;
     if(val < -DMATH_PI) val += 2 * (float)DMATH_PI;
     py_newfloat(py_retval(), val);
@@ -25893,6 +26184,7 @@ void pk__add_module_vmath() {
     py_bindmagic(vec2i, __sub__, vec2i__sub__);
     py_bindmagic(vec2i, __mul__, vec2i__mul__);
     py_bindmagic(vec2i, __floordiv__, vec2i__floordiv__);
+    py_bindmagic(vec2i, __mod__, vec2i__mod__);
     py_bindmagic(vec2i, __eq__, vec2i__eq__);
     py_bindmagic(vec2i, __ne__, vec2i__ne__);
     py_bindmagic(vec2i, __hash__, vec2i__hash__);
@@ -25918,6 +26210,7 @@ void pk__add_module_vmath() {
     py_bindmagic(vec3i, __sub__, vec3i__sub__);
     py_bindmagic(vec3i, __mul__, vec3i__mul__);
     py_bindmagic(vec3i, __floordiv__, vec3i__floordiv__);
+    py_bindmagic(vec3i, __mod__, vec3i__mod__);
     py_bindmagic(vec3i, __eq__, vec3i__eq__);
     py_bindmagic(vec3i, __ne__, vec3i__ne__);
     py_bindmagic(vec3i, __hash__, vec3i__hash__);
@@ -25945,6 +26238,7 @@ void pk__add_module_vmath() {
     py_bindmagic(vec4i, __sub__, vec4i__sub__);
     py_bindmagic(vec4i, __mul__, vec4i__mul__);
     py_bindmagic(vec4i, __floordiv__, vec4i__floordiv__);
+    py_bindmagic(vec4i, __mod__, vec4i__mod__);
     py_bindmagic(vec4i, __eq__, vec4i__eq__);
     py_bindmagic(vec4i, __ne__, vec4i__ne__);
     py_bindmagic(vec4i, __hash__, vec4i__hash__);
@@ -30051,6 +30345,7 @@ static bool io_FileIO__exit__(int argc, py_Ref argv) {
 
 static bool io_FileIO_read(int argc, py_Ref argv) {
     io_FileIO* ud = py_touserdata(py_arg(0));
+    if(ud->file == NULL) return ValueError("I/O operation on closed file");
     bool is_binary = ud->mode[strlen(ud->mode) - 1] == 'b';
     int size;
     if(argc == 1) {
@@ -30061,24 +30356,37 @@ static bool io_FileIO_read(int argc, py_Ref argv) {
     } else if(argc == 2) {
         PY_CHECK_ARG_TYPE(1, tp_int);
         size = py_toint(py_arg(1));
+        if (size < 0) {
+            long current = ftell(ud->file);
+            fseek(ud->file, 0, SEEK_END);
+            size = ftell(ud->file);
+            fseek(ud->file, current, SEEK_SET);
+        }
     } else {
         return TypeError("read() takes at most 2 arguments (%d given)", argc);
     }
     if(is_binary) {
         void* dst = py_newbytes(py_retval(), size);
-        int actual_size = fread(dst, 1, size, ud->file);
-        py_bytes_resize(py_retval(), actual_size);
+        if(size > 0) {
+            int actual_size = fread(dst, 1, size, ud->file);
+            py_bytes_resize(py_retval(), actual_size);
+        }
     } else {
-        void* dst = PK_MALLOC(size);
-        int actual_size = fread(dst, 1, size, ud->file);
-        py_newstrv(py_retval(), (c11_sv){dst, actual_size});
-        PK_FREE(dst);
+        if(size > 0) {
+            void* dst = PK_MALLOC(size);
+            int actual_size = fread(dst, 1, size, ud->file);
+            py_newstrv(py_retval(), (c11_sv){dst, actual_size});
+            PK_FREE(dst);
+        } else {
+            py_newstr(py_retval(), "");
+        }
     }
     return true;
 }
 
 static bool io_FileIO_tell(int argc, py_Ref argv) {
     io_FileIO* ud = py_touserdata(py_arg(0));
+    if(ud->file == NULL) return ValueError("I/O operation on closed file");
     py_newint(py_retval(), ftell(ud->file));
     return true;
 }
@@ -30088,6 +30396,7 @@ static bool io_FileIO_seek(int argc, py_Ref argv) {
     PY_CHECK_ARG_TYPE(1, tp_int);
     PY_CHECK_ARG_TYPE(2, tp_int);
     io_FileIO* ud = py_touserdata(py_arg(0));
+    if(ud->file == NULL) return ValueError("I/O operation on closed file");
     long cookie = py_toint(py_arg(1));
     int whence = py_toint(py_arg(2));
     py_newint(py_retval(), fseek(ud->file, cookie, whence));
@@ -30108,6 +30417,7 @@ static bool io_FileIO_close(int argc, py_Ref argv) {
 static bool io_FileIO_write(int argc, py_Ref argv) {
     PY_CHECK_ARGC(2);
     io_FileIO* ud = py_touserdata(py_arg(0));
+    if(ud->file == NULL) return ValueError("I/O operation on closed file");
     size_t written_size;
     if(ud->mode[strlen(ud->mode) - 1] == 'b') {
         PY_CHECK_ARG_TYPE(1, tp_bytes);
@@ -30126,6 +30436,7 @@ static bool io_FileIO_write(int argc, py_Ref argv) {
 static bool io_FileIO_flush(int argc, py_Ref argv) {
     PY_CHECK_ARGC(1);
     io_FileIO* ud = py_touserdata(py_arg(0));
+    if(ud->file == NULL) return ValueError("I/O operation on closed file");
     fflush(ud->file);
     py_newnone(py_retval());
     return true;
@@ -30133,8 +30444,8 @@ static bool io_FileIO_flush(int argc, py_Ref argv) {
 
 void pk__add_module_io() {
     py_Ref mod = py_newmodule("io");
-
-    py_Type FileIO = pk_newtype("FileIO", tp_object, mod, NULL, false, true);
+    py_Type FileIO = py_newtype("FileIO", tp_object, mod, NULL);
+    py_tpsetfinal(FileIO);
 
     py_bindmagic(FileIO, __new__, io_FileIO__new__);
     py_bindmagic(FileIO, __enter__, io_FileIO__enter__);
@@ -30422,13 +30733,13 @@ static bool lz4_compress(int argc, py_Ref argv) {
     PY_CHECK_ARG_TYPE(0, tp_bytes);
     int src_size;
     const void* src = py_tobytes(argv, &src_size);
-    int dst_capacity = LZ4_compressBound(src_size);
-    char* p = (char*)py_newbytes(py_retval(), sizeof(int) + dst_capacity);
-    memcpy(p, &src_size, sizeof(int));
-    char* dst = p + sizeof(int);
+    uint32_t dst_capacity = LZ4_compressBound(src_size);
+    char* p = (char*)py_newbytes(py_retval(), sizeof(uint32_t) + dst_capacity);
+    memcpy(p, &src_size, sizeof(uint32_t));
+    char* dst = p + sizeof(uint32_t);
     int dst_size = LZ4_compress_default(src, dst, src_size, dst_capacity);
     if(dst_size <= 0) return ValueError("LZ4 compression failed");
-    py_bytes_resize(py_retval(), sizeof(int) + dst_size);
+    py_bytes_resize(py_retval(), sizeof(uint32_t) + dst_size);
     return true;
 }
 
@@ -30436,15 +30747,16 @@ static bool lz4_decompress(int argc, py_Ref argv) {
     PY_CHECK_ARGC(1);
     PY_CHECK_ARG_TYPE(0, tp_bytes);
     int total_size;
-    const int* p = (int*)py_tobytes(argv, &total_size);
+    const uint32_t* p = (uint32_t*)py_tobytes(argv, &total_size);
     const char* src = (const char*)(p + 1);
-    if(total_size < sizeof(int)) return ValueError("invalid LZ4 data");
-    int uncompressed_size = *p;
-    if(uncompressed_size < 0) return ValueError("invalid LZ4 data");
+    if(total_size < sizeof(uint32_t)) return ValueError("invalid LZ4 data");
+    uint32_t uncompressed_size;
+    memcpy(&uncompressed_size, p, sizeof(uint32_t));
+    if(uncompressed_size >= INT32_MAX) return ValueError("invalid LZ4 data");
     char* dst = (char*)py_newbytes(py_retval(), uncompressed_size);
-    int dst_size = LZ4_decompress_safe(src, dst, total_size - sizeof(int), uncompressed_size);
+    int dst_size = LZ4_decompress_safe(src, dst, total_size - sizeof(uint32_t), uncompressed_size);
     if(dst_size < 0) return ValueError("LZ4 decompression failed");
-    assert(dst_size == uncompressed_size);
+    c11__rtassert(dst_size == uncompressed_size);
     return true;
 }
 
@@ -30637,6 +30949,33 @@ static bool gc_setup_debug_callback(int argc, py_Ref argv) {
     return true;
 }
 
+static bool gc_is_tracked(int argc, py_Ref argv) {
+    PY_CHECK_ARGC(1);
+    if(!argv->is_ptr) {
+        py_newbool(py_retval(), false);
+        return true;
+    }
+    bool res = !(argv->_obj->gc_marked & 0b10);
+    py_newbool(py_retval(), res);
+    return true;
+}
+
+static bool gc_track(int argc, py_Ref argv) {
+    PY_CHECK_ARGC(1);
+    if(!argv->is_ptr) return TypeError("gc.track() only accepts objects");
+    argv->_obj->gc_marked &= 0b01;
+    py_newnone(py_retval());
+    return true;
+}
+
+static bool gc_untrack(int argc, py_Ref argv) {
+    PY_CHECK_ARGC(1);
+    if(!argv->is_ptr) return TypeError("gc.untrack() only accepts objects");
+    argv->_obj->gc_marked |= 0b10;
+    py_newnone(py_retval());
+    return true;
+}
+
 void pk__add_module_gc() {
     py_Ref mod = py_newmodule("gc");
 
@@ -30647,6 +30986,10 @@ void pk__add_module_gc() {
     py_bindfunc(mod, "collect", gc_collect);
     py_bindfunc(mod, "collect_hint", gc_collect_hint);
     py_bindfunc(mod, "setup_debug_callback", gc_setup_debug_callback);
+
+    py_bindfunc(mod, "is_tracked", gc_is_tracked);
+    py_bindfunc(mod, "track", gc_track);
+    py_bindfunc(mod, "untrack", gc_untrack);
 }
 
 // src/compiler/lexer.c
@@ -30768,15 +31111,15 @@ static void add_token_with_value(Lexer* self, TokenIndex type, TokenValue value)
        type == TK_DEF) {
         // remove previous async token
         self->nexts.length--;
-        
+
         Token deco = *back;
         deco.type = TK_DECORATOR;
         c11_vector__push(Token, &self->nexts, deco);
-        
+
         Token id = *back;
         id.type = TK_ID;
         c11_vector__push(Token, &self->nexts, id);
-        
+
         Token eol = *back;
         eol.type = TK_EOL;
         c11_vector__push(Token, &self->nexts, eol);
@@ -30866,7 +31209,8 @@ static Error* LexerError(Lexer* self, const char* fmt, ...) {
     err->src = self->src;
     PK_INCREF(self->src);
     err->lineno = self->current_line;
-    if(*self->curr_char == '\n') { err->lineno--; }
+    const char* end = self->src->source->data + self->src->source->size;
+    if(self->curr_char <= end && *self->curr_char == '\n') { err->lineno--; }
     va_list args;
     va_start(args, fmt);
     vsnprintf(err->msg, sizeof(err->msg), fmt, args);
@@ -31146,7 +31490,11 @@ static Error* lex_one_token(Lexer* self, bool* eof, bool is_fstring) {
                     // BUG: f"{stack[2:]}"
                     return eat_fstring_spec(self, eof);
                 }
-                add_token(self, TK_COLON);
+                if(matchchar(self, '=')) {
+                    add_token(self, TK_WALRUS);
+                } else {
+                    add_token(self, TK_COLON);
+                }
                 return NULL;
             }
             case ';': add_token(self, TK_SEMICOLON); return NULL;
@@ -31371,6 +31719,7 @@ const char* TokenSymbols[] = {
     ">=",
     "<=",
     "~",
+    ":=",
     /** KW_BEGIN **/
     // NOTE: These keywords should be sorted in ascending order!!
     "False",
@@ -32118,6 +32467,36 @@ GroupedExpr* GroupedExpr__new(int line, Expr* child) {
     self->vt = &Vt;
     self->line = line;
     self->child = child;
+    return self;
+}
+
+// NamedExpr: walrus operator (x := expr)
+typedef struct NamedExpr {
+    EXPR_COMMON_HEADER
+    NameExpr* name;
+    Expr* rhs;
+} NamedExpr;
+
+static void NamedExpr__dtor(Expr* self_) {
+    NamedExpr* self = (NamedExpr*)self_;
+    vtdelete((Expr*)self->name);
+    vtdelete(self->rhs);
+}
+
+static void NamedExpr__emit_(Expr* self_, Ctx* ctx) {
+    NamedExpr* self = (NamedExpr*)self_;
+    vtemit_(self->rhs, ctx);                              // [value]
+    Ctx__emit_(ctx, OP_DUP_TOP, BC_NOARG, self->line);   // [value, value]
+    vtemit_store((Expr*)self->name, ctx);                 // [value]
+}
+
+static NamedExpr* NamedExpr__new(int line, NameExpr* name, Expr* rhs) {
+    const static ExprVt Vt = {.dtor = NamedExpr__dtor, .emit_ = NamedExpr__emit_};
+    NamedExpr* self = PK_MALLOC(sizeof(NamedExpr));
+    self->vt = &Vt;
+    self->line = line;
+    self->name = name;
+    self->rhs = rhs;
     return self;
 }
 
@@ -33084,6 +33463,22 @@ static Error* exprAnd(Compiler* self) {
     return NULL;
 }
 
+static Error* exprWalrus(Compiler* self) {
+    Error* err;
+    int line = prev()->line;
+    // LHS is on the stack; verify it's a simple name
+    Expr* lhs = Ctx__s_top(ctx());
+    if(!lhs->vt->is_name) {
+        return SyntaxError(self, "':=' target must be a simple name");
+    }
+    check(parse_expression(self, PREC_NAMED_EXPR + 1, false));
+    Expr* rhs = Ctx__s_popx(ctx());
+    NameExpr* name = (NameExpr*)Ctx__s_popx(ctx());
+    NamedExpr* e = NamedExpr__new(line, name, rhs);
+    Ctx__s_push(ctx(), (Expr*)e);
+    return NULL;
+}
+
 static Error* exprTernary(Compiler* self) {
     // [true_expr]
     Error* err;
@@ -33726,7 +34121,11 @@ static Error* _compile_f_args(Compiler* self, FuncDecl* decl, bool is_lambda) {
         }
 
         // eat type hints
-        if(!is_lambda && match(TK_COLON)) check(consume_type_hints(self));
+        if(!is_lambda && match(TK_COLON)) {
+            c11_sv hint;
+            check(consume_type_hints_sv(self, &hint));
+            FuncDecl__add_annotation(decl, name, hint);
+        }
         if(state == 0 && curr()->type == TK_ASSIGN) state = 2;
         switch(state) {
             case 0: FuncDecl__add_arg(decl, name); break;
@@ -33775,7 +34174,11 @@ static Error* compile_function(Compiler* self, int decorators) {
         check(_compile_f_args(self, decl, false));
         consume(TK_RPAREN);
     }
-    if(match(TK_ARROW)) check(consume_type_hints(self));
+    if(match(TK_ARROW)) {
+        c11_sv hint;
+        check(consume_type_hints_sv(self, &hint));
+        FuncDecl__add_annotation(decl, py_name("return"), hint);
+    }
     check(compile_block_body(self));
     check(pop_context(self));
 
@@ -34381,6 +34784,7 @@ const static PrattRule rules[TK__COUNT__] = {
     [TK_AND_KW ] =     { NULL,          exprAnd,            PREC_LOGICAL_AND   },
     [TK_OR_KW] =       { NULL,          exprOr,             PREC_LOGICAL_OR    },
     [TK_NOT_KW] =      { exprNot,       NULL,               PREC_LOGICAL_NOT   },
+    [TK_WALRUS] =      { NULL,          exprWalrus,         PREC_NAMED_EXPR    },
     [TK_TRUE] =        { exprLiteral0 },
     [TK_FALSE] =       { exprLiteral0 },
     [TK_NONE] =        { exprLiteral0 },

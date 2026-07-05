@@ -11,18 +11,22 @@
 
 // clang-format off
 
-#define PK_VERSION				"2.1.8"
+#define PK_VERSION				"2.1.9"
 #define PK_VERSION_MAJOR            2
 #define PK_VERSION_MINOR            1
-#define PK_VERSION_PATCH            8
+#define PK_VERSION_PATCH            9
 
 /*************** feature settings ***************/
 #ifndef PK_ENABLE_OS                // can be overridden by cmake
 #define PK_ENABLE_OS                1
 #endif
 
-#ifndef PK_ENABLE_THREADS           // can be overridden by cmake
-#define PK_ENABLE_THREADS           1
+#ifndef PK_ENABLE_THREADS           // must be enabled from cmake
+#define PK_ENABLE_THREADS           0
+#endif
+
+#ifndef PK_ENABLE_DLL               // must be enabled from cmake
+#define PK_ENABLE_DLL               0
 #endif
 
 #ifndef PK_ENABLE_DETERMINISM       // must be enabled from cmake
@@ -1034,6 +1038,9 @@ PK_API char* py_profiler_report();
 /************* Others *************/
 int64_t time_ns();
 int64_t time_monotonic_ns();
+py_i64 cpy11__int_floordiv(py_i64 a, py_i64 b);
+py_i64 cpy11__int_mod(py_i64 a, py_i64 b);
+void cpy11__float_divmod(double vx, double wx, double *floordiv, double *mod);
 
 /// An utility function to read a line from stdin for REPL.
 PK_API int py_replinput(char* buf, int max_size);
