@@ -19,7 +19,7 @@ public class AsyncTask {
     internal var task: Task<Void, Never>?
 
     internal var iterator: PyObject?
-    internal var result: PyObject?
+    public var result: PyObject?
 
     private init(task: @escaping () async -> Void) {
         self.task = Task { [self] in

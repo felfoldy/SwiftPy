@@ -8424,10 +8424,11 @@ bool generator__next__(int argc, py_Ref argv) {
     if(ud->state == 2) return StopIteration();
 
     // reset frame->p0
-    assert(!ud->frame->is_locals_special);
-    int locals_offset = ud->frame->locals - ud->frame->p0;
-    ud->frame->p0 = py_peek(0);
-    ud->frame->locals = ud->frame->p0 + locals_offset;
+    if(!ud->frame->is_locals_special) {
+        int locals_offset = ud->frame->locals - ud->frame->p0;
+        ud->frame->locals = p0 + locals_offset;
+    }
+    ud->frame->p0 = p0;
     
     // restore the context
     py_Ref backup = py_getslot(argv, 0);
@@ -17054,6 +17055,10 @@ bool pk_exec(CodeObject* co, py_Ref module) {
     VM__push_frame(vm, frame);
     FrameResult res = VM__run_top_frame(vm);
     if(res == RES_ERROR) return false;
+    if(res == RES_YIELD) {
+        VM__pop_frame(vm);
+        return RuntimeError("top-level 'yield' requires exec()");
+    }
     assert(res == RES_RETURN);
     return true;
 }
@@ -17085,6 +17090,10 @@ bool pk_execdyn(CodeObject* co, py_Ref module, py_Ref globals, py_Ref locals) {
     VM__push_frame(vm, frame);
     FrameResult res = VM__run_top_frame(vm);
     if(res == RES_ERROR) return false;
+    if(res == RES_YIELD) {
+        VM__pop_frame(vm);
+        return RuntimeError("top-level 'yield' requires exec()");
+    }
     assert(res == RES_RETURN);
     return true;
 }
@@ -23539,9 +23548,51 @@ static bool _builtins_execdyn(const char* title, int argc, py_Ref argv, enum py_
     py_Frame* frame = pk_current_vm->top_frame;
     // [globals, locals, code]
     CodeObject* code = py_touserdata(py_peek(-1));
+
+    if(mode == EXEC_MODE) {
+        c11__foreach(Bytecode, &code->codes, bc) {
+            if(bc->op != OP_YIELD_VALUE && bc->op != OP_FOR_ITER_YIELD_VALUE) continue;
+            // the code can yield at top level: return a suspended generator instead of
+            // executing; the slots anchor the values the suspended frame borrows
+            // (0 = stack backup, 1 = code, 2 = globals, 3 = locals)
+            if(!code->src->is_dynamic && argc != 1) {
+                return ValueError(
+                    "code object is not dynamic, `globals` and `locals` must not be specified");
+            }
+            VM* vm = pk_current_vm;
+            py_Ref out = py_retval();
+            Generator* ud = py_newobject(out, tp_generator, 4, sizeof(Generator));
+            ud->frame = NULL;
+            ud->state = 0;
+            py_newlist(py_getslot(out, 0));
+            py_setslot(out, 1, py_peek(-1));
+            py_Ref globals = py_peek(-3);
+            if(globals->type == tp_namedict) globals = py_getslot(globals, 0);
+            if(globals->type != tp_module && !py_istype(globals, tp_dict)) {
+                return TypeError("globals must be a dict object");
+            }
+            py_setslot(out, 2, globals);
+            py_Ref locals = py_NIL();
+            switch(py_peek(-2)->type) {
+                case tp_dict:
+                    py_setslot(out, 3, py_peek(-2));
+                    locals = py_getslot(out, 3);
+                    break;
+                case tp_locals:  // caller-frame locals cannot outlive suspension
+                case tp_nil: break;
+                default: return TypeError("locals must be a dict object");
+            }
+            py_GlobalRef module = frame ? frame->module : vm->main;
+            ud->frame = Frame__new(code, vm->stack.sp, module, py_getslot(out, 2), locals, true);
+            py_shrink(3);
+            return true;
+        }
+    }
+
     if(code->src->is_dynamic) {
         bool ok = pk_execdyn(code, frame ? frame->module : NULL, py_peek(-3), py_peek(-2));
         py_shrink(3);
+        if(mode == EXEC_MODE) py_newnone(py_retval());
         return ok;
     } else {
         if(argc != 1) {
@@ -23550,14 +23601,13 @@ static bool _builtins_execdyn(const char* title, int argc, py_Ref argv, enum py_
         }
         bool ok = pk_exec(code, frame ? frame->module : NULL);
         py_shrink(3);
+        if(mode == EXEC_MODE) py_newnone(py_retval());
         return ok;
     }
 }
 
 static bool builtins_exec(int argc, py_Ref argv) {
-    bool ok = _builtins_execdyn("exec", argc, argv, EXEC_MODE);
-    py_newnone(py_retval());
-    return ok;
+    return _builtins_execdyn("exec", argc, argv, EXEC_MODE);
 }
 
 static bool builtins_eval(int argc, py_Ref argv) {
@@ -24859,7 +24909,7 @@ static bool inspect_is_user_defined_type(int argc, py_Ref argv) {
     return true;
 }
 
-static void set_annotation(py_OutRef out, const FuncDecl* decl, py_Name name) {
+static void inspect_signature_annotation(py_OutRef out, const FuncDecl* decl, py_Name name) {
     for(int i = 0; i < decl->annotations.length; i++) {
         FuncDeclAnnotation* item = c11__at(FuncDeclAnnotation, (c11_vector*)&decl->annotations, i);
         if(item->name == name) {
@@ -24870,19 +24920,14 @@ static void set_annotation(py_OutRef out, const FuncDecl* decl, py_Name name) {
     py_newnone(out);
 }
 
-// Fills a (name, kind, defaults, annotation) entry where `defaults`
-// is a 0- or 1-tuple and `annotation` is a str or None.
-static void set_param_entry(py_OutRef out,
-                            const FuncDecl* decl,
-                            py_Name name,
-                            int kind,
-                            const py_TValue* default_value) {
+static void inspect_signature_entry(py_OutRef out, const FuncDecl* decl, py_Name name, int kind,
+                                    const py_TValue* default_value) {
     py_TValue* entry = py_newtuple(out, 4);
     py_newstr(&entry[0], py_name2str(name));
     py_newint(&entry[1], kind);
     py_TValue* defaults = py_newtuple(&entry[2], default_value != NULL);
     if(default_value) defaults[0] = *default_value;
-    set_annotation(&entry[3], decl, name);
+    inspect_signature_annotation(&entry[3], decl, name);
 }
 
 // Returns ((name, kind, defaults, annotation), ...), return_annotation.
@@ -24906,22 +24951,22 @@ static bool inspect__signature_data(int argc, py_Ref argv) {
     for(int i = 0; i < decl->args.length; i++) {
         int32_t index = c11__getitem(int32_t, &decl->args, i);
         py_Name name = c11__getitem(py_Name, &co->varnames, index);
-        set_param_entry(&items[j++], decl, name, 1, NULL);
+        inspect_signature_entry(&items[j++], decl, name, 1, NULL);
     }
     if(has_starred_arg) {
         py_Name name = c11__getitem(py_Name, &co->varnames, decl->starred_arg);
-        set_param_entry(&items[j++], decl, name, 2, NULL);
+        inspect_signature_entry(&items[j++], decl, name, 2, NULL);
     }
     for(int i = 0; i < decl->kwargs.length; i++) {
         FuncDeclKwArg* kv = c11__at(FuncDeclKwArg, &decl->kwargs, i);
         // defaults after *args can only be passed by keyword
-        set_param_entry(&items[j++], decl, kv->key, has_starred_arg ? 3 : 1, &kv->value);
+        inspect_signature_entry(&items[j++], decl, kv->key, has_starred_arg ? 3 : 1, &kv->value);
     }
     if(has_starred_kwarg) {
         py_Name name = c11__getitem(py_Name, &co->varnames, decl->starred_kwarg);
-        set_param_entry(&items[j++], decl, name, 4, NULL);
+        inspect_signature_entry(&items[j++], decl, name, 4, NULL);
     }
-    set_annotation(&result[1], decl, py_name("return"));
+    inspect_signature_annotation(&result[1], decl, py_name("return"));
     return true;
 }
 
@@ -33947,7 +33992,6 @@ static Error* compile_for_loop(Compiler* self) {
 
 static Error* compile_yield_from(Compiler* self, int kw_line) {
     Error* err;
-    if(self->contexts.length <= 1) return SyntaxError(self, "'yield from' outside function");
     check(EXPR_TUPLE(self));
     Ctx__s_emit_top(ctx());
     Ctx__emit_(ctx(), OP_GET_ITER, BC_NOARG, kw_line);
@@ -34501,7 +34545,6 @@ static Error* compile_stmt(Compiler* self) {
             break;
         }
         case TK_YIELD:
-            if(self->contexts.length <= 1) return SyntaxError(self, "'yield' outside function");
             if(match_end_stmt(self)) {
                 Ctx__emit_(ctx(), OP_YIELD_VALUE, 1, kw_line);
             } else {
