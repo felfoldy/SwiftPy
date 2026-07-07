@@ -13,28 +13,6 @@ import Testing
 struct AsyncTests {
     let main = py.main
     
-    @Test func codeToRun() {
-
-        let parsed = AsyncParser("""
-        await URL.download()
-        print('finished')
-        """)
-
-        #expect(parsed.code == "URL.download()")
-        #expect(parsed.continuationCode == "print('finished')")
-    }
-    
-    @Test func result() {
-        let parsed = AsyncParser("""
-        result = await async_func()
-        print(result)
-        """)
-
-        #expect(parsed.code == "async_func()")
-        #expect(parsed.continuationCode == "print(result)")
-        #expect(parsed.call == .awaiting(resultName: "result"))
-    }
-    
     @Test func asyncRun() async {
         main.def("async_func() -> AsyncTask") { argc, argv in
             PyBind.function(argc, argv) {

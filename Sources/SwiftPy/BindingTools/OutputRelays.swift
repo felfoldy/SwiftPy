@@ -63,14 +63,22 @@ public struct OutputRelays {
         let connection = interpreter.connection
         
         outputRelayHandler = OutputRelayHandler(stream: STDOUT_FILENO) { value in
+            #if DEBUG
+            let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+            if trimmed.hasPrefix("WARNING MISSING STYLE") {
+                return
+            }
+            #endif
             connection.send(id: 0, .stdout(text: value))
         }
 
         errorRelayHandler = OutputRelayHandler(stream: STDERR_FILENO) { value in
+            #if DEBUG
             let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
-            if filterOSLog, trimmed.hasPrefix("OSLOG") {
+            if trimmed.hasPrefix("OSLOG") {
                 return
             }
+            #endif
             connection.send(id: 0, .stderr(text: value))
         }
     }

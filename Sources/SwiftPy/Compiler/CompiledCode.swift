@@ -7,9 +7,13 @@
 
 import Foundation
 
-/// The result of compiling async-aware Python: either plain compiled code to
-/// run directly, or an ``AsyncCode`` await chain to drive asynchronously.
-public enum CompiledCode: Sendable {
-    case plain(PyObject, mode: CompileMode)
-    case async(AsyncCode)
+/// Compiled Python code ready to execute.
+public struct CompiledCode: Sendable {
+    let code: PyObject
+    let mode: CompileMode
+
+    init(_ code: PyObject, mode: CompileMode) {
+        self.code = code
+        self.mode = mode
+    }
 }

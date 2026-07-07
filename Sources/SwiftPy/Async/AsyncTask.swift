@@ -36,41 +36,34 @@ public class AsyncTask {
         }
     }
 
-    init(generator: PyObject) throws {
-        let context = AsyncCode.current
+    init(generator: PyObject) throws(PythonError) {
         iterator = try py.retain(py.iter(generator.reference))
 
-        // Child tasks created in the loop must not inherit this generator's
-        // context, otherwise they would resume its continuation a second time.
-        self.task = AsyncCode.$current.withValue(nil) {
-            Task { [self] in
-                do {
-                    while !isDone {
-                        guard let iterator else {
-                            throw PythonError.AssertionError("Iterator is missing")
-                        }
-
-                        do {
-                            let next = try py.next(iterator.reference)
-
-                            // Fix a loop if any child task fails.
-                            if let child = AsyncTask(next) {
-                                Interpreter.onDisplay(child.body())
-                                _ = await child.task?.value
-                                child.isDone = true
-                            } else {
-                                try await Task.sleep(nanoseconds: 1)
-                            }
-                        } catch let PythonError.StopIteration(result) {
-                            let object = py.retain(result)
-                            self.result = object
-                            self.isDone = true
-                            await context?.complete(result: object)
-                        }
+        self.task = Task { [self] in
+            do {
+                while !isDone {
+                    guard let iterator else {
+                        throw PythonError.AssertionError("Iterator is missing")
                     }
-                } catch {
-                    context?.completion?()
+
+                    do {
+                        let next = try py.next(iterator.reference)
+
+                        // Fix a loop if any child task fails.
+                        if let child = AsyncTask(next) {
+                            Interpreter.onDisplay(child.body())
+                            _ = await child.task?.value
+                            child.isDone = true
+                        } else {
+                            try await Task.sleep(nanoseconds: 1)
+                        }
+                    } catch let PythonError.StopIteration(result) {
+                        self.result = py.retain(result)
+                        self.isDone = true
+                    }
                 }
+            } catch {
+                // iteration ended with an error
             }
         }
     }
@@ -101,33 +94,21 @@ public class AsyncTask {
 
 extension AsyncTask {
     public convenience init(_ task: @escaping () async throws -> Void) {
-        let context = AsyncCode.current
-        
         self.init {
             do {
                 try await task()
-                await context?.complete(result: nil)
             } catch {
                 log.critical("\(error.localizedDescription)")
-                context?.completion?()
             }
         }
     }
     
     public convenience init<T: PythonConvertible>(_ task: @escaping () async throws -> T) where T: Sendable {
-        let context = AsyncCode.current
-
         self.init(returns: { () async -> T? in
             do {
-                let result = try await task()
-
-                await context?.complete(result: py.retain(result))
-
-                return result
+                return try await task()
             } catch {
                 Interpreter.shared.connection.send(id: 0, .stderr(text: error.localizedDescription))
-                context?.completion?()
-
                 return nil
             }
         })

@@ -82,6 +82,15 @@ public final class Interpreter {
         bindModule("rlcompleter", in: .module)
     }
 
+    func compile(
+        _ source: String,
+        filename: String = "<string>",
+        mode: CompileMode = .execution
+    ) throws(PythonError) -> CompiledCode {
+        let compiledCode = PyObject(try py.compile(source: source, filename: filename, mode: mode))
+        return CompiledCode(compiledCode, mode: mode)
+    }
+
     @discardableResult
     func execute(_ code: PyObject, mode: CompileMode = .execution) throws(PythonError) -> PyObject {
         let retval = try PyAPI.convertRetval(code.reference) { code in
@@ -155,36 +164,32 @@ public extension Interpreter {
     
     /// Executes compiled code synchronously.
     ///
-    /// Only plain code can be run synchronously; passing asynchronous code
-    /// throws an error. Use the `async` overload to run async code.
     /// Use ``compile(_:filename:mode:)`` to produce the ``CompiledCode``.
     ///
     /// - Parameter code: The compiled code to execute.
-    /// - Throws: A ``PythonError`` if the code is asynchronous or execution fails.
+    /// - Throws: A ``PythonError`` if execution fails.
+    @discardableResult
     static func execute(_ code: CompiledCode) throws(PythonError) -> PyObject? {
-        if case let .plain(code, mode) = code {
-            return try shared.execute(code, mode: mode)
-        }
-        throw .AssertionError("Cannot execute async code")
+        try shared.execute(code.code, mode: code.mode)
     }
 
-    /// Executes compiled code, awaiting asynchronous code.
+    /// Executes compiled code, awaiting any generator the code returns.
     ///
-    /// Plain code runs synchronously, while asynchronous code is awaited.
+    /// If the code returns a generator (e.g. from a top-level `await`), it is
+    /// iterated asynchronously as an ``AsyncTask``.
     /// Use ``compile(_:filename:mode:)`` to produce the ``CompiledCode``.
     ///
     /// - Parameter code: The compiled code to execute.
     /// - Throws: A ``PythonError`` if execution fails.
     @discardableResult
     static func execute(_ code: CompiledCode) async throws(PythonError) -> PyObject? {
-        switch code {
-        case let .plain(code, mode):
-            return try shared.execute(code, mode: mode)
-
-        case let .async(code):
-            try await shared.execute(code)
-            return nil
+        let result = try shared.execute(code.code, mode: code.mode)
+        if py.istype(result.reference, type: .generator) {
+            let task = try AsyncTask(generator: result)
+            await task.untilCompletes()
+            return task.result
         }
+        return result
     }
 
     /// Evaluates the expression, casts to the given type and returns the result.
@@ -194,9 +199,7 @@ public extension Interpreter {
     static func evaluate<Result: PythonConvertible>(_ expression: String) -> Result? {
         do {
             let code = try shared.compile(expression, mode: .evaluation)
-            if case let .plain(code, _) = code {
-                try shared.execute(code, mode: .evaluation)
-            }
+            try shared.execute(code.code, mode: .evaluation)
             let result = py.retain(py.retval)
             return try Result.cast(result.reference)
         } catch {
