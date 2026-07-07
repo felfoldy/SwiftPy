@@ -6302,6 +6302,8 @@ typedef struct CodeObject {
     c11_vector /*T=py_Name*/ names;     // non-local names
     int nlocals;  // number of local variables
 
+    bool has_yield;  // whether this code object contains yield opcodes
+
     c11_smallmap_n2d varnames_inv;
     c11_smallmap_n2d names_inv;
 
@@ -6328,11 +6330,6 @@ typedef struct FuncDeclKwArg {
     py_TValue value;  // default value
 } FuncDeclKwArg;
 
-typedef struct FuncDeclAnnotation {
-    py_Name name;      // parameter name, or `return` for the return hint
-    c11_string* hint;  // source text of the type hint
-} FuncDeclAnnotation;
-
 typedef struct FuncDecl {
     RefCounted rc;
     CodeObject code;  // strong ref
@@ -6340,11 +6337,11 @@ typedef struct FuncDecl {
     c11_vector /*T=int32_t*/ args;          // indices in co->varnames
     c11_vector /*T=FuncDeclKwArg*/ kwargs;  // indices in co->varnames
 
-    c11_vector /*T=FuncDeclAnnotation*/ annotations;
-
     int starred_arg;    // index in co->varnames, -1 if no *arg
     int starred_kwarg;  // index in co->varnames, -1 if no **kwarg
     bool nested;        // whether this function is nested
+
+    py_TValue annotations;  // dict[str, str], nil if empty
 
     char* docstring;
 
@@ -6451,6 +6448,9 @@ typedef struct Generator{
 } Generator;
 
 void pk_newgenerator(py_Ref out, py_Frame* frame, py_TValue* begin, py_TValue* end);
+
+// Create a suspended generator that executes `code` at top level when resumed.
+bool pk_newexecgenerator(py_Ref out, py_Ref code, py_Ref globals, py_Ref locals);
 
 void Generator__dtor(Generator* ud);
 // interpreter/line_profiler.h
@@ -7998,6 +7998,7 @@ void FuncDecl__gc_mark(const FuncDecl* self, c11_vector* p_stack) {
         FuncDeclKwArg* kw = c11__at(FuncDeclKwArg, &self->kwargs, j);
         pk__mark_value(&kw->value);
     }
+    pk__mark_value(&self->annotations);
 }
 
 void CodeObject__gc_mark(const CodeObject* self, c11_vector* p_stack) {
@@ -8410,6 +8411,36 @@ void pk_newgenerator(py_Ref out, py_Frame* frame, py_TValue* begin, py_TValue* e
     for(py_TValue* p = begin; p != end; p++) {
         py_list_append(tmp, p);
     }
+}
+
+bool pk_newexecgenerator(py_Ref out, py_Ref code, py_Ref globals, py_Ref locals) {
+    // the slots anchor the values the suspended frame borrows
+    // (0 = stack backup, 1 = code, 2 = globals, 3 = locals)
+    VM* vm = pk_current_vm;
+    Generator* ud = py_newobject(out, tp_generator, 4, sizeof(Generator));
+    ud->frame = NULL;
+    ud->state = 0;
+    py_newlist(py_getslot(out, 0));
+    py_setslot(out, 1, code);
+    if(globals->type == tp_namedict) globals = py_getslot(globals, 0);
+    if(globals->type != tp_module && !py_istype(globals, tp_dict)) {
+        return TypeError("globals must be a dict object");
+    }
+    py_setslot(out, 2, globals);
+    py_Ref frame_locals = py_NIL();
+    switch(locals->type) {
+        case tp_dict:
+            py_setslot(out, 3, locals);
+            frame_locals = py_getslot(out, 3);
+            break;
+        case tp_locals:  // caller-frame locals cannot outlive suspension
+        case tp_nil: break;
+        default: return TypeError("locals must be a dict object");
+    }
+    py_GlobalRef module = vm->top_frame ? vm->top_frame->module : vm->main;
+    CodeObject* co = py_touserdata(code);
+    ud->frame = Frame__new(co, vm->stack.sp, module, py_getslot(out, 2), frame_locals, true);
+    return true;
 }
 
 void Generator__dtor(Generator* ud) {
@@ -10380,8 +10411,6 @@ void FuncDecl__dtor(FuncDecl* self) {
     CodeObject__dtor(&self->code);
     c11_vector__dtor(&self->args);
     c11_vector__dtor(&self->kwargs);
-    c11__foreach(FuncDeclAnnotation, &self->annotations, item) c11_string__delete(item->hint);
-    c11_vector__dtor(&self->annotations);
     c11_smallmap_n2d__dtor(&self->kw_to_index);
     if(self->docstring) py_free(self->docstring);
 }
@@ -10394,11 +10423,11 @@ FuncDecl_ FuncDecl__rcnew(SourceData_ src, c11_sv name) {
 
     c11_vector__ctor(&self->args, sizeof(int32_t));
     c11_vector__ctor(&self->kwargs, sizeof(FuncDeclKwArg));
-    c11_vector__ctor(&self->annotations, sizeof(FuncDeclAnnotation));
 
     self->starred_arg = -1;
     self->starred_kwarg = -1;
     self->nested = false;
+    self->annotations = *py_NIL();
 
     self->docstring = NULL;
     self->type = FuncType_UNSET;
@@ -10453,9 +10482,10 @@ void FuncDecl__add_starred_kwarg(FuncDecl* self, py_Name name) {
 }
 
 void FuncDecl__add_annotation(FuncDecl* self, py_Name name, c11_sv hint) {
-    FuncDeclAnnotation* item = c11_vector__emplace(&self->annotations);
-    item->name = name;
-    item->hint = c11_string__new2(hint.data, hint.size);
+    if(py_isnil(&self->annotations)) py_newdict(&self->annotations);
+    py_TValue value;
+    py_newstrv(&value, hint);
+    py_dict_setitem_by_str(&self->annotations, py_name2str(name), &value);
 }
 
 void CodeObject__ctor(CodeObject* self, SourceData_ src, c11_sv name) {
@@ -10470,6 +10500,7 @@ void CodeObject__ctor(CodeObject* self, SourceData_ src, c11_sv name) {
     c11_vector__ctor(&self->varnames, sizeof(py_Name));
     c11_vector__ctor(&self->names, sizeof(py_Name));
     self->nlocals = 0;
+    self->has_yield = false;
 
     c11_smallmap_n2d__ctor(&self->varnames_inv);
     c11_smallmap_n2d__ctor(&self->names_inv);
@@ -11060,6 +11091,9 @@ static void CodeObject__serialize(c11_serializer* s,
     // nlocals
     c11_serializer__write_i32(s, co->nlocals);
 
+    // has_yield
+    c11_serializer__write_i8(s, co->has_yield);
+
     // blocks
     _Static_assert(sizeof(CodeBlock) == sizeof(int32_t) * 5, "");
     c11_serializer__write_i32(s, co->blocks.length);
@@ -11156,6 +11190,9 @@ static CodeObject CodeObject__deserialize(c11_deserializer* d, const char* filen
     // nlocals
     co.nlocals = c11_deserializer__read_i32(d);
 
+    // has_yield
+    co.has_yield = c11_deserializer__read_i8(d);
+
     // blocks
     int blocks_len = c11_deserializer__read_i32(d);
     c11_deserializer__consume_mark(d, '[');
@@ -11179,6 +11216,13 @@ static CodeObject CodeObject__deserialize(c11_deserializer* d, const char* filen
     co.end_line = c11_deserializer__read_i32(d);
 
     return co;
+}
+
+static bool annotation__serialize(py_Ref key, py_Ref val, void* ctx) {
+    c11_serializer* s = ctx;
+    c11_serializer__write_cstr(s, py_tostr(key));
+    c11_serializer__write_cstr(s, py_tostr(val));
+    return true;
 }
 
 // Serialize FuncDecl
@@ -11223,13 +11267,11 @@ static void FuncDecl__serialize(c11_serializer* s,
     c11_serializer__write_i8(s, (int8_t)decl->type);
 
     // annotations
-    c11_serializer__write_i32(s, decl->annotations.length);
+    py_Ref annotations = (py_Ref)&decl->annotations;
+    bool empty = py_isnil(annotations);
+    c11_serializer__write_i32(s, empty ? 0 : py_dict_len(annotations));
     c11_serializer__write_mark(s, '[');
-    for(int i = 0; i < decl->annotations.length; i++) {
-        FuncDeclAnnotation* item = c11__at(FuncDeclAnnotation, &decl->annotations, i);
-        c11_serializer__write_cstr(s, py_name2str(item->name));
-        c11_serializer__write_cstr(s, item->hint->data);
-    }
+    if(!empty) py_dict_apply(annotations, annotation__serialize, s);
     c11_serializer__write_mark(s, ']');
 }
 
@@ -11241,7 +11283,6 @@ static FuncDecl_ FuncDecl__deserialize(c11_deserializer* d, SourceData_ embedded
 
     c11_vector__ctor(&self->args, sizeof(int32_t));
     c11_vector__ctor(&self->kwargs, sizeof(FuncDeclKwArg));
-    c11_vector__ctor(&self->annotations, sizeof(FuncDeclAnnotation));
     c11_smallmap_n2d__ctor(&self->kw_to_index);
 
     // CodeObject (embedded)
@@ -11291,14 +11332,14 @@ static FuncDecl_ FuncDecl__deserialize(c11_deserializer* d, SourceData_ embedded
     self->type = (FuncType)c11_deserializer__read_i8(d);
 
     // annotations
+    self->annotations = *py_NIL();
     int annotations_len = c11_deserializer__read_i32(d);
     c11_deserializer__consume_mark(d, '[');
     for(int i = 0; i < annotations_len; i++) {
         const char* name_str = c11_deserializer__read_cstr(d);
         const char* hint_str = c11_deserializer__read_cstr(d);
-        FuncDeclAnnotation* item = c11_vector__emplace(&self->annotations);
-        item->name = py_name(name_str);
-        item->hint = c11_string__new(hint_str);
+        c11_sv hint = {hint_str, (int)strlen(hint_str)};
+        FuncDecl__add_annotation(self, py_name(name_str), hint);
     }
     c11_deserializer__consume_mark(d, ']');
     return self;
@@ -11348,7 +11389,7 @@ const char kPythonLibs_dataclasses[] = "def _get_annotations(cls: type):\n    in
 const char kPythonLibs_datetime[] = "from time import localtime\nimport operator\n\nclass timedelta:\n    def __init__(self, days=0, seconds=0):\n        self.days = days\n        self.seconds = seconds\n\n    def __repr__(self):\n        return f\"datetime.timedelta(days={self.days}, seconds={self.seconds})\"\n\n    def __eq__(self, other) -> bool:\n        if not isinstance(other, timedelta):\n            return NotImplemented\n        return (self.days, self.seconds) == (other.days, other.seconds)\n\n    def __ne__(self, other) -> bool:\n        if not isinstance(other, timedelta):\n            return NotImplemented\n        return (self.days, self.seconds) != (other.days, other.seconds)\n\n\nclass date:\n    def __init__(self, year: int, month: int, day: int):\n        self.year = year\n        self.month = month\n        self.day = day\n\n    @staticmethod\n    def today():\n        t = localtime()\n        return date(t.tm_year, t.tm_mon, t.tm_mday)\n    \n    def __cmp(self, other, op):\n        if not isinstance(other, date):\n            return NotImplemented\n        if self.year != other.year:\n            return op(self.year, other.year)\n        if self.month != other.month:\n            return op(self.month, other.month)\n        return op(self.day, other.day)\n\n    def __eq__(self, other) -> bool:\n        return self.__cmp(other, operator.eq)\n    \n    def __ne__(self, other) -> bool:\n        return self.__cmp(other, operator.ne)\n\n    def __lt__(self, other: 'date') -> bool:\n        return self.__cmp(other, operator.lt)\n\n    def __le__(self, other: 'date') -> bool:\n        return self.__cmp(other, operator.le)\n\n    def __gt__(self, other: 'date') -> bool:\n        return self.__cmp(other, operator.gt)\n\n    def __ge__(self, other: 'date') -> bool:\n        return self.__cmp(other, operator.ge)\n\n    def __str__(self):\n        return f\"{self.year}-{self.month:02}-{self.day:02}\"\n\n    def __repr__(self):\n        return f\"datetime.date({self.year}, {self.month}, {self.day})\"\n\n\nclass datetime(date):\n    def __init__(self, year: int, month: int, day: int, hour: int, minute: int, second: int):\n        super().__init__(year, month, day)\n        # Validate and set hour, minute, and second\n        if not 0 <= hour <= 23:\n            raise ValueError(\"Hour must be between 0 and 23\")\n        self.hour = hour\n        if not 0 <= minute <= 59:\n            raise ValueError(\"Minute must be between 0 and 59\")\n        self.minute = minute\n        if not 0 <= second <= 59:\n            raise ValueError(\"Second must be between 0 and 59\")\n        self.second = second\n\n    def date(self) -> date:\n        return date(self.year, self.month, self.day)\n\n    @staticmethod\n    def now():\n        t = localtime()\n        tm_sec = t.tm_sec\n        if tm_sec == 60:\n            tm_sec = 59\n        return datetime(t.tm_year, t.tm_mon, t.tm_mday, t.tm_hour, t.tm_min, tm_sec)\n\n    def __str__(self):\n        return f\"{self.year}-{self.month:02}-{self.day:02} {self.hour:02}:{self.minute:02}:{self.second:02}\"\n\n    def __repr__(self):\n        return f\"datetime.datetime({self.year}, {self.month}, {self.day}, {self.hour}, {self.minute}, {self.second})\"\n\n    def __cmp(self, other, op):\n        if not isinstance(other, datetime):\n            return NotImplemented\n        if self.year != other.year:\n            return op(self.year, other.year)\n        if self.month != other.month:\n            return op(self.month, other.month)\n        if self.day != other.day:\n            return op(self.day, other.day)\n        if self.hour != other.hour:\n            return op(self.hour, other.hour)\n        if self.minute != other.minute:\n            return op(self.minute, other.minute)\n        return op(self.second, other.second)\n\n    def __eq__(self, other) -> bool:\n        return self.__cmp(other, operator.eq)\n    \n    def __ne__(self, other) -> bool:\n        return self.__cmp(other, operator.ne)\n    \n    def __lt__(self, other) -> bool:\n        return self.__cmp(other, operator.lt)\n    \n    def __le__(self, other) -> bool:\n        return self.__cmp(other, operator.le)\n    \n    def __gt__(self, other) -> bool:\n        return self.__cmp(other, operator.gt)\n    \n    def __ge__(self, other) -> bool:\n        return self.__cmp(other, operator.ge)\n\n\n";
 const char kPythonLibs_functools[] = "class cache:\n    def __init__(self, f):\n        self.f = f\n        self.cache = {}\n\n    def __call__(self, *args):\n        if args not in self.cache:\n            self.cache[args] = self.f(*args)\n        return self.cache[args]\n    \nclass lru_cache:\n    def __init__(self, maxsize=128):\n        self.maxsize = maxsize\n        self.cache = {}\n\n    def __call__(self, f):\n        def wrapped(*args):\n            if args in self.cache:\n                res = self.cache.pop(args)\n                self.cache[args] = res\n                return res\n            \n            res = f(*args)\n            if len(self.cache) >= self.maxsize:\n                first_key = next(iter(self.cache))\n                self.cache.pop(first_key)\n            self.cache[args] = res\n            return res\n        return wrapped\n    \ndef reduce(function, sequence, initial=...):\n    it = iter(sequence)\n    if initial is ...:\n        try:\n            value = next(it)\n        except StopIteration:\n            raise TypeError(\"reduce() of empty sequence with no initial value\")\n    else:\n        value = initial\n    for element in it:\n        value = function(value, element)\n    return value\n\nclass partial:\n    def __init__(self, f, *args, **kwargs):\n        self.f = f\n        if not callable(f):\n            raise TypeError(\"the first argument must be callable\")\n        self.args = args\n        self.kwargs = kwargs\n\n    def __call__(self, *args, **kwargs):\n        kwargs.update(self.kwargs)\n        return self.f(*self.args, *args, **kwargs)\n\n";
 const char kPythonLibs_heapq[] = "# Heap queue algorithm (a.k.a. priority queue)\ndef heappush(heap, item):\n    \"\"\"Push item onto heap, maintaining the heap invariant.\"\"\"\n    heap.append(item)\n    _siftdown(heap, 0, len(heap)-1)\n\ndef heappop(heap):\n    \"\"\"Pop the smallest item off the heap, maintaining the heap invariant.\"\"\"\n    lastelt = heap.pop()    # raises appropriate IndexError if heap is empty\n    if heap:\n        returnitem = heap[0]\n        heap[0] = lastelt\n        _siftup(heap, 0)\n        return returnitem\n    return lastelt\n\ndef heapreplace(heap, item):\n    \"\"\"Pop and return the current smallest value, and add the new item.\n\n    This is more efficient than heappop() followed by heappush(), and can be\n    more appropriate when using a fixed-size heap.  Note that the value\n    returned may be larger than item!  That constrains reasonable uses of\n    this routine unless written as part of a conditional replacement:\n\n        if item > heap[0]:\n            item = heapreplace(heap, item)\n    \"\"\"\n    returnitem = heap[0]    # raises appropriate IndexError if heap is empty\n    heap[0] = item\n    _siftup(heap, 0)\n    return returnitem\n\ndef heappushpop(heap, item):\n    \"\"\"Fast version of a heappush followed by a heappop.\"\"\"\n    if heap and heap[0] < item:\n        item, heap[0] = heap[0], item\n        _siftup(heap, 0)\n    return item\n\ndef heapify(x):\n    \"\"\"Transform list into a heap, in-place, in O(len(x)) time.\"\"\"\n    n = len(x)\n    # Transform bottom-up.  The largest index there's any point to looking at\n    # is the largest with a child index in-range, so must have 2*i + 1 < n,\n    # or i < (n-1)/2.  If n is even = 2*j, this is (2*j-1)/2 = j-1/2 so\n    # j-1 is the largest, which is n//2 - 1.  If n is odd = 2*j+1, this is\n    # (2*j+1-1)/2 = j so j-1 is the largest, and that's again n//2-1.\n    for i in reversed(range(n//2)):\n        _siftup(x, i)\n\n# 'heap' is a heap at all indices >= startpos, except possibly for pos.  pos\n# is the index of a leaf with a possibly out-of-order value.  Restore the\n# heap invariant.\ndef _siftdown(heap, startpos, pos):\n    newitem = heap[pos]\n    # Follow the path to the root, moving parents down until finding a place\n    # newitem fits.\n    while pos > startpos:\n        parentpos = (pos - 1) >> 1\n        parent = heap[parentpos]\n        if newitem < parent:\n            heap[pos] = parent\n            pos = parentpos\n            continue\n        break\n    heap[pos] = newitem\n\ndef _siftup(heap, pos):\n    endpos = len(heap)\n    startpos = pos\n    newitem = heap[pos]\n    # Bubble up the smaller child until hitting a leaf.\n    childpos = 2*pos + 1    # leftmost child position\n    while childpos < endpos:\n        # Set childpos to index of smaller child.\n        rightpos = childpos + 1\n        if rightpos < endpos and not heap[childpos] < heap[rightpos]:\n            childpos = rightpos\n        # Move the smaller child up.\n        heap[pos] = heap[childpos]\n        pos = childpos\n        childpos = 2*pos + 1\n    # The leaf at pos is empty now.  Put newitem there, and bubble it up\n    # to its final resting place (by sifting its parents down).\n    heap[pos] = newitem\n    _siftdown(heap, startpos, pos)";
-const char kPythonLibs_inspect[] = "class _empty:\n    pass\n\n\nclass Parameter:\n    POSITIONAL_ONLY = 0\n    POSITIONAL_OR_KEYWORD = 1\n    VAR_POSITIONAL = 2\n    KEYWORD_ONLY = 3\n    VAR_KEYWORD = 4\n\n    empty = _empty\n\n    def __init__(self, name, kind, *default, annotation=None):\n        self.name = name\n        self.kind = kind\n        # pocketpy only allows literal defaults, so use *default as sentinel\n        self.default = default[0] if default else _empty\n        self.annotation = _empty if annotation is None else annotation\n\n    def __str__(self):\n        res = self.name\n        if self.annotation is not _empty:\n            res += ': ' + self.annotation\n            if self.default is not _empty:\n                res += ' = ' + repr(self.default)\n        elif self.default is not _empty:\n            res += '=' + repr(self.default)\n        if self.kind == Parameter.VAR_POSITIONAL:\n            res = '*' + res\n        elif self.kind == Parameter.VAR_KEYWORD:\n            res = '**' + res\n        return res\n\n    def __repr__(self):\n        return '<Parameter \"' + str(self) + '\">'\n\n\nclass Signature:\n    empty = _empty\n\n    def __init__(self, parameters, return_annotation=None):\n        self.parameters = {p.name: p for p in parameters}\n        self.return_annotation = _empty if return_annotation is None else return_annotation\n\n    def __str__(self):\n        res = '(' + ', '.join([str(p) for p in self.parameters.values()]) + ')'\n        if self.return_annotation is not _empty:\n            res += ' -> ' + self.return_annotation\n        return res\n\n    def __repr__(self):\n        return '<Signature ' + str(self) + '>'\n\n\ndef _from_function(func, drop_first):\n    entries, return_annotation = _signature_data(func)\n    params = []\n    for name, kind, default, annotation in entries:\n        params.append(Parameter(name, kind, *default, annotation=annotation))\n    if drop_first:\n        params = params[1:]\n    return Signature(params, return_annotation)\n\n\ndef signature(obj):\n    if not callable(obj):\n        raise TypeError(repr(obj) + ' is not a callable object')\n    if isinstance(obj, type):\n        return _from_function(obj.__init__, True)\n    if hasattr(obj, '__func__'):\n        return _from_function(obj.__func__, True)\n    return _from_function(obj, False)\n";
+const char kPythonLibs_inspect[] = "class _empty:\n    pass\n\n\nclass Parameter:\n    POSITIONAL_ONLY = 0\n    POSITIONAL_OR_KEYWORD = 1\n    VAR_POSITIONAL = 2\n    KEYWORD_ONLY = 3\n    VAR_KEYWORD = 4\n\n    empty = _empty\n\n    def __init__(self, name, kind, *default, annotation=None):\n        self.name = name\n        self.kind = kind\n        # pocketpy only allows literal defaults, so use *default as sentinel\n        self.default = default[0] if default else _empty\n        self.annotation = _empty if annotation is None else annotation\n\n    def __str__(self):\n        res = self.name\n        if self.annotation is not _empty:\n            res += ': ' + self.annotation\n            if self.default is not _empty:\n                res += ' = ' + repr(self.default)\n        elif self.default is not _empty:\n            res += '=' + repr(self.default)\n        if self.kind == Parameter.VAR_POSITIONAL:\n            res = '*' + res\n        elif self.kind == Parameter.VAR_KEYWORD:\n            res = '**' + res\n        return res\n\n    def __repr__(self):\n        return '<Parameter \"' + str(self) + '\">'\n\n\nclass Signature:\n    empty = _empty\n\n    def __init__(self, parameters, return_annotation=None):\n        self.parameters = {p.name: p for p in parameters}\n        self.return_annotation = _empty if return_annotation is None else return_annotation\n\n    def __str__(self):\n        res = '(' + ', '.join([str(p) for p in self.parameters.values()]) + ')'\n        if self.return_annotation is not _empty:\n            res += ' -> ' + self.return_annotation\n        return res\n\n    def __repr__(self):\n        return '<Signature ' + str(self) + '>'\n\n\ndef _from_function(func, drop_first):\n    annotations = func.__annotations__\n    params = [Parameter(*entry, annotation=annotations.get(entry[0]))\n              for entry in _signature_data(func)]\n    if drop_first:\n        params = params[1:]\n    return Signature(params, annotations.get('return'))\n\n\ndef signature(obj):\n    if not callable(obj):\n        raise TypeError(repr(obj) + ' is not a callable object')\n    if isinstance(obj, type):\n        return _from_function(obj.__init__, True)\n    if hasattr(obj, '__func__'):\n        return _from_function(obj.__func__, True)\n    return _from_function(obj, False)\n";
 const char kPythonLibs_long_v1[] = "# after v1.2.2, int is always 64-bit\nPyLong_SHIFT = 60//2 - 1\n\nPyLong_BASE = 2 ** PyLong_SHIFT\nPyLong_MASK = PyLong_BASE - 1\nPyLong_DECIMAL_SHIFT = 4\nPyLong_DECIMAL_BASE = 10 ** PyLong_DECIMAL_SHIFT\n\n##############################################################\n\ndef ulong_fromint(x: int):\n    # return a list of digits and sign\n    if x == 0: return [0], 1\n    sign = 1 if x > 0 else -1\n    if sign < 0: x = -x\n    res = []\n    while x:\n        res.append(x & PyLong_MASK)\n        x >>= PyLong_SHIFT\n    return res, sign\n\ndef ulong_cmp(a: list, b: list) -> int:\n    # return 1 if a>b, -1 if a<b, 0 if a==b\n    if len(a) > len(b): return 1\n    if len(a) < len(b): return -1\n    for i in range(len(a)-1, -1, -1):\n        if a[i] > b[i]: return 1\n        if a[i] < b[i]: return -1\n    return 0\n\ndef ulong_pad_(a: list, size: int):\n    # pad leading zeros to have `size` digits\n    delta = size - len(a)\n    if delta > 0:\n        a.extend([0] * delta)\n\ndef ulong_unpad_(a: list):\n    # remove leading zeros\n    while len(a)>1 and a[-1]==0:\n        a.pop()\n\ndef ulong_add(a: list, b: list) -> list:\n    res = [0] * max(len(a), len(b))\n    ulong_pad_(a, len(res))\n    ulong_pad_(b, len(res))\n    carry = 0\n    for i in range(len(res)):\n        carry += a[i] + b[i]\n        res[i] = carry & PyLong_MASK\n        carry >>= PyLong_SHIFT\n    if carry > 0:\n        res.append(carry)\n    return res\n\ndef ulong_inc_(a: list):\n    a[0] += 1\n    for i in range(len(a)):\n        if a[i] < PyLong_BASE: break\n        a[i] -= PyLong_BASE\n        if i+1 == len(a):\n            a.append(1)\n        else:\n            a[i+1] += 1\n    \n\ndef ulong_sub(a: list, b: list) -> list:\n    # a >= b\n    res = []\n    borrow = 0\n    for i in range(len(b)):\n        tmp = a[i] - b[i] - borrow\n        if tmp < 0:\n            tmp += PyLong_BASE\n            borrow = 1\n        else:\n            borrow = 0\n        res.append(tmp)\n    for i in range(len(b), len(a)):\n        tmp = a[i] - borrow\n        if tmp < 0:\n            tmp += PyLong_BASE\n            borrow = 1\n        else:\n            borrow = 0\n        res.append(tmp)\n    ulong_unpad_(res)\n    return res\n\ndef ulong_divmodi(a: list, b: int):\n    # b > 0\n    res = []\n    carry = 0\n    for i in range(len(a)-1, -1, -1):\n        carry <<= PyLong_SHIFT\n        carry += a[i]\n        res.append(carry // b)\n        carry %= b\n    res.reverse()\n    ulong_unpad_(res)\n    return res, carry\n\n\ndef ulong_divmod(a: list, b: list):\n\n    if ulong_cmp(a, b) < 0:\n        return [0], a\n\n    if len(b) == 1:\n        q, r = ulong_divmodi(a, b[0])\n        r, _ = ulong_fromint(r)\n        return q, r\n\n    max = (len(a) - len(b)) * PyLong_SHIFT + \x5c\n        (a[-1].bit_length() - b[-1].bit_length())\n\n    low = [0]\n\n    high = (max // PyLong_SHIFT) * [0] + \x5c\n        [(2**(max % PyLong_SHIFT)) & PyLong_MASK]\n\n    while ulong_cmp(low, high) < 0:\n        ulong_inc_(high)\n        mid, r = ulong_divmodi(ulong_add(low, high), 2)\n        if ulong_cmp(a, ulong_mul(b, mid)) >= 0:\n            low = mid\n        else:\n            high = ulong_sub(mid, [1])\n\n    q = [0] * (len(a) - len(b) + 1)\n    while ulong_cmp(a, ulong_mul(b, low)) >= 0:\n        q = ulong_add(q, low)\n        a = ulong_sub(a, ulong_mul(b, low))\n    ulong_unpad_(q)\n    return q, a\n\ndef ulong_floordivi(a: list, b: int):\n    # b > 0\n    return ulong_divmodi(a, b)[0]\n\ndef ulong_muli(a: list, b: int):\n    # b >= 0\n    res = [0] * len(a)\n    carry = 0\n    for i in range(len(a)):\n        carry += a[i] * b\n        res[i] = carry & PyLong_MASK\n        carry >>= PyLong_SHIFT\n    if carry > 0:\n        res.append(carry)\n    return res\n\ndef ulong_mul(a: list, b: list):\n    N = len(a) + len(b)\n    # use grade-school multiplication\n    res = [0] * N\n    for i in range(len(a)):\n        carry = 0\n        for j in range(len(b)):\n            carry += res[i+j] + a[i] * b[j]\n            res[i+j] = carry & PyLong_MASK\n            carry >>= PyLong_SHIFT\n        res[i+len(b)] = carry\n    ulong_unpad_(res)\n    return res\n\ndef ulong_powi(a: list, b: int):\n    # b >= 0\n    if b == 0: return [1]\n    res = [1]\n    while b:\n        if b & 1:\n            res = ulong_mul(res, a)\n        a = ulong_mul(a, a)\n        b >>= 1\n    return res\n\ndef ulong_repr(x: list) -> str:\n    res = []\n    while len(x)>1 or x[0]>0:   # non-zero\n        x, r = ulong_divmodi(x, PyLong_DECIMAL_BASE)\n        res.append(str(r).zfill(PyLong_DECIMAL_SHIFT))\n    res.reverse()\n    s = ''.join(res)\n    if len(s) == 0: return '0'\n    if len(s) > 1: s = s.lstrip('0')\n    return s\n\ndef ulong_fromstr(s: str):\n    if s[-1] == 'L':\n        s = s[:-1]\n    res, base = [0], [1]\n    if s[0] == '-':\n        sign = -1\n        s = s[1:]\n    else:\n        sign = 1\n    s = s[::-1]\n    for c in s:\n        c = ord(c) - 48\n        assert 0 <= c <= 9\n        res = ulong_add(res, ulong_muli(base, c))\n        base = ulong_muli(base, 10)\n    return res, sign\n\nclass long:\n    def __init__(self, x):\n        if type(x) is tuple:\n            self.digits, self.sign = x\n        elif type(x) is int:\n            self.digits, self.sign = ulong_fromint(x)\n        elif type(x) is float:\n            self.digits, self.sign = ulong_fromint(int(x))\n        elif type(x) is str:\n            self.digits, self.sign = ulong_fromstr(x)\n        elif type(x) is long:\n            self.digits, self.sign = x.digits.copy(), x.sign\n        else:\n            raise TypeError('expected int or str')\n        \n    def __len__(self):\n        return len(self.digits)\n\n    def __add__(self, other):\n        if type(other) is int:\n            other = long(other)\n        elif type(other) is not long:\n            return NotImplemented\n        if self.sign == other.sign:\n            return long((ulong_add(self.digits, other.digits), self.sign))\n        else:\n            cmp = ulong_cmp(self.digits, other.digits)\n            if cmp == 0:\n                return long(0)\n            if cmp > 0:\n                return long((ulong_sub(self.digits, other.digits), self.sign))\n            else:\n                return long((ulong_sub(other.digits, self.digits), other.sign))\n            \n    def __radd__(self, other):\n        return self.__add__(other)\n    \n    def __sub__(self, other):\n        if type(other) is int:\n            other = long(other)\n        elif type(other) is not long:\n            return NotImplemented\n        if self.sign != other.sign:\n            return long((ulong_add(self.digits, other.digits), self.sign))\n        cmp = ulong_cmp(self.digits, other.digits)\n        if cmp == 0:\n            return long(0)\n        if cmp > 0:\n            return long((ulong_sub(self.digits, other.digits), self.sign))\n        else:\n            return long((ulong_sub(other.digits, self.digits), -other.sign))\n            \n    def __rsub__(self, other):\n        if type(other) is int:\n            other = long(other)\n        elif type(other) is not long:\n            return NotImplemented\n        return other.__sub__(self)\n    \n    def __mul__(self, other):\n        if type(other) is int:\n            return long((\n                ulong_muli(self.digits, abs(other)),\n                self.sign * (1 if other >= 0 else -1)\n            ))\n        elif type(other) is long:\n            return long((\n                ulong_mul(self.digits, other.digits),\n                self.sign * other.sign\n            ))\n        return NotImplemented\n    \n    def __rmul__(self, other):\n        return self.__mul__(other)\n    \n    #######################################################\n    def __divmod__(self, other):\n        if type(other) is int:\n            assert self.sign == 1 and other > 0\n            q, r = ulong_divmodi(self.digits, other)\n            return long((q, 1)), r\n        if type(other) is long:\n            assert self.sign == 1 and other.sign == 1\n            q, r = ulong_divmod(self.digits, other.digits)\n            assert len(other)>1 or other.digits[0]>0\n            return long((q, 1)), long((r, 1))\n        raise NotImplementedError\n\n    def __floordiv__(self, other):\n        return self.__divmod__(other)[0]\n\n    def __mod__(self, other):\n        return self.__divmod__(other)[1]\n\n    def __pow__(self, other: int):\n        assert type(other) is int and other >= 0\n        if self.sign == -1 and other & 1:\n            sign = -1\n        else:\n            sign = 1\n        return long((ulong_powi(self.digits, other), sign))\n    \n    def __lshift__(self, other: int):\n        assert type(other) is int and other >= 0\n        x = self.digits.copy()\n        q, r = divmod(other, PyLong_SHIFT)\n        x = [0]*q + x\n        for _ in range(r): x = ulong_muli(x, 2)\n        return long((x, self.sign))\n    \n    def __rshift__(self, other: int):\n        assert type(other) is int and other >= 0\n        x = self.digits.copy()\n        q, r = divmod(other, PyLong_SHIFT)\n        x = x[q:]\n        if not x: return long(0)\n        for _ in range(r): x = ulong_floordivi(x, 2)\n        return long((x, self.sign))\n    \n    def __neg__(self):\n        return long((self.digits, -self.sign))\n    \n    def __cmp__(self, other):\n        if type(other) is int:\n            other = long(other)\n        elif type(other) is not long:\n            return NotImplemented\n        if self.sign > other.sign:\n            return 1\n        elif self.sign < other.sign:\n            return -1\n        else:\n            return ulong_cmp(self.digits, other.digits)\n        \n    def __eq__(self, other):\n        return self.__cmp__(other) == 0\n    def __ne__(self, other):\n        return self.__cmp__(other) != 0\n    def __lt__(self, other):\n        return self.__cmp__(other) < 0\n    def __le__(self, other):\n        return self.__cmp__(other) <= 0\n    def __gt__(self, other):\n        return self.__cmp__(other) > 0\n    def __ge__(self, other):\n        return self.__cmp__(other) >= 0\n            \n    def __repr__(self):\n        prefix = '-' if self.sign < 0 else ''\n        return prefix + ulong_repr(self.digits) + 'L'";
 const char kPythonLibs_operator[] = "# https://docs.python.org/3/library/operator.html#mapping-operators-to-functions\n\ndef le(a, b): return a <= b\ndef lt(a, b): return a < b\ndef ge(a, b): return a >= b\ndef gt(a, b): return a > b\ndef eq(a, b): return a == b\ndef ne(a, b): return a != b\n\ndef and_(a, b): return a & b\ndef or_(a, b): return a | b\ndef xor(a, b): return a ^ b\ndef invert(a): return ~a\ndef lshift(a, b): return a << b\ndef rshift(a, b): return a >> b\n\ndef is_(a, b): return a is b\ndef is_not(a, b): return a is not b\ndef not_(a): return not a\ndef truth(a): return bool(a)\ndef contains(a, b): return b in a\n\ndef add(a, b): return a + b\ndef sub(a, b): return a - b\ndef mul(a, b): return a * b\ndef truediv(a, b): return a / b\ndef floordiv(a, b): return a // b\ndef mod(a, b): return a % b\ndef pow(a, b): return a ** b\ndef neg(a): return -a\ndef matmul(a, b): return a @ b\n\ndef getitem(a, b): return a[b]\ndef setitem(a, b, c): a[b] = c\ndef delitem(a, b): del a[b]\n\ndef iadd(a, b): a += b; return a\ndef isub(a, b): a -= b; return a\ndef imul(a, b): a *= b; return a\ndef itruediv(a, b): a /= b; return a\ndef ifloordiv(a, b): a //= b; return a\ndef imod(a, b): a %= b; return a\n# def ipow(a, b): a **= b; return a\n# def imatmul(a, b): a @= b; return a\ndef iand(a, b): a &= b; return a\ndef ior(a, b): a |= b; return a\ndef ixor(a, b): a ^= b; return a\ndef ilshift(a, b): a <<= b; return a\ndef irshift(a, b): a >>= b; return a\n\nclass attrgetter:\n    def __init__(self, attr):\n        self.attr = attr\n    def __call__(self, obj):\n        return getattr(obj, self.attr)\n\nclass itemgetter:\n    def __init__(self, item):\n        self.item = item\n    def __call__(self, obj):\n        return obj[self.item]\n";
 const char kPythonLibs_typing[] = "class _Placeholder:\n    def __init__(self, *args, **kwargs):\n        pass\n    def __getitem__(self, *args):\n        return self\n    def __call__(self, *args, **kwargs):\n        return self\n    def __and__(self, other):\n        return self\n    def __or__(self, other):\n        return self\n    def __xor__(self, other):\n        return self\n\n\n_PLACEHOLDER = _Placeholder()\n\nSequence = _PLACEHOLDER\nList = _PLACEHOLDER\nDict = _PLACEHOLDER\nTuple = _PLACEHOLDER\nSet = _PLACEHOLDER\nAny = _PLACEHOLDER\nUnion = _PLACEHOLDER\nOptional = _PLACEHOLDER\nCallable = _PLACEHOLDER\nType = _PLACEHOLDER\nTypeAlias = _PLACEHOLDER\nNewType = _PLACEHOLDER\n\nClassVar = _PLACEHOLDER\n\nLiteral = _PLACEHOLDER\nLiteralString = _PLACEHOLDER\n\nIterable = _PLACEHOLDER\nGenerator = _PLACEHOLDER\nIterator = _PLACEHOLDER\n\nHashable = _PLACEHOLDER\n\nTypeVar = _PLACEHOLDER\nSelf = _PLACEHOLDER\n\nProtocol = object\nGeneric = object\nNever = object\n\nTYPE_CHECKING = False\n\n# decorators\noverload = lambda x: x\noverride = lambda x: x\nfinal = lambda x: x\n\n# exhaustiveness checking\nassert_never = lambda x: x\n\nTypedDict = dict\nNotRequired = _PLACEHOLDER\nReadOnly = _PLACEHOLDER\nRequired = _PLACEHOLDER\nTypeIs = _PLACEHOLDER\nTypeGuard = _PLACEHOLDER\n\ncast = lambda _, val: val\n";
@@ -20330,7 +20371,7 @@ static bool number__pow__(int argc, py_Ref argv) {
 
 static py_i64 i64_abs(py_i64 x) { return x < 0 ? -x : x; }
 
-py_i64 cpy11__int_floordiv(py_i64 a, py_i64 b) {
+py_i64 cpy312__int_floordiv(py_i64 a, py_i64 b) {
     assert(b != 0);
     if(a == 0) return 0;
     if((a < 0) == (b < 0)) {
@@ -20340,7 +20381,7 @@ py_i64 cpy11__int_floordiv(py_i64 a, py_i64 b) {
     }
 }
 
-py_i64 cpy11__int_mod(py_i64 a, py_i64 b) {
+py_i64 cpy312__int_mod(py_i64 a, py_i64 b) {
     assert(b != 0);
     if(a == 0) return 0;
     py_i64 res;
@@ -20353,7 +20394,7 @@ py_i64 cpy11__int_mod(py_i64 a, py_i64 b) {
 }
 
 // https://github.com/python/cpython/blob/3.11/Objects/floatobject.c#L677
-void cpy11__float_divmod(double vx, double wx, double *floordiv, double *mod)
+void cpy312__float_divmod(double vx, double wx, double *floordiv, double *mod)
 {
     double div;
     *mod = dmath_fmod(vx, wx);
@@ -20396,7 +20437,7 @@ static bool int__floordiv__(int argc, py_Ref argv) {
     if(py_isint(&argv[1])) {
         py_i64 rhs = py_toint(&argv[1]);
         if(rhs == 0) return ZeroDivisionError("integer division by zero");
-        py_newint(py_retval(), cpy11__int_floordiv(lhs, rhs));
+        py_newint(py_retval(), cpy312__int_floordiv(lhs, rhs));
     } else {
         py_newnotimplemented(py_retval());
     }
@@ -20409,7 +20450,7 @@ static bool int__mod__(int argc, py_Ref argv) {
     if(py_isint(&argv[1])) {
         py_i64 rhs = py_toint(&argv[1]);
         if(rhs == 0) return ZeroDivisionError("integer modulo by zero");
-        py_newint(py_retval(), cpy11__int_mod(lhs, rhs));
+        py_newint(py_retval(), cpy312__int_mod(lhs, rhs));
     } else {
         py_newnotimplemented(py_retval());
     }
@@ -20423,7 +20464,7 @@ static bool float__floordiv__(int argc, py_Ref argv) {
     if(try_castfloat(&argv[1], &rhs)) {
         if(rhs == 0.0) return ZeroDivisionError("float modulo by zero");
         double q, r;
-        cpy11__float_divmod(lhs, rhs, &q, &r);
+        cpy312__float_divmod(lhs, rhs, &q, &r);
         py_newfloat(py_retval(), q);
         return true;
     }
@@ -20438,7 +20479,7 @@ static bool float__rfloordiv__(int argc, py_Ref argv) {
     if(try_castfloat(&argv[1], &lhs)) {
         if(rhs == 0.0) return ZeroDivisionError("float modulo by zero");
         double q, r;
-        cpy11__float_divmod(lhs, rhs, &q, &r);
+        cpy312__float_divmod(lhs, rhs, &q, &r);
         py_newfloat(py_retval(), q);
         return true;
     }
@@ -20453,7 +20494,7 @@ static bool float__mod__(int argc, py_Ref argv) {
     if(try_castfloat(&argv[1], &rhs)) {
         if(rhs == 0.0) return ZeroDivisionError("float modulo by zero");
         double q, r;
-        cpy11__float_divmod(lhs, rhs, &q, &r);
+        cpy312__float_divmod(lhs, rhs, &q, &r);
         py_newfloat(py_retval(), r);
         return true;
     }
@@ -20468,7 +20509,7 @@ static bool float__rmod__(int argc, py_Ref argv) {
     if(try_castfloat(&argv[1], &lhs)) {
         if(rhs == 0.0) return ZeroDivisionError("float modulo by zero");
         double q, r;
-        cpy11__float_divmod(lhs, rhs, &q, &r);
+        cpy312__float_divmod(lhs, rhs, &q, &r);
         py_newfloat(py_retval(), r);
         return true;
     }
@@ -20483,7 +20524,7 @@ static bool float__divmod__(int argc, py_Ref argv) {
     if(try_castfloat(&argv[1], &rhs)) {
         if(rhs == 0.0) return ZeroDivisionError("float modulo by zero");
         double q, r;
-        cpy11__float_divmod(lhs, rhs, &q, &r);
+        cpy312__float_divmod(lhs, rhs, &q, &r);
         py_Ref p = py_newtuple(py_retval(), 2);
         py_newfloat(&p[0], q);
         py_newfloat(&p[1], r);
@@ -20499,8 +20540,8 @@ static bool int__divmod__(int argc, py_Ref argv) {
     py_i64 rhs = py_toint(&argv[1]);
     if(rhs == 0) return ZeroDivisionError("integer division or modulo by zero");
     py_Ref p = py_newtuple(py_retval(), 2);
-    py_newint(&p[0], cpy11__int_floordiv(lhs, rhs));
-    py_newint(&p[1], cpy11__int_mod(lhs, rhs));
+    py_newint(&p[0], cpy312__int_floordiv(lhs, rhs));
+    py_newint(&p[1], cpy312__int_mod(lhs, rhs));
     return true;
 }
 
@@ -23549,44 +23590,15 @@ static bool _builtins_execdyn(const char* title, int argc, py_Ref argv, enum py_
     // [globals, locals, code]
     CodeObject* code = py_touserdata(py_peek(-1));
 
-    if(mode == EXEC_MODE) {
-        c11__foreach(Bytecode, &code->codes, bc) {
-            if(bc->op != OP_YIELD_VALUE && bc->op != OP_FOR_ITER_YIELD_VALUE) continue;
-            // the code can yield at top level: return a suspended generator instead of
-            // executing; the slots anchor the values the suspended frame borrows
-            // (0 = stack backup, 1 = code, 2 = globals, 3 = locals)
-            if(!code->src->is_dynamic && argc != 1) {
-                return ValueError(
-                    "code object is not dynamic, `globals` and `locals` must not be specified");
-            }
-            VM* vm = pk_current_vm;
-            py_Ref out = py_retval();
-            Generator* ud = py_newobject(out, tp_generator, 4, sizeof(Generator));
-            ud->frame = NULL;
-            ud->state = 0;
-            py_newlist(py_getslot(out, 0));
-            py_setslot(out, 1, py_peek(-1));
-            py_Ref globals = py_peek(-3);
-            if(globals->type == tp_namedict) globals = py_getslot(globals, 0);
-            if(globals->type != tp_module && !py_istype(globals, tp_dict)) {
-                return TypeError("globals must be a dict object");
-            }
-            py_setslot(out, 2, globals);
-            py_Ref locals = py_NIL();
-            switch(py_peek(-2)->type) {
-                case tp_dict:
-                    py_setslot(out, 3, py_peek(-2));
-                    locals = py_getslot(out, 3);
-                    break;
-                case tp_locals:  // caller-frame locals cannot outlive suspension
-                case tp_nil: break;
-                default: return TypeError("locals must be a dict object");
-            }
-            py_GlobalRef module = frame ? frame->module : vm->main;
-            ud->frame = Frame__new(code, vm->stack.sp, module, py_getslot(out, 2), locals, true);
-            py_shrink(3);
-            return true;
+    if(mode == EXEC_MODE && code->has_yield) {
+        // the code can yield at top level: return a suspended generator instead of executing
+        if(!code->src->is_dynamic && argc != 1) {
+            return ValueError(
+                "code object is not dynamic, `globals` and `locals` must not be specified");
         }
+        if(!pk_newexecgenerator(py_retval(), py_peek(-1), py_peek(-3), py_peek(-2))) return false;
+        py_shrink(3);
+        return true;
     }
 
     if(code->src->is_dynamic) {
@@ -23735,6 +23747,17 @@ static bool function__doc__(int argc, py_Ref argv) {
     return true;
 }
 
+static bool function__annotations__(int argc, py_Ref argv) {
+    PY_CHECK_ARGC(1);
+    Function* func = py_touserdata(py_arg(0));
+    if(py_isnil(&func->decl->annotations)) {
+        py_newdict(py_retval());
+    } else {
+        py_assign(py_retval(), &func->decl->annotations);
+    }
+    return true;
+}
+
 static bool function__name__(int argc, py_Ref argv) {
     PY_CHECK_ARGC(1);
     Function* func = py_touserdata(py_arg(0));
@@ -23762,6 +23785,7 @@ py_Type pk_function__register() {
         pk_newtype("function", tp_object, NULL, (void (*)(void*))Function__dtor, false, true);
     py_bindproperty(type, "__doc__", function__doc__, NULL);
     py_bindproperty(type, "__name__", function__name__, NULL);
+    py_bindproperty(type, "__annotations__", function__annotations__, NULL);
     py_bindmagic(type, __repr__, function__repr__);
     return type;
 }
@@ -24909,28 +24933,7 @@ static bool inspect_is_user_defined_type(int argc, py_Ref argv) {
     return true;
 }
 
-static void inspect_signature_annotation(py_OutRef out, const FuncDecl* decl, py_Name name) {
-    for(int i = 0; i < decl->annotations.length; i++) {
-        FuncDeclAnnotation* item = c11__at(FuncDeclAnnotation, (c11_vector*)&decl->annotations, i);
-        if(item->name == name) {
-            py_newstrv(out, c11_string__sv(item->hint));
-            return;
-        }
-    }
-    py_newnone(out);
-}
-
-static void inspect_signature_entry(py_OutRef out, const FuncDecl* decl, py_Name name, int kind,
-                                    const py_TValue* default_value) {
-    py_TValue* entry = py_newtuple(out, 4);
-    py_newstr(&entry[0], py_name2str(name));
-    py_newint(&entry[1], kind);
-    py_TValue* defaults = py_newtuple(&entry[2], default_value != NULL);
-    if(default_value) defaults[0] = *default_value;
-    inspect_signature_annotation(&entry[3], decl, name);
-}
-
-// Returns ((name, kind, defaults, annotation), ...), return_annotation.
+// Returns a tuple of (name, kind[, default]) entries.
 static bool inspect__signature_data(int argc, py_Ref argv) {
     PY_CHECK_ARGC(1);
     if(!py_istype(argv, tp_function)) {
@@ -24945,28 +24948,35 @@ static bool inspect__signature_data(int argc, py_Ref argv) {
     int total = decl->args.length + decl->kwargs.length + (int)has_starred_arg +
                 (int)has_starred_kwarg;
 
-    py_TValue* result = py_newtuple(py_retval(), 2);
-    py_TValue* items = py_newtuple(&result[0], total);
+    py_TValue* items = py_newtuple(py_retval(), total);
     int j = 0;
     for(int i = 0; i < decl->args.length; i++) {
         int32_t index = c11__getitem(int32_t, &decl->args, i);
         py_Name name = c11__getitem(py_Name, &co->varnames, index);
-        inspect_signature_entry(&items[j++], decl, name, 1, NULL);
+        py_TValue* entry = py_newtuple(&items[j++], 2);
+        py_newstr(&entry[0], py_name2str(name));
+        py_newint(&entry[1], 1);
     }
     if(has_starred_arg) {
         py_Name name = c11__getitem(py_Name, &co->varnames, decl->starred_arg);
-        inspect_signature_entry(&items[j++], decl, name, 2, NULL);
+        py_TValue* entry = py_newtuple(&items[j++], 2);
+        py_newstr(&entry[0], py_name2str(name));
+        py_newint(&entry[1], 2);
     }
     for(int i = 0; i < decl->kwargs.length; i++) {
-        FuncDeclKwArg* kv = c11__at(FuncDeclKwArg, &decl->kwargs, i);
+        FuncDeclKwArg kv = c11__getitem(FuncDeclKwArg, &decl->kwargs, i);
+        py_TValue* entry = py_newtuple(&items[j++], 3);
+        py_newstr(&entry[0], py_name2str(kv.key));
         // defaults after *args can only be passed by keyword
-        inspect_signature_entry(&items[j++], decl, kv->key, has_starred_arg ? 3 : 1, &kv->value);
+        py_newint(&entry[1], has_starred_arg ? 3 : 1);
+        entry[2] = kv.value;
     }
     if(has_starred_kwarg) {
         py_Name name = c11__getitem(py_Name, &co->varnames, decl->starred_kwarg);
-        inspect_signature_entry(&items[j++], decl, name, 4, NULL);
+        py_TValue* entry = py_newtuple(&items[j++], 2);
+        py_newstr(&entry[0], py_name2str(name));
+        py_newint(&entry[1], 4);
     }
-    inspect_signature_annotation(&result[1], decl, py_name("return"));
     return true;
 }
 
@@ -24986,8 +24996,8 @@ void pk__add_module_inspect() {
 // src/modules/vmath.c
 static bool isclose(float a, float b) { return dmath_fabs(a - b) < 1e-4; }
 
-py_i64 cpy11__int_floordiv(py_i64 a, py_i64 b);
-py_i64 cpy11__int_mod(py_i64 a, py_i64 b);
+py_i64 cpy312__int_floordiv(py_i64 a, py_i64 b);
+py_i64 cpy312__int_mod(py_i64 a, py_i64 b);
 
 #define DEFINE_VEC_FIELD(name, T, Tc, field)                                                       \
     static bool name##__##field(int argc, py_Ref argv) {                                           \
@@ -25295,7 +25305,7 @@ DEF_VECTOR_OPS(3)
         c11_vec##D##i a = py_tovec##D##i(&argv[0]);                                                \
         py_i64 b = py_toint(&argv[1]);                                                             \
         for(int i = 0; i < D; i++)                                                                 \
-            a.data[i] = cpy11__int_floordiv(a.data[i], b);                                       \
+            a.data[i] = cpy312__int_floordiv(a.data[i], b);                                       \
         py_newvec##D##i(py_retval(), a);                                                           \
         return true;                                                                               \
     }                                                                                              \
@@ -25305,7 +25315,7 @@ DEF_VECTOR_OPS(3)
         c11_vec##D##i a = py_tovec##D##i(&argv[0]);                                                \
         py_i64 b = py_toint(&argv[1]);                                                             \
         for(int i = 0; i < D; i++)                                                                 \
-            a.data[i] = cpy11__int_mod(a.data[i], b);                                             \
+            a.data[i] = cpy312__int_mod(a.data[i], b);                                             \
         py_newvec##D##i(py_retval(), a);                                                           \
         return true;                                                                               \
     }
@@ -27894,7 +27904,7 @@ static py_TValue* c11_chunked_array2d__new_chunk(c11_chunked_array2d* self, c11_
 }
 
 static void
-    cpy11__divmod_int_uint(int a, int b_log2, int b_mask, int* restrict q, int* restrict r) {
+    cpy312__divmod_int_uint(int a, int b_log2, int b_mask, int* restrict q, int* restrict r) {
     if(a >= 0) {
         *q = a >> b_log2;
         *r = a & b_mask;
@@ -27909,12 +27919,12 @@ static void c11_chunked_array2d__world_to_chunk(c11_chunked_array2d* self,
                                                 int row,
                                                 c11_vec2i* restrict chunk_pos,
                                                 c11_vec2i* restrict local_pos) {
-    cpy11__divmod_int_uint(col,
+    cpy312__divmod_int_uint(col,
                            self->chunk_size_log2,
                            self->chunk_size_mask,
                            &chunk_pos->x,
                            &local_pos->x);
-    cpy11__divmod_int_uint(row,
+    cpy312__divmod_int_uint(row,
                            self->chunk_size_log2,
                            self->chunk_size_mask,
                            &chunk_pos->y,
@@ -33010,6 +33020,7 @@ static void Ctx__s_emit_decorators(Ctx* self, int count) {
 }
 
 static int Ctx__emit_(Ctx* self, Opcode opcode, uint16_t arg, int line) {
+    if(opcode == OP_YIELD_VALUE || opcode == OP_FOR_ITER_YIELD_VALUE) self->co->has_yield = true;
     Bytecode bc = {(uint16_t)opcode, arg};
     BytecodeEx bcx = {line, self->curr_iblock};
     c11_vector__push(Bytecode, &self->co->codes, bc);
@@ -33380,16 +33391,7 @@ static Error* pop_context(Compiler* self) {
     // pre-compute func->is_simple
     FuncDecl* func = ctx()->func;
     if(func) {
-        // check generator
-        Bytecode* codes = func->code.codes.data;
-        int codes_length = func->code.codes.length;
-
-        for(int i = 0; i < codes_length; i++) {
-            if(codes[i].op == OP_YIELD_VALUE || codes[i].op == OP_FOR_ITER_YIELD_VALUE) {
-                func->type = FuncType_GENERATOR;
-                break;
-            }
-        }
+        if(func->code.has_yield) func->type = FuncType_GENERATOR;
 
         if(func->type == FuncType_UNSET) {
             bool is_simple = true;

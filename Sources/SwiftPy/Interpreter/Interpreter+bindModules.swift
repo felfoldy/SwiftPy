@@ -11,6 +11,8 @@ import UIKit
 import SwiftUI
 #endif
 
+import pocketpy
+
 extension Interpreter {
     func bindBuiltins() {
         let builtins = py.module("builtins")
@@ -27,7 +29,7 @@ extension Interpreter {
 
         _ = try? py.exec(
             source: asyncSource,
-            filename: "<stdin>",
+            filename: "<string>",
             mode: .execution,
             module: builtins?.reference
         )
@@ -115,9 +117,7 @@ extension Interpreter {
             module.class(Peer.self)
         }
     }
-    
 
-    
     func bindStorage() {
         bindModule("storage.native") { module in
             if #available(macOS 15, iOS 18, visionOS 2, *) {
