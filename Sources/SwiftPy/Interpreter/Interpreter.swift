@@ -57,6 +57,8 @@ public final class Interpreter {
         builtinExec = py.getbuiltin("exec")!.pointee._cfunc
         builtinEval = py.getbuiltin("eval")!.pointee._cfunc
 
+        bindFunctools()
+        
         setCallbacks()
         
         log.info("pocketpy [\(py.version)] initialized")

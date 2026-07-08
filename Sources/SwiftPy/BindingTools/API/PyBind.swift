@@ -260,40 +260,22 @@ extension PyRef {
         overloads: Bool = false,
         function: PyAPI.CFunction
     ) {
-        let functionRef = py.pushtmp()
-        defer { py.pop() }
-        let name = py.newfunction(functionRef, signature: signature, docstring: docstring, function: function)
-
-        let sigRet = py.retain(signature)
-        py.setdict(functionRef, name: "_signature", value: sigRet?.reference)
-
-        var interface = "def \(signature):"
-        if let docstring {
-            interface += "\n    \"\"\"\(docstring)\"\"\""
-        } else {
-            interface += " ..."
-        }
-        let interfaceRet = py.retain(interface)
-        py.setdict(
-            functionRef,
-            name: "_interface",
-            value: interfaceRet?.reference
-        )
+        let functionObj = PyObject()
+        let name = py.newfunction(functionObj.reference, signature: signature, docstring: docstring, function: function)
 
         if overloads,
            let existing = py.getdict(self, name: name) {
             // If already overloaded.
             if let overloads = py.getdict(existing, name: "_overloads") {
-                py.list.append(overloads, value: functionRef)
+                py.list.append(overloads, value: functionObj.reference)
                 return
             }
 
             // Create dispatcher function.
-            let overload = py.pushtmp()
-            defer { py.pop() }
+            let overload = PyObject()
             
             makeFunctionOverload(
-                overload,
+                overload.reference,
                 name: name,
                 isInstance: signature.contains("(self")
             )
@@ -302,12 +284,12 @@ extension PyRef {
             defer { py.pop() }
             py.newlist(list)
             py.list.append(list, value: existing)
-            py.list.append(list, value: functionRef)
-            py.setdict(overload, name: "_overloads", value: list)
+            py.list.append(list, value: functionObj.reference)
+            overload._overloads = list
 
-            py.setdict(self, name: name, value: overload)
+            py.setdict(self, name: name, value: overload.reference)
         } else {
-            py.setdict(self, name: name, value: functionRef)
+            py.setdict(self, name: name, value: functionObj.reference)
         }
     }
 
@@ -424,14 +406,13 @@ extension PyBind {
     
     @usableFromInline
     static func forwardKwargs(_ kwargs: PyRef?) -> Int32 {
-        let iter = try! py.retain(py.iter(kwargs))
-        while let key = try? py.next(iter.reference) {
+        guard let kwargs else { return 0 }
+        py_dict_apply(kwargs, { key, value, _ in
             let keyName = py_name(py_tostr(key))
             py.newint(py.pushtmp(), value: Int(bitPattern: keyName))
-
-            py_dict_getitem(kwargs, key)
-            py.push(py.retval)
-        }
+            py_push(value)
+            return true
+        }, nil)
         return py.dict.len(kwargs)
     }
 }

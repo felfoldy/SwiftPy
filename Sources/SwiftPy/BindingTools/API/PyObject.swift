@@ -241,6 +241,12 @@ public extension PyObject {
         self.init(reference)
     }
     
+    convenience init() {
+        let tmp = py.pushtmp()
+        defer { py.pop() }
+        self.init(tmp)
+    }
+    
     /// Creates a handle to the object representing a Python type.
     ///
     /// - Parameter type: The Python type to wrap.

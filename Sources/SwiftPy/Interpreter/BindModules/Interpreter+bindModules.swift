@@ -20,7 +20,9 @@ extension Interpreter {
         // Add async decorator.
         let asyncSource = """
         def async(func):
+            import functools
             import asyncio
+            @functools.wraps(func)
             def coroutine(*args,**kwargs):
                 cr = func(*args,**kwargs)
                 return asyncio.AsyncTask(cr)

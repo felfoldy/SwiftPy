@@ -106,8 +106,6 @@ struct AsyncTests {
     @Test
     func asyncTaskFromGenerator() async throws {
         await Interpreter.run("""
-        import asyncio
-        
         async def asyncTaskFromGenerator_make():
             yield 1
             return 2
@@ -203,5 +201,23 @@ struct AsyncTests {
 
         let result: Int = try #require(py.main.gcCollectAfterAwait_result)
         #expect(result == 42)
+    }
+
+    @Test
+    func asyncDecoratorPreservesMetadata() throws {
+        Interpreter.run("""
+        async def asyncDecoratorPreserves_func(x: int):
+            \"\"\"My docstring.\"\"\"
+            yield
+        """)
+
+        let name: String? = main.asyncDecoratorPreserves_func?.__name__
+        let doc: String? = main.asyncDecoratorPreserves_func?.__doc__
+        let annotations: PyObject? = main.asyncDecoratorPreserves_func?.__annotations__
+        let annotationsString = try? py.repr(annotations?.reference)
+
+        #expect(name == "asyncDecoratorPreserves_func")
+        #expect(doc == "My docstring.")
+        #expect(annotationsString == "{'x': 'int'}")
     }
 }

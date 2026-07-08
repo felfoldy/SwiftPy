@@ -464,6 +464,14 @@ public extension PyAPI {
     }
     
     @inlinable
+    func str(_ self: PyRef) throws(PythonError) -> String {
+        let retval = try PyAPI.convertRetval {
+            py_str(self)
+        }
+        return try .cast(retval)
+    }
+
+    @inlinable
     func newfloat(_ out: PyRef, value: Double) {
         py_newfloat(out, value)
     }
