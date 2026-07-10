@@ -147,7 +147,7 @@ public extension Interpreter {
         }
         _ = try? await execute(code)
     }
-    
+
     /// Compiles Python source into reusable ``CompiledCode``.
     ///
     /// - Parameters:
@@ -163,7 +163,7 @@ public extension Interpreter {
     ) throws(PythonError) -> CompiledCode {
         try shared.compile(source, filename: filename, mode: mode)
     }
-    
+
     /// Executes compiled code synchronously.
     ///
     /// Use ``compile(_:filename:mode:)`` to produce the ``CompiledCode``.
