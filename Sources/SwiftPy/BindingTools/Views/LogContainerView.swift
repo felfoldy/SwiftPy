@@ -67,8 +67,8 @@ public struct LogContainerView<Content: View>: View {
                 Text("I should print the requested text using the print_content tool.")
                     .font(.caption)
             }
-            LogContainerView(tint: .orange, title: "Calling tool", icon: "wrench.and.screwdriver") {
-                Text("print_content(content=\"Print to the console\")")
+            LogContainerView(tint: .orange, title: #"greet(name="Bob")"#, icon: "wrench.and.screwdriver") {
+                Text("greeted")
                     .font(.caption.monospaced())
             }
             LogContainerView(tint: .green, title: "Tool output") {
