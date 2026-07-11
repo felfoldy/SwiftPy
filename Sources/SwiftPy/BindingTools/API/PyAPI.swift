@@ -210,7 +210,7 @@ public struct PyAPI {
 
     @discardableResult
     @inlinable
-    public func call(_ function: PyRef, unpacking args: [(any PythonConvertible)?]) throws(PythonError) -> PyRef {
+    public func call(_ function: PyRef, unpacking args: [PythonConvertible?]) throws(PythonError) -> PyRef {
         try PyAPI.convertRetval(function) { function in
             py.push(function)
             py.pushnil()
