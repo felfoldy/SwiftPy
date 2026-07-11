@@ -99,8 +99,7 @@ extension Interpreter {
             module.def("host(name: str) -> None",
                        docstring: "Hosts the remote Python interpreter on this device.") { argc, argv in
                 PyBind.function(argc, argv) { (name: String) in
-                    // TODO: Refactor hosting.
-                    return
+                    Interpreter.host(name: name)
                 }
             }
         }

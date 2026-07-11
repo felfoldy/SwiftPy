@@ -52,6 +52,14 @@ public final class Interpreter {
     @usableFromInline
     let connection = LocalInterpreterConnection()
 
+    private var _activeConnection: (any InterpreterConnection)?
+    private var hostPeer: Peer?
+    private var hostEventTask: Task<Void, Never>?
+
+    var activeConnection: any InterpreterConnection {
+        _activeConnection ?? connection
+    }
+
     init() {
         // Store builtin exec and eval.
         builtinExec = py.getbuiltin("exec")!.pointee._cfunc
@@ -233,6 +241,35 @@ public extension Interpreter {
     }
 
     static var connection: any InterpreterConnection {
-        shared.connection
+        shared.activeConnection
+    }
+
+    /// Advertises this device as a remote interpreter host under `name`.
+    static func host(name: String) {
+        let peer = Peer(name: name)
+        let connection = shared.connection
+        let encoder = JSONEncoder()
+        let decoder = JSONDecoder()
+
+        peer.messageReceived { data in
+            guard let command = try? decoder.decode(ConsoleCommand.self, from: data) else { return }
+            Task { await connection.perform(command) }
+        }
+
+        shared.hostEventTask?.cancel()
+        shared.hostEventTask = Task {
+            for await event in await connection.events {
+                guard let data = try? encoder.encode(event) else { continue }
+                try? peer.send(data: data)
+            }
+        }
+
+        peer.advertise()
+        shared.hostPeer = peer
+    }
+
+    /// Replaces the active connection with a remote connection to `target`.
+    static func connect(to target: String) {
+        shared._activeConnection = RemoteInterpreterConnection(target: target)
     }
 }
