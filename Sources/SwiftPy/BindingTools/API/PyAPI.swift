@@ -39,7 +39,7 @@ public struct PyAPI {
     
     public typealias pyCompileMode = py_CompileMode
 
-    public let version = PK_VERSION
+    public let version: String = PK_VERSION
 
     public let dict = Dict()
     public let list = List()
