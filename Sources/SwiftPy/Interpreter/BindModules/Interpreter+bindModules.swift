@@ -102,9 +102,24 @@ extension Interpreter {
                     Interpreter.host(name: name)
                 }
             }
+
+            module.def("modules() -> list[str]",
+                       docstring: "Return the names of registered Python modules.") { argc, argv in
+                PyBind.function(argc, argv) {
+                    Interpreter.shared.registeredModuleNames
+                }
+            }
+
+            let appVersion = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? ""
+            module.app_version = appVersion
+            module.pocketpy_version = py.version
         }
 
-        bindModule("interpreter", in: .module)
+        bindModule(
+            "interpreter",
+            in: .module,
+            docs: "Utilities for interacting with the PyPrompt interpreter."
+        )
     }
     
     func bindPathlib() {

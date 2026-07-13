@@ -10,25 +10,27 @@ import Foundation
 
 extension Interpreter {
     /// Internal module binding.
-    func bindModule(_ name: String, block: @escaping (PyModule) -> Void) {
+    func bindModule(_ name: String, docs: String? = nil, block: @escaping (PyModule) -> Void) {
         moduleFactory[name] = { module in
             guard let module = PyModule(module) else { return }
 
             block(module)
-
-            // Add module.__doc__.
-            _ = try? py.module("interpreter")?.bind_interfaces?(module.reference)
+            if let docs {
+                module.__doc__ = docs
+            }
         }
     }
 
-    func bindModule(_ name: String, in bundle: Bundle) {
+    func bindModule(_ name: String, in bundle: Bundle, docs: String? = nil) {
         guard let path = bundle.path(forResource: name, ofType: "py"),
               let content = try? String(contentsOfFile: path, encoding: .utf8) else {
             log.error("Could not find \(name).py in bundle \(bundle.bundlePath)")
             return
         }
 
-        registeredSources[name + ".py"] = content
+        let filename = name + ".py"
+        registeredSources[filename] = content
+        registeredSourceDocs[filename] = docs
     }
 }
 
@@ -57,9 +59,10 @@ public enum PyBind {
     ///
     /// - Parameters:
     ///   - name: The name the module is imported under in Python.
+    ///   - docs: Optional module documentation exposed as `module.__doc__`.
     ///   - block: A closure that configures the ``PyModule`` with its bindings.
-    public static func module(_ name: String, block: @escaping (PyModule) -> Void) {
-        Interpreter.shared.bindModule(name, block: block)
+    public static func module(_ name: String, docs: String? = nil, block: @escaping (PyModule) -> Void) {
+        Interpreter.shared.bindModule(name, docs: docs, block: block)
     }
 
     /// Registers a source-only module whose body is loaded from `<name>.py`
@@ -68,8 +71,8 @@ public enum PyBind {
     /// ```swift
     /// PyBind.module("module", in: .module)
     /// ```
-    public static func module(_ name: String, in bundle: Bundle) {
-        Interpreter.shared.bindModule(name, in: bundle)
+    public static func module(_ name: String, in bundle: Bundle, docs: String? = nil) {
+        Interpreter.shared.bindModule(name, in: bundle, docs: docs)
     }
 
     /// `() -> Void`

@@ -1,8 +1,9 @@
-from rlcompleter import Completer
-from interpreter.native import *
+from rlcompleter import Completer as _Completer
+from interpreter.native import host
 
-def completions(text: str) -> list[str]:
-    completer = Completer()
+
+def _completions(text: str) -> list[str]:
+    completer = _Completer()
 
     completion_list = []
     state = 0
@@ -18,17 +19,7 @@ def completions(text: str) -> list[str]:
     return completion_list
 
 
-def bind_interfaces(module):
-    interfaces = []
-
-    for name, value in module.__dict__.items():
-        if hasattr(value, '_interface'):
-            interfaces.append(value._interface)
-    
-    module.__doc__ = "\n\n\n".join(interfaces)
-
-
-def dir(obj) -> list[str]:
+def _dir(obj) -> list[str]:
     if hasattr(obj, '__dir__') and not isinstance(obj, type):
         return obj.__dir__()
 
@@ -50,4 +41,7 @@ def dir(obj) -> list[str]:
 
 
 import builtins as _builtins
-_builtins.dir = dir
+_builtins.dir = _dir
+
+from help import help as _help
+_builtins.help = _help

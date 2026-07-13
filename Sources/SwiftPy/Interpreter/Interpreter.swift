@@ -40,6 +40,9 @@ public final class Interpreter {
     /// Python source registered from bundles, keyed by file name (e.g. `"module.py"`).
     var registeredSources: [String: String] = [:]
 
+    /// Documentation for source-only modules, keyed by file name (e.g. `"module.py"`).
+    var registeredSourceDocs: [String: String] = [:]
+
     let profiler = OSSignposter(logger: Logger(
         OSLog(subsystem: "com.felfoldy.SwiftPy",
               category: .pointsOfInterest)
@@ -58,6 +61,24 @@ public final class Interpreter {
 
     var activeConnection: any InterpreterConnection {
         _activeConnection ?? connection
+    }
+
+    var registeredModuleNames: [String] {
+        let hiddenModules: Set<String> = [
+            "help",
+            "keyword",
+            "rlcompleter",
+        ]
+        let nativeModules = moduleFactory.keys
+        let sourceModules = registeredSources.keys.map { name in
+            name.hasSuffix(".py") ? String(name.dropLast(3)) : name
+        }
+
+        return Array(Set(nativeModules).union(sourceModules))
+            .filter { name in
+                !name.hasSuffix(".native") && !hiddenModules.contains(name)
+            }
+            .sorted()
     }
 
     init() {
@@ -88,6 +109,7 @@ public final class Interpreter {
         bindStorage()
 
         // Register bundled source-only modules.
+        bindModule("help", in: .module)
         bindModule("keyword", in: .module)
         bindModule("rlcompleter", in: .module)
     }
@@ -222,7 +244,7 @@ public extension Interpreter {
     /// - Parameter text: Text to complete.
     /// - Returns: An array of string completions.
     static func complete(_ text: String) -> [String] {
-        let result: [String]? = try? py.module("interpreter")?.completions?(text)
+        let result: [String]? = try? py.module("interpreter")?._completions?(text)
         return result ?? []
     }
 

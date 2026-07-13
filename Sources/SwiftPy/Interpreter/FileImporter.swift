@@ -19,7 +19,16 @@ protocol FileImporter {
 
 struct RegisteredSourceImporter: FileImporter {
     func source(name: String) -> String? {
-        Interpreter.shared.registeredSources[name]
+        guard let source = Interpreter.shared.registeredSources[name] else {
+            return nil
+        }
+
+        guard let docs = Interpreter.shared.registeredSourceDocs[name],
+              let encodedDocs = try? String(data: JSONEncoder().encode(docs), encoding: .utf8) else {
+            return source
+        }
+
+        return "__doc__ = \(encodedDocs)\n" + source
     }
 }
 

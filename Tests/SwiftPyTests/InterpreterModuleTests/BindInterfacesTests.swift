@@ -27,19 +27,38 @@ struct BindInterfacesTests {
                 TestClass4.self
             )
         }
+
+        PyBind.module("documented_test", docs: "Documented test module.") { test in
+            test.classes(TestClass3.self)
+        }
     }
     
     @Test func helpOnModule() throws {
         Interpreter.run("""
+        import builtins as _b
         import test
+        _test_help_cap = []
+        _test_help_orig = _b.print
+        def _test_help_cp(msg=''):
+            _test_help_cap.append(str(msg))
+        _b.print = _test_help_cp
         help(test)
+        _b.print = _test_help_orig
+        _test_help_out = "\\n".join(_test_help_cap)
         """)
 
-        let doc: String = try #require(
-            py.main.test?.__doc__
-        )
+        let output: String = try #require(Interpreter.evaluate("_test_help_out"))
+        #expect(output.contains("TestClass3"))
+        #expect(output.contains("TestClass4"))
+    }
 
-        #expect(doc.contains("TestClass3"))
-        #expect(doc.contains("TestClass4"))
+    @Test func moduleDocsParameterSetsDocstring() throws {
+        Interpreter.run("""
+        import documented_test
+        _documented_test_doc = documented_test.__doc__
+        """)
+
+        let doc: String = try #require(Interpreter.evaluate("_documented_test_doc"))
+        #expect(doc == "Documented test module.")
     }
 }

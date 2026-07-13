@@ -50,7 +50,7 @@ public struct PyModule {
     }
 
     public func def(_ signature: String, docstring: String? = nil, function: PyAPI.CFunction) {
-        reference.bind(signature, function: function)
+        reference.bind(signature, docstring: docstring, function: function)
     }
 
     public func classes(_ types: PythonBindable.Type...) {
