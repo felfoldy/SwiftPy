@@ -36,10 +36,10 @@ struct HelpTests {
     func interpreterModuleExposesOnlyPublicAPI() throws {
         Interpreter.run("""
         import interpreter as _interpreter
-        _interpreter_public_names = sorted([
-            name for name in _interpreter.__dict__.keys()
-            if not name.startswith('_')
-        ])
+        _interpreter_public_names = []
+        for name, value in _interpreter.__dict__.items():
+            if not name.startswith('_'):
+                _interpreter_public_names.append(name)
         _interpreter_has_binder = hasattr(_interpreter, '_bind_interfaces')
         _interpreter_has_old_binder = hasattr(_interpreter, 'bind_interfaces')
         """)
@@ -332,8 +332,12 @@ struct HelpTests {
 
             let output: String = try #require(Interpreter.evaluate("_mods_out"))
             #expect(output.contains("Registered modules"))
-            #expect(output.contains("asyncio"))
+            #expect(output.contains("asyncio - Async task utilities."))
             #expect(output.contains("interpreter - Utilities for interacting with the PyPrompt interpreter."))
+            #expect(output.contains("keyring - Secure password storage using the system keychain."))
+            #expect(output.contains("modeling - Provides a model decorator for LLM structured output and ORM-style storage."))
+            #expect(output.contains("p2p - Peer-to-peer discovery and messaging."))
+            #expect(output.contains("pathlib - Object-oriented filesystem paths."))
             #expect(!output.contains("interpreter.native"))
             #expect(!output.contains("help"))
             #expect(!output.contains("rlcompleter"))

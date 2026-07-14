@@ -77,7 +77,7 @@ public final class Keyring {
 
 extension Interpreter {
     func bindKeyring() {
-        bindModule("keyring") { module in
+        bindModule("keyring", docs: "Secure password storage using the system keychain.") { module in
             module.def(
                 "get_password(service: str, username: str) -> str | None",
                 docstring: "Return the password for the given service and username, or None if not found."

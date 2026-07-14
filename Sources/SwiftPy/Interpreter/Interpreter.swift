@@ -40,9 +40,6 @@ public final class Interpreter {
     /// Python source registered from bundles, keyed by file name (e.g. `"module.py"`).
     var registeredSources: [String: String] = [:]
 
-    /// Documentation for source-only modules, keyed by file name (e.g. `"module.py"`).
-    var registeredSourceDocs: [String: String] = [:]
-
     let profiler = OSSignposter(logger: Logger(
         OSLog(subsystem: "com.felfoldy.SwiftPy",
               category: .pointsOfInterest)

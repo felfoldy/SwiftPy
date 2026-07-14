@@ -1,3 +1,5 @@
+__doc__ = "Provides a model decorator for LLM structured output and ORM-style storage."
+
 @classmethod
 def _model_from_json(cls, json_str: str):
     import json

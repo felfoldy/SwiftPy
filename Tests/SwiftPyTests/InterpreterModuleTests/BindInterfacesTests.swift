@@ -21,6 +21,8 @@ class TestClass4 {
 @MainActor
 struct BindInterfacesTests {
     init() {
+        Interpreter.run("import interpreter")
+
         PyBind.module("test") { test in
             test.classes(
                 TestClass3.self,

@@ -65,7 +65,7 @@ extension Interpreter {
     }
 
     func bindAsyncio() {
-        bindModule("asyncio") { module in
+        bindModule("asyncio", docs: "Async task utilities.") { module in
             module.class(AsyncTask.self)
 
             module.def(
@@ -115,21 +115,17 @@ extension Interpreter {
             module.pocketpy_version = py.version
         }
 
-        bindModule(
-            "interpreter",
-            in: .module,
-            docs: "Utilities for interacting with the PyPrompt interpreter."
-        )
+        bindModule("interpreter", in: .module)
     }
     
     func bindPathlib() {
-        bindModule("pathlib") { module in
+        bindModule("pathlib", docs: "Object-oriented filesystem paths.") { module in
             module.class(Path.self)
         }
     }
     
     func bindP2P() {
-        bindModule("p2p") { module in
+        bindModule("p2p", docs: "Peer-to-peer discovery and messaging.") { module in
             module.class(Peer.self)
         }
     }

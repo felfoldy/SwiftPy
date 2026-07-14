@@ -21,16 +21,14 @@ extension Interpreter {
         }
     }
 
-    func bindModule(_ name: String, in bundle: Bundle, docs: String? = nil) {
+    func bindModule(_ name: String, in bundle: Bundle) {
         guard let path = bundle.path(forResource: name, ofType: "py"),
               let content = try? String(contentsOfFile: path, encoding: .utf8) else {
             log.error("Could not find \(name).py in bundle \(bundle.bundlePath)")
             return
         }
 
-        let filename = name + ".py"
-        registeredSources[filename] = content
-        registeredSourceDocs[filename] = docs
+        registeredSources[name + ".py"] = content
     }
 }
 
@@ -71,8 +69,8 @@ public enum PyBind {
     /// ```swift
     /// PyBind.module("module", in: .module)
     /// ```
-    public static func module(_ name: String, in bundle: Bundle, docs: String? = nil) {
-        Interpreter.shared.bindModule(name, in: bundle, docs: docs)
+    public static func module(_ name: String, in bundle: Bundle) {
+        Interpreter.shared.bindModule(name, in: bundle)
     }
 
     /// `() -> Void`
