@@ -11,6 +11,14 @@ public protocol InterpreterConnection: Sendable {
     func perform(_ command: ConsoleCommand) async
 }
 
+public extension InterpreterConnection {
+    func perform(_ commands: ConsoleCommand...) async {
+        for command in commands {
+            await perform(command)
+        }
+    }
+}
+
 public enum ConsoleCommand: Codable, Sendable {
     case createContext
     case complete(id: UInt64, lastComponent: String)
