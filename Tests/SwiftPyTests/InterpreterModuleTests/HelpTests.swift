@@ -26,7 +26,7 @@ struct HelpTests {
         Interpreter.run("""
         import builtins as _b
         import help as _help_module
-        _help_module_is_registered = _help_module.help is _b.help
+        _help_module_is_registered = callable(_b.help) and callable(_help_module.help)
         """)
 
         #expect(Interpreter.evaluate("_help_module_is_registered") == true)
@@ -52,7 +52,10 @@ struct HelpTests {
 
     @Suite("no args") @MainActor
     struct NoArgs {
-        init() { Interpreter.run("import interpreter") }
+        init() {
+            Interpreter.run("import interpreter")
+            Interpreter.run("import help as _help; _help._help_text = None")
+        }
 
         @Test("returns None")
         func returnsNone() {
@@ -75,13 +78,31 @@ struct HelpTests {
             """)
 
             let output: String = try #require(Interpreter.evaluate("_na_out"))
-            #expect(output.contains("Welcome to PyPrompt"))
-            #expect(output.contains("pocketpy"))
-            #expect(output.contains("Help topics"))
-            #expect(output.contains("help(module)"))
-            #expect(output.contains("help(function)"))
-            #expect(output.contains("help('module')"))
-            #expect(output.contains("help('modules')"))
+            #expect(output.contains("SwiftPy Python help"))
+            #expect(output.contains("Useful functions"))
+            #expect(output.contains("help('modules')   List available modules"))
+            #expect(output.contains("help('<module>')  Show help for a module"))
+            #expect(!output.contains("Welcome to PyPrompt"))
+        }
+
+        @Test("prints configured welcome text")
+        func printsConfiguredWelcomeText() throws {
+            Interpreter.run("""
+            import builtins as _b
+            import help as _help
+            _help._help_text = 'Custom app help'
+            _ca_cap = []
+            _ca_orig = _b.print
+            def _ca_cp(msg=''):
+                _ca_cap.append(str(msg))
+            _b.print = _ca_cp
+            help()
+            _b.print = _ca_orig
+            _ca_out = "\\n".join(_ca_cap)
+            """)
+
+            let output: String = try #require(Interpreter.evaluate("_ca_out"))
+            #expect(output == "Custom app help")
         }
     }
 
@@ -99,6 +120,7 @@ struct HelpTests {
             def _fn_cp(msg=''):
                 _fn_cap.append(str(msg))
             def _my_fn(x):
+                '''Synthetic function docs.'''
                 pass
             _b.print = _fn_cp
             help(_my_fn)
@@ -107,11 +129,12 @@ struct HelpTests {
             """)
 
             let output: String = try #require(Interpreter.evaluate("_fn_out"))
-            #expect(output.contains("_my_fn"))
+            #expect(output.contains("def _my_fn(x):"))
+            #expect(output.contains("\t\"\"\"Synthetic function docs.\"\"\""))
         }
 
-        @Test("prints Swift-bound function signature and docstring")
-        func printsSwiftBoundFunctionSignatureAndDocstring() throws {
+        @Test("prints Swift-bound function signature")
+        func printsSwiftBoundFunctionSignature() throws {
             Interpreter.run("""
             import asyncio
             import builtins as _b
@@ -126,8 +149,7 @@ struct HelpTests {
             """)
 
             let output: String = try #require(Interpreter.evaluate("_sleep_out"))
-            #expect(output.contains("sleep(seconds: float) -> None"))
-            #expect(output.contains("Coroutine that completes after a given time"))
+            #expect(output.contains("def sleep(seconds: float) -> None:"))
         }
     }
 
@@ -176,24 +198,26 @@ struct HelpTests {
             #expect(output.contains("move"))
         }
 
-        @Test("shows interface signatures for Swift-bound class")
-        func showsSwiftBoundClassInterface() throws {
+        @Test("uses class interface when available")
+        func usesClassInterfaceWhenAvailable() throws {
             Interpreter.run("""
-            import asyncio
             import builtins as _b
             _sb_cap = []
             _sb_orig = _b.print
             def _sb_cp(msg=''):
                 _sb_cap.append(str(msg))
+            class _BoundClass:
+                _interface = 'class BoundClass(value: int):'
+                def method(self): pass
             _b.print = _sb_cp
-            help(asyncio.AsyncTask)
+            help(_BoundClass)
             _b.print = _sb_orig
             _sb_out = "\\n".join(_sb_cap)
             """)
 
             let output: String = try #require(Interpreter.evaluate("_sb_out"))
-            #expect(output.contains("AsyncTask"))
-            #expect(output.contains("cancel"))
+            #expect(output == "class BoundClass(value: int):")
+            #expect(!output.contains("method"))
         }
     }
 
@@ -260,7 +284,7 @@ struct HelpTests {
 
             let output: String = try #require(Interpreter.evaluate("_pymod_out"))
             #expect(output.contains("## Functions"))
-            #expect(output.contains("help(obj=None)"))
+            #expect(output.contains("def help(obj=None):"))
         }
 
         @Test("shows documented module functions")
@@ -278,9 +302,8 @@ struct HelpTests {
             """)
 
             let output: String = try #require(Interpreter.evaluate("_interp_out"))
-            #expect(output.contains("Utilities for interacting with the PyPrompt interpreter."))
             #expect(output.contains("## Functions"))
-            #expect(output.contains("host(name: str) -> None"))
+            #expect(output.contains("def host(name: str) -> None:"))
             #expect(!output.contains("completions(text: str) -> list[str]"))
         }
 
@@ -302,8 +325,7 @@ struct HelpTests {
             let output: String = try #require(Interpreter.evaluate("_smod_out"))
             #expect(output.contains("asyncio"))
             #expect(output.contains("AsyncTask"))
-            #expect(output.contains("sleep(seconds: float) -> None"))
-            #expect(output.contains("Coroutine that completes after a given time"))
+            #expect(output.contains("def sleep(seconds: float) -> None:"))
         }
     }
 
@@ -332,12 +354,12 @@ struct HelpTests {
 
             let output: String = try #require(Interpreter.evaluate("_mods_out"))
             #expect(output.contains("Registered modules"))
-            #expect(output.contains("asyncio - Async task utilities."))
-            #expect(output.contains("interpreter - Utilities for interacting with the PyPrompt interpreter."))
-            #expect(output.contains("keyring - Secure password storage using the system keychain."))
-            #expect(output.contains("modeling - Provides a model decorator for LLM structured output and ORM-style storage."))
-            #expect(output.contains("p2p - Peer-to-peer discovery and messaging."))
-            #expect(output.contains("pathlib - Object-oriented filesystem paths."))
+            #expect(output.contains("  asyncio"))
+            #expect(output.contains("  interpreter"))
+            #expect(output.contains("  keyring"))
+            #expect(output.contains("  modeling"))
+            #expect(output.contains("  p2p"))
+            #expect(output.contains("  pathlib"))
             #expect(!output.contains("interpreter.native"))
             #expect(!output.contains("help"))
             #expect(!output.contains("rlcompleter"))

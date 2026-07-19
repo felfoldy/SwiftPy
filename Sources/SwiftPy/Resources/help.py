@@ -1,5 +1,5 @@
 import inspect
-from interpreter.native import app_version, pocketpy_version, modules as _registered_modules
+from interpreter.native import modules as _registered_modules
 
 
 def _print_doc(doc, indent="    "):
@@ -23,12 +23,31 @@ def _callable_signature(obj, fallback_name=None):
         return name + "(...)"
 
 
-def _callable(obj, fallback_name=None):
-    print(_callable_signature(obj, fallback_name))
+def _callable_definition(obj, fallback_name=None):
+    signature = _callable_signature(obj, fallback_name)
+    if signature.startswith("def "):
+        return signature if signature.endswith(":") else signature + ":"
+    return "def " + signature + ":"
+
+
+def _docstring(doc, indent="\t"):
+    lines = doc.strip().split("\n")
+    if len(lines) == 1:
+        print(indent + '"""' + lines[0] + '"""')
+        return
+
+    print(indent + '"""')
+    for line in lines:
+        print(indent + line)
+    print(indent + '"""')
+
+
+def _callable(obj, fallback_name=None, indent=""):
+    print(indent + _callable_definition(obj, fallback_name))
 
     doc = getattr(obj, '__doc__', None)
     if doc:
-        _print_doc(doc)
+        _docstring(doc, indent + "\t")
 
 
 def _class_signature(cls):
@@ -39,6 +58,11 @@ def _class_signature(cls):
 
 
 def _class(cls):
+    interface = getattr(cls, '_interface', None)
+    if interface:
+        print(interface)
+        return
+
     print(_class_signature(cls))
 
     doc = getattr(cls, '__doc__', None)
@@ -59,11 +83,7 @@ def _class(cls):
 
     for attr_name, attr in methods:
         print()
-        print("    " + _callable_signature(attr, attr_name))
-        doc = getattr(attr, '__doc__', None)
-        if doc:
-            first_line = doc.strip().split("\n")[0]
-            print("        " + first_line)
+        _callable(attr, fallback_name=attr_name, indent="\t")
 
 
 def _module_summary(name):
@@ -121,31 +141,22 @@ def _module(module):
             _callable(function, fallback_name=name)
 
 
+_help_text = None
+
+
+def _default_help_text():
+    return """
+SwiftPy Python help
+
+Useful functions:
+  help('modules')   List available modules
+  help('<module>')  Show help for a module
+""".strip()
+
+
 def help(obj=None):
     if obj is None:
-        lines = [
-            "Welcome to PyPrompt!",
-            "",
-            "PyPrompt is a lightweight Python interpreter powered by pocketpy.",
-            "",
-            "Enter Python code in the input field and tap the Python button to run it.",
-            "",
-            "Examples:",
-            "  print(\"Hello, world!\")",
-            "  2 + 2",
-            "  [x * x for x in range(10)]",
-            "",
-            "Help topics:",
-            "  help(module)        Show module classes and functions",
-            "  help(type)          Show class details and methods",
-            "  help(function)      Show a callable signature and documentation",
-            "  help('module')      Import a module by name and show help",
-            "  help('modules')     List registered module names",
-            "",
-            "PyPrompt " + app_version,
-            "pocketpy " + pocketpy_version,
-        ]
-        print("\n".join(lines))
+        print(_help_text or _default_help_text())
         return
 
     module_type = type(__import__('math'))

@@ -46,4 +46,12 @@ import builtins as _builtins
 _builtins.dir = _dir
 
 from help import help as _help
-_builtins.help = _help
+
+
+def _builtin_help(*args):
+    if len(args) == 0:
+        return _help(None)
+    return _help(args[0])
+
+
+_builtins.help = _builtin_help
