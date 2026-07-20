@@ -24,6 +24,8 @@ public enum ConsoleCommand: Codable, Sendable {
     case complete(id: UInt64, lastComponent: String)
     case compile(id: UInt64, source: String)
     case run(id: UInt64)
+    /// Compiles and runs a source in one step, assigning it a fresh context id.
+    case execute(source: String)
 }
 
 public struct InterpreterEvent: Codable, Sendable {

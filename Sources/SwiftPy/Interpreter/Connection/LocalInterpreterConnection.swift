@@ -43,6 +43,13 @@ public actor LocalInterpreterConnection: InterpreterConnection {
             await time(id: id) {
                 try await Interpreter.execute(compiled.code)
             }
+
+        case let .execute(source):
+            // Reuse the standard flow: allocate a fresh context, then compile and run it.
+            await perform(.createContext)
+            let id = currentContextId
+            await compile(id: id, source: source)
+            await perform(.run(id: id))
         }
     }
     
