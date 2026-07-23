@@ -121,7 +121,18 @@ public final class Interpreter {
     }
 
     @discardableResult
-    func execute(_ code: PyObject, mode: CompileMode = .execution) throws(PythonError) -> PyObject {
+    func execute(
+        _ code: PyObject,
+        globals: PyObject? = nil,
+        locals: PyObject? = nil,
+        mode: CompileMode = .execution
+    ) throws(PythonError) -> PyObject {
+        if let globals {
+            let function = py.getbuiltin(mode == .evaluation ? "eval" : "exec")!
+            let retval = try py.call(function, args: code, globals, locals ?? globals)
+            return py.retain(retval)
+        }
+
         let retval = try PyAPI.convertRetval(code.reference) { code in
             let function = mode == .evaluation ? builtinEval : builtinExec
             let isExecuted = profiler.withIntervalSignpost("Python") {
@@ -195,11 +206,18 @@ public extension Interpreter {
     ///
     /// Use ``compile(_:filename:mode:)`` to produce the ``CompiledCode``.
     ///
-    /// - Parameter code: The compiled code to execute.
+    /// - Parameters:
+    ///   - code: The compiled code to execute.
+    ///   - globals: The global namespace. Defaults to the shared interpreter state.
+    ///   - locals: The local namespace. Defaults to the same mapping as `globals`.
     /// - Throws: A ``PythonError`` if execution fails.
     @discardableResult
-    static func execute(_ code: CompiledCode) throws(PythonError) -> PyObject? {
-        try shared.execute(code.code, mode: code.mode)
+    static func execute(
+        _ code: CompiledCode,
+        globals: PyObject? = nil,
+        locals: PyObject? = nil
+    ) throws(PythonError) -> PyObject? {
+        try shared.execute(code.code, globals: globals, locals: locals, mode: code.mode)
     }
 
     /// Executes compiled code, awaiting any generator the code returns.
@@ -208,11 +226,18 @@ public extension Interpreter {
     /// iterated asynchronously as an ``AsyncTask``.
     /// Use ``compile(_:filename:mode:)`` to produce the ``CompiledCode``.
     ///
-    /// - Parameter code: The compiled code to execute.
+    /// - Parameters:
+    ///   - code: The compiled code to execute.
+    ///   - globals: The global namespace. Defaults to the shared interpreter state.
+    ///   - locals: The local namespace. Defaults to the same mapping as `globals`.
     /// - Throws: A ``PythonError`` if execution fails.
     @discardableResult
-    static func execute(_ code: CompiledCode) async throws(PythonError) -> PyObject? {
-        let result = try shared.execute(code.code, mode: code.mode)
+    static func execute(
+        _ code: CompiledCode,
+        globals: PyObject? = nil,
+        locals: PyObject? = nil
+    ) async throws(PythonError) -> PyObject? {
+        let result = try shared.execute(code.code, globals: globals, locals: locals, mode: code.mode)
         if py.istype(result.reference, type: .generator) {
             let task = try AsyncTask(generator: result)
             await task.untilCompletes()

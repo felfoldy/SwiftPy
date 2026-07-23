@@ -191,7 +191,7 @@ public struct PyAPI {
     @inlinable
     public func compile(source: String, filename: String, mode: CompileMode) throws(PythonError) -> PyRef {
         try PyAPI.convertRetval {
-            py_compile(source, filename, mode.pyMode, false)
+            py_compile(source, filename, mode.pyMode, true)
         }
     }
     

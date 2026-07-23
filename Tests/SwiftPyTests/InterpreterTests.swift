@@ -32,6 +32,65 @@ struct InterpreterTests {
     }
     #endif
 
+    @Test func isolatedExecuteDoesNotLeakToMain() async throws {
+        let namespace = PyObject()
+        py.newdict(namespace.reference)
+        let code = try Interpreter.compile("isolated_marker = 7")
+
+        try await Interpreter.execute(code, globals: namespace)
+
+        #expect(py.main.isolated_marker == nil)
+    }
+
+    @Test func isolatedExecuteCapturesResultsInProvidedNamespace() async throws {
+        let namespace = PyObject()
+        py.newdict(namespace.reference)
+        let code = try Interpreter.compile("answer = len([1, 2, 3]) + 39")
+
+        // `len` proves builtins are still reachable from the isolated namespace.
+        try await Interpreter.execute(code, globals: namespace)
+
+        let values = [String: Int](namespace)
+        #expect(values?["answer"] == 42)
+    }
+
+    @Test func isolatedExecuteSharesGlobalsAndLocals() async throws {
+        let namespace = PyObject()
+        py.newdict(namespace.reference)
+        let code = try Interpreter.compile(
+            """
+            base = 40
+            def add_two():
+                return base + 2
+            result = add_two()
+            """
+        )
+
+        // A top-level function must see other top-level names, which only holds
+        // when globals and locals are the same mapping.
+        try await Interpreter.execute(code, globals: namespace)
+
+        // The namespace also holds the `add_two` function, so read the single
+        // value rather than casting every entry to Int.
+        let values = [String: PyObject](namespace)
+        #expect(Int(values?["result"]) == 42)
+    }
+
+    @Test func withOutputCaptureReturnsPrintedText() async throws {
+        let code = try Interpreter.compile(
+            """
+            print("hello")
+            print("world")
+            """
+        )
+
+        let output = try await Interpreter.withOutputCapture {
+            try await Interpreter.execute(code)
+        }
+
+        #expect(output == "hello\nworld\n")
+    }
+
     @Test(
         .disabled("Performance benchmark")
     )
