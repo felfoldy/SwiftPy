@@ -21,25 +21,25 @@ public class AsyncTask {
     internal var iterator: PyObject?
     public var result: PyObject?
 
+    /// The work to run, held until the task is first started.
+    private var pendingWork: (() async -> Void)?
+
     private init(task: @escaping () async -> Void) {
-        self.task = Task { [self] in
-            await task()
-            isDone = true
-        }
+        pendingWork = task
     }
 
     private init<T: PythonConvertible>(returns task: @escaping () async -> T?) {
-        self.task = Task { [self] in
+        pendingWork = { [weak self] in
             let result = await task()
-            self.result = py.retain(result)
-            isDone = true
+            self?.result = py.retain(result)
         }
     }
 
     init(generator: PyObject) throws(PythonError) {
         iterator = try py.retain(py.iter(generator.reference))
 
-        self.task = Task { [self] in
+        pendingWork = { [weak self] in
+            guard let self else { return }
             do {
                 while !isDone {
                     guard let iterator else {
@@ -52,6 +52,7 @@ public class AsyncTask {
                         // Fix a loop if any child task fails.
                         if let child = AsyncTask(next) {
                             Interpreter.onDisplay(child.body())
+                            child.resume()
                             _ = await child.task?.value
                             child.isDone = true
                         } else {
@@ -68,11 +69,23 @@ public class AsyncTask {
         }
     }
 
+    /// Starts the underlying work if it hasn't been started yet.
+    public func resume() {
+        guard let work = pendingWork else { return }
+        pendingWork = nil
+        task = Task { [self] in
+            await work()
+            isDone = true
+        }
+    }
+
     func __iter__() -> AsyncTask {
-        self
+        resume()
+        return self
     }
 
     func __next__() throws(PythonError) -> AsyncTask {
+        resume()
         if isDone {
             throw .StopIteration(result?.reference)
         }
@@ -123,6 +136,7 @@ extension AsyncTask {
     }
     
     public func untilCompletes() async {
+        resume()
         await task?.value
     }
 }
