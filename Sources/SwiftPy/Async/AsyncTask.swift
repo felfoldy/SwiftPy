@@ -13,39 +13,35 @@ typealias TaskResult = PythonConvertible & Sendable
 @Scriptable(base: .View)
 @MainActor
 public class AsyncTask {
-    public var isDone: Bool = false
+    /// Whether the task has finished, successfully or with an error.
+    public var isDone: Bool { outcome != nil }
     public var viewRepresentation: AnyView?
 
     internal var task: Task<Void, Never>?
 
-    internal var iterator: PyObject?
-    public var result: PyObject?
+    /// The task's outcome once finished: the produced value or a raised error.
+    var outcome: Result<PyObject?, PythonError>?
 
-    /// The work to run, held until the task is first started.
-    private var pendingWork: (() async -> Void)?
-
-    private init(task: @escaping () async -> Void) {
-        pendingWork = task
+    /// The produced value once the task has finished successfully; `nil` otherwise.
+    public var result: PyObject? {
+        guard case let .success(value) = outcome else { return nil }
+        return value
     }
 
-    private init<T: PythonConvertible>(returns task: @escaping () async -> T?) {
-        pendingWork = { [weak self] in
-            let result = await task()
-            self?.result = py.retain(result)
-        }
+    /// The work to run, held until the task is first started.
+    /// Returns the task's result, or `nil` if it produces none.
+    private var pendingWork: (() async throws -> PyObject?)?
+
+    private init(work: @escaping () async throws -> PyObject?) {
+        pendingWork = work
     }
 
     init(generator: PyObject) throws(PythonError) {
-        iterator = try py.retain(py.iter(generator.reference))
+        let iterator = try py.retain(py.iter(generator.reference))
 
-        pendingWork = { [weak self] in
-            guard let self else { return }
+        pendingWork = {
             do {
-                while !isDone {
-                    guard let iterator else {
-                        throw PythonError.AssertionError("Iterator is missing")
-                    }
-
+                while true {
                     do {
                         let next = try py.next(iterator.reference)
 
@@ -54,17 +50,16 @@ public class AsyncTask {
                             Interpreter.onDisplay(child.body())
                             child.resume()
                             _ = await child.task?.value
-                            child.isDone = true
                         } else {
                             try await Task.sleep(nanoseconds: 1)
                         }
                     } catch let PythonError.StopIteration(result) {
-                        self.result = py.retain(result)
-                        self.isDone = true
+                        return py.retain(result)
                     }
                 }
             } catch {
                 // iteration ended with an error
+                return nil
             }
         }
     }
@@ -74,8 +69,13 @@ public class AsyncTask {
         guard let work = pendingWork else { return }
         pendingWork = nil
         task = Task { [self] in
-            await work()
-            isDone = true
+            do {
+                outcome = .success(try await work())
+            } catch let error as PythonError {
+                outcome = .failure(error)
+            } catch {
+                outcome = .failure(.RuntimeError(error.localizedDescription))
+            }
         }
     }
 
@@ -86,10 +86,14 @@ public class AsyncTask {
 
     func __next__() throws(PythonError) -> AsyncTask {
         resume()
-        if isDone {
-            throw .StopIteration(result?.reference)
+        switch outcome {
+        case let .success(value):
+            throw .StopIteration(value?.reference)
+        case let .failure(error):
+            throw error
+        case nil:
+            return self
         }
-        return self
     }
 
     func body() -> AnyView {
@@ -108,23 +112,15 @@ public class AsyncTask {
 extension AsyncTask {
     public convenience init(_ task: @escaping () async throws -> Void) {
         self.init {
-            do {
-                try await task()
-            } catch {
-                log.critical("\(error.localizedDescription)")
-            }
+            try await task()
+            return nil
         }
     }
-    
+
     public convenience init<T: PythonConvertible>(_ task: @escaping () async throws -> T) where T: Sendable {
-        self.init(returns: { () async -> T? in
-            do {
-                return try await task()
-            } catch {
-                Interpreter.shared.connection.send(id: 0, .stderr(text: error.localizedDescription))
-                return nil
-            }
-        })
+        self.init {
+            py.retain(try await task())
+        }
     }
     
     public convenience init<T: PythonConvertible>(

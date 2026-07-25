@@ -97,8 +97,7 @@ struct AsyncTests {
         
         #expect(Interpreter.evaluate("iterate()") == Int?.none)
         
-        AsyncTests.asyncTaskIterator_task.isDone = true
-        AsyncTests.asyncTaskIterator_task.result = py.retain(2)
+        AsyncTests.asyncTaskIterator_task.outcome = .success(py.retain(2))
 
         #expect(Interpreter.evaluate("iterate()") == 2)
     }
@@ -219,5 +218,26 @@ struct AsyncTests {
         #expect(name == "asyncDecoratorPreserves_func")
         #expect(doc == "My docstring.")
         #expect(annotationsString == "{'x': 'int'}")
+    }
+
+    @Test
+    func errorPropagatesToAwaitSite() async {
+        main.def("errorPropagates_fail() -> AsyncTask") { _, _ in
+            PyAPI.return {
+                AsyncTask { () async throws -> Void in
+                    throw PythonError.RuntimeError("boom")
+                }
+            }
+        }
+
+        await Interpreter.run("""
+        errorPropagates_caught = False
+        try:
+            await errorPropagates_fail()
+        except RuntimeError:
+            errorPropagates_caught = True
+        """)
+
+        #expect(main.errorPropagates_caught == true)
     }
 }
