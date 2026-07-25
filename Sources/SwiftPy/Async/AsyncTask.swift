@@ -10,12 +10,11 @@ import SwiftUI
 
 typealias TaskResult = PythonConvertible & Sendable
 
-@Scriptable(base: .View)
+@Scriptable
 @MainActor
 public class AsyncTask {
     /// Whether the task has finished, successfully or with an error.
     public var isDone: Bool { outcome != nil }
-    public var viewRepresentation: AnyView?
 
     internal var task: Task<Void, Never>?
 
@@ -47,7 +46,6 @@ public class AsyncTask {
 
                         // Fix a loop if any child task fails.
                         if let child = AsyncTask(next) {
-                            Interpreter.onDisplay(child.body())
                             child.resume()
                             _ = await child.task?.value
                         } else {
@@ -96,10 +94,6 @@ public class AsyncTask {
         }
     }
 
-    func body() -> AnyView {
-        viewRepresentation ?? AnyView(EmptyView())
-    }
-
     deinit {
         task?.cancel()
     }
@@ -122,15 +116,7 @@ extension AsyncTask {
             py.retain(try await task())
         }
     }
-    
-    public convenience init<T: PythonConvertible>(
-        presenting: any View,
-        _ task: @escaping () async throws -> T
-    ) where T: Sendable {
-        self.init(task)
-        viewRepresentation = AnyView(presenting)
-    }
-    
+
     public func untilCompletes() async {
         resume()
         await task?.value

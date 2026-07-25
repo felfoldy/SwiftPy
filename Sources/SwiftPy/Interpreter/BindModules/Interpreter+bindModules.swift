@@ -110,6 +110,14 @@ extension Interpreter {
                 }
             }
 
+            module.def("display(view) -> None",
+                       docstring: "Presents a view in the console.") { argc, argv in
+                PyBind.function(argc, argv) { (view: PyObject) -> Void in
+                    guard let view = view.reference.view else { return }
+                    Interpreter.onDisplay(view)
+                }
+            }
+
             let appVersion = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? ""
             module.app_version = appVersion
             module.pocketpy_version = py.version

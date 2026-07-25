@@ -21,7 +21,7 @@ public final class AsyncSleep {
         task = AsyncTask {
             try await Task.sleep(for: .seconds(seconds))
         }
-        task.viewRepresentation = body()
+        Interpreter.onDisplay(body())
     }
 
     func body() -> AnyView {

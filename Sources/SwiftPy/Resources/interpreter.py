@@ -1,7 +1,7 @@
 __doc__ = "Utilities for interacting with the PyPrompt interpreter."
 
 from rlcompleter import Completer as _Completer
-from interpreter.native import host
+from interpreter.native import host, display
 
 
 def _completions(text: str) -> list[str]:

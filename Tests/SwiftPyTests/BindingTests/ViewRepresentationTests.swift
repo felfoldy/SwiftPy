@@ -36,4 +36,25 @@ struct ViewRepresentationTests {
 
         #expect(displayed != nil)
     }
+
+    @Test
+    func displayBinding() {
+        let main = py.main
+
+        var displayed: AnyView?
+        Interpreter.onDisplay = { displayed = $0 }
+        defer { Interpreter.onDisplay = { _ in } }
+
+        _ = AnyView.pyType
+        _ = CustomView.pyType
+
+        main.display_view = CustomView()
+
+        Interpreter.run("""
+        from interpreter import display
+        display(display_view)
+        """)
+
+        #expect(displayed != nil)
+    }
 }
