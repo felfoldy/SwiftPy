@@ -22,10 +22,12 @@ extension Interpreter {
         def async(func):
             import functools
             import asyncio
+            import inspect
+            if not inspect.isgeneratorfunction(func):
+                return func
             @functools.wraps(func)
             def coroutine(*args,**kwargs):
-                cr = func(*args,**kwargs)
-                return asyncio.AsyncTask(cr)
+                return asyncio.AsyncTask(func(*args,**kwargs))
             return coroutine
         """
 

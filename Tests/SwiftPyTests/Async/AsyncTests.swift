@@ -160,16 +160,16 @@ struct AsyncTests {
     
     @Test
     func asyncNotAGenerator() async throws {
+        // An `async def` without a `yield` is not a coroutine; the `async`
+        // decorator leaves it as a plain synchronous function.
         await Interpreter.run("""
         async def not_generator() -> str:
             return 'success'
-        result = await not_generator()
+        result = not_generator()
         """)
 
-        withKnownIssue {
-            let result: String = try #require(py.main.result)
-            #expect(result == "success")
-        }
+        let result: String = try #require(py.main.result)
+        #expect(result == "success")
     }
     
     @Test func sleep() async {
