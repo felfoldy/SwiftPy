@@ -57,15 +57,15 @@ class Completer:
 
 
     def _callable_postfix(self, val, word):
-        if callable(val):
-            word += "("
-            # TODO: no signature in inspect
-            # try:
-            #     if not inspect.signature(val).parameters:
-            #         word += ")"
-            # except ValueError:
-            #     pass
+        if not callable(val):
+            return word
 
+        word += "("
+        try:
+            if not inspect.signature(val).parameters:
+                word += ")"
+        except Exception:
+            pass
         return word
 
 
@@ -95,7 +95,10 @@ class Completer:
             for word, val in nspace.items():
                 if word[:n] == text and word not in seen:
                     seen.add(word)
-                    matches.append(self._callable_postfix(val, word))
+                    if word == text:
+                        matches.append(self._callable_postfix(val, word))
+                    else:
+                        matches.append(word)
         
         return matches
 
@@ -137,17 +140,17 @@ class Completer:
         while True:
             for word in words:
                 if (word[:n] == attr and not (noprefix and word[:n+1] == noprefix)):
-                    
                     pattern = f"{expr}.{word}"
-                    
+
+                    if word != attr:
+                        matches.append(pattern)
+                        continue
+
+                    # A @property is not itself callable, and reading it would
+                    # run its getter (an undesirable side effect), so skip the
+                    # postfix and the getattr below for properties.
                     attribute = getattr(type(thisobject), word, None)
                     if isinstance(attribute, property):
-                        # bpo-44752: thisobject.word is a method decorated by
-                        # `@property`. What follows applies a postfix if
-                        # thisobject.word is callable, but know we know that
-                        # this is not callable (because it is a property).
-                        # Also, getattr(thisobject, word) will evaluate the
-                        # property method, which is not desirable.
                         matches.append(pattern)
                         continue
 
