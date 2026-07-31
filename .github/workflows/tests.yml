@@ -24,6 +24,8 @@ jobs:
           xcode-version: latest-stable
 
       - name: Run tests
+        env:
+          LLVM_PROFILE_FILE: ${{ runner.temp }}/SwiftPy-%p.profraw
         run: |
           set -o pipefail
           xcodebuild test \
