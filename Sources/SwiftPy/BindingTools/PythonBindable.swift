@@ -66,6 +66,89 @@ public extension PythonValueBindable {
         }
     }
 
+#if swift(<6.4)
+    // Concrete overloads — work around "reabstraction of pack values" ICE in Swift 6.3.
+    // Remove this entire block when upgrading to Swift 6.4.
+
+    @inlinable
+    static func __init__<Arg1: PythonConvertible>(
+        _ argv: PyRef?,
+        _ initializer: @MainActor (Arg1) throws -> Self
+    ) -> Bool {
+        PyAPI.return {
+            let arg1 = try Arg1.cast(argv, 1)
+            try initializer(arg1).storeInPython(argv)
+            return .none
+        }
+    }
+
+    @inlinable
+    static func __init__<Arg1: PythonConvertible, Arg2: PythonConvertible>(
+        _ argv: PyRef?,
+        _ initializer: @MainActor (Arg1, Arg2) throws -> Self
+    ) -> Bool {
+        PyAPI.return {
+            let arg1 = try Arg1.cast(argv, 1)
+            let arg2 = try Arg2.cast(argv, 2)
+            try initializer(arg1, arg2).storeInPython(argv)
+            return .none
+        }
+    }
+
+    @inlinable
+    static func __init__<Arg1: PythonConvertible, Arg2: PythonConvertible, Arg3: PythonConvertible>(
+        _ argv: PyRef?,
+        _ initializer: @MainActor (Arg1, Arg2, Arg3) throws -> Self
+    ) -> Bool {
+        PyAPI.return {
+            let arg1 = try Arg1.cast(argv, 1)
+            let arg2 = try Arg2.cast(argv, 2)
+            let arg3 = try Arg3.cast(argv, 3)
+            try initializer(arg1, arg2, arg3).storeInPython(argv)
+            return .none
+        }
+    }
+
+    @inlinable
+    static func __init__<Arg1: PythonConvertible>(
+        _ argc: Int32, _ argv: PyRef?,
+        _ initializer: @MainActor (Arg1) throws -> Self
+    ) -> Bool {
+        PyAPI.return {
+            let arg1 = try Arg1.cast(argv, 1)
+            try initializer(arg1).storeInPython(argv)
+            return .none
+        }
+    }
+
+    @inlinable
+    static func __init__<Arg1: PythonConvertible, Arg2: PythonConvertible>(
+        _ argc: Int32, _ argv: PyRef?,
+        _ initializer: @MainActor (Arg1, Arg2) throws -> Self
+    ) -> Bool {
+        PyAPI.return {
+            let arg1 = try Arg1.cast(argv, 1)
+            let arg2 = try Arg2.cast(argv, 2)
+            try initializer(arg1, arg2).storeInPython(argv)
+            return .none
+        }
+    }
+
+    @inlinable
+    static func __init__<Arg1: PythonConvertible, Arg2: PythonConvertible, Arg3: PythonConvertible>(
+        _ argc: Int32, _ argv: PyRef?,
+        _ initializer: @MainActor (Arg1, Arg2, Arg3) throws -> Self
+    ) -> Bool {
+        PyAPI.return {
+            let arg1 = try Arg1.cast(argv, 1)
+            let arg2 = try Arg2.cast(argv, 2)
+            let arg3 = try Arg3.cast(argv, 3)
+            try initializer(arg1, arg2, arg3).storeInPython(argv)
+            return .none
+        }
+    }
+#endif
+
     @inlinable
     static func __init__<each Arg: PythonConvertible>(
         _ argv: PyRef?,
@@ -77,8 +160,8 @@ public extension PythonValueBindable {
             return .none
         }
     }
-    
-    /// Binds an  `init(args)`.
+
+    /// Binds an `init(args)`.
     @inlinable
     static func __init__<each Arg: PythonConvertible>(
         _ argc: Int32, _ argv: PyRef?,
@@ -114,7 +197,7 @@ public extension PythonBindable {
         guard let reference else { return }
 
         let userdata = userdata ?? reference.userdata
-        
+
         // Store retained self pointer in python userdata.
         let retainedSelfPointer = Unmanaged.passRetained(self)
             .toOpaque()
@@ -125,7 +208,7 @@ public extension PythonBindable {
         pointer.initialize(to: reference.pointee)
         _pythonCache.reference = pointer
     }
-    
+
     @inlinable
     func toPython(_ reference: PyRef) {
         if let cached = _pythonCache.reference {
@@ -136,7 +219,7 @@ public extension PythonBindable {
         let userdata = py.newobject(reference, type: Self.pyType, slots: -1)
         storeInPython(reference, userdata: userdata)
     }
-    
+
     @inlinable
     static func fromPython(_ reference: PyRef) -> Self {
         let pointer = reference.userdata
@@ -144,7 +227,7 @@ public extension PythonBindable {
         return Unmanaged<Self>.fromOpaque(pointer)
             .takeUnretainedValue()
     }
-    
+
     @inlinable
     static func __repr__(_ argv: PyRef?) -> Bool {
         PyAPI.return {
@@ -169,7 +252,7 @@ public extension PythonBindable {
         )
         return true
     }
-    
+
     @inlinable
     static func _bind_setter<Value: PythonConvertible>(_ keypath: ReferenceWritableKeyPath<Self, Value>, _ argv: PyRef?) -> Bool {
         PyAPI.return {
@@ -178,7 +261,7 @@ public extension PythonBindable {
             return .none
         }
     }
-    
+
     @inlinable
     static func _bind_setter<Value>(_ keypath: ReferenceWritableKeyPath<Self, Value>, _ argv: PyRef?) -> Bool {
         PyAPI.return {
@@ -191,9 +274,9 @@ public extension PythonBindable {
             return .none
         }
     }
-    
+
     // MARK: _bind_function
-    
+
     /// `() -> Void`
     @inlinable
     static func _bind_function(
@@ -245,6 +328,129 @@ public extension PythonBindable {
         }
     }
 
+#if swift(<6.4)
+    // Concrete overloads — work around "reabstraction of pack values" ICE in Swift 6.3.
+    // Remove this entire block when upgrading to Swift 6.4.
+
+    /// `(Arg) -> Void`
+    @inlinable
+    static func _bind_function<Arg1: PythonConvertible>(
+        _ argv: PyRef?,
+        _ fn: (Self) -> (Arg1) throws -> Void
+    ) -> Bool {
+        PyAPI.return {
+            let obj = try cast(argv)
+            let arg1 = try Arg1.cast(argv, 1)
+            try fn(obj)(arg1)
+            return .none
+        }
+    }
+
+    /// `(Arg) async -> Void`
+    @inlinable
+    static func _bind_function<Arg1: PythonConvertible>(
+        _ argv: PyRef?,
+        _ fn: @escaping (Self) -> (Arg1) async throws -> Void
+    ) -> Bool where Arg1: Sendable {
+        PyAPI.return {
+            let obj = try cast(argv)
+            let arg1 = try Arg1.cast(argv, 1)
+            return AsyncTask {
+                try await fn(obj)(arg1)
+            }
+        }
+    }
+
+    /// `(Arg) -> any`
+    @inlinable
+    static func _bind_function<Arg1: PythonConvertible>(
+        _ argv: PyRef?,
+        _ fn: (Self) -> (Arg1) throws -> any PythonConvertible
+    ) -> Bool {
+        PyAPI.return {
+            let obj = try cast(argv)
+            let arg1 = try Arg1.cast(argv, 1)
+            return try fn(obj)(arg1)
+        }
+    }
+
+    /// `(Arg) async -> Result`
+    @inlinable
+    static func _bind_function<Arg1: PythonConvertible, Result: PythonConvertible>(
+        _ argv: PyRef?,
+        _ fn: @escaping (Self) -> (Arg1) async throws -> Result
+    ) -> Bool where Result: Sendable, Arg1: Sendable {
+        PyAPI.return {
+            let obj = try cast(argv)
+            let arg1 = try Arg1.cast(argv, 1)
+            return AsyncTask {
+                try await fn(obj)(arg1)
+            }
+        }
+    }
+
+    /// `(Arg1, Arg2) -> Void`
+    @inlinable
+    static func _bind_function<Arg1: PythonConvertible, Arg2: PythonConvertible>(
+        _ argv: PyRef?,
+        _ fn: (Self) -> (Arg1, Arg2) throws -> Void
+    ) -> Bool {
+        PyAPI.return {
+            let obj = try cast(argv)
+            let arg1 = try Arg1.cast(argv, 1)
+            let arg2 = try Arg2.cast(argv, 2)
+            try fn(obj)(arg1, arg2)
+            return .none
+        }
+    }
+
+    /// `(Arg1, Arg2) async -> Void`
+    @inlinable
+    static func _bind_function<Arg1: PythonConvertible, Arg2: PythonConvertible>(
+        _ argv: PyRef?,
+        _ fn: @escaping (Self) -> (Arg1, Arg2) async throws -> Void
+    ) -> Bool where Arg1: Sendable, Arg2: Sendable {
+        PyAPI.return {
+            let obj = try cast(argv)
+            let arg1 = try Arg1.cast(argv, 1)
+            let arg2 = try Arg2.cast(argv, 2)
+            return AsyncTask {
+                try await fn(obj)(arg1, arg2)
+            }
+        }
+    }
+
+    /// `(Arg1, Arg2) -> any`
+    @inlinable
+    static func _bind_function<Arg1: PythonConvertible, Arg2: PythonConvertible>(
+        _ argv: PyRef?,
+        _ fn: (Self) -> (Arg1, Arg2) throws -> any PythonConvertible
+    ) -> Bool {
+        PyAPI.return {
+            let obj = try cast(argv)
+            let arg1 = try Arg1.cast(argv, 1)
+            let arg2 = try Arg2.cast(argv, 2)
+            return try fn(obj)(arg1, arg2)
+        }
+    }
+
+    /// `(Arg1, Arg2) async -> Result`
+    @inlinable
+    static func _bind_function<Arg1: PythonConvertible, Arg2: PythonConvertible, Result: PythonConvertible>(
+        _ argv: PyRef?,
+        _ fn: @escaping (Self) -> (Arg1, Arg2) async throws -> Result
+    ) -> Bool where Result: Sendable, Arg1: Sendable, Arg2: Sendable {
+        PyAPI.return {
+            let obj = try cast(argv)
+            let arg1 = try Arg1.cast(argv, 1)
+            let arg2 = try Arg2.cast(argv, 2)
+            return AsyncTask {
+                try await fn(obj)(arg1, arg2)
+            }
+        }
+    }
+#endif
+
     /// `(...) -> Void`
     @inlinable
     static func _bind_function<each Arg: PythonConvertible>(
@@ -287,7 +493,7 @@ public extension PythonBindable {
             return try arguments(obj)(repeat (each result))
         }
     }
-    
+
     /// `(...) async -> any`
     @inlinable
     static func _bind_function<each Arg: PythonConvertible, Result: PythonConvertible>(
@@ -297,7 +503,7 @@ public extension PythonBindable {
         PyAPI.return {
             let obj = try cast(argv)
             let args = try PyBind.castArgs(argv: argv, from: 1) as (repeat (each Arg))
-            
+
             return AsyncTask {
                 try await fn(obj)(repeat each args)
             }
