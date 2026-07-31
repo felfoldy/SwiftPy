@@ -14,8 +14,6 @@ concurrency:
 jobs:
   test:
     runs-on: macos-latest
-    env:
-      SWIFT_TOOLCHAIN: swift-6.4.x-DEVELOPMENT-SNAPSHOT-2026-07-17-a
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -24,15 +22,6 @@ jobs:
         uses: maxim-lobanov/setup-xcode@v1
         with:
           xcode-version: latest-stable
-
-      - name: Install Swift toolchain
-        run: |
-          set -o pipefail
-          url="https://download.swift.org/swift-6.4.x-branch/xcode/${SWIFT_TOOLCHAIN}/${SWIFT_TOOLCHAIN}-osx.pkg"
-          curl -fSL "$url" -o toolchain.pkg
-          sudo installer -pkg toolchain.pkg -target /
-          plist="/Library/Developer/Toolchains/${SWIFT_TOOLCHAIN}.xctoolchain/Info.plist"
-          echo "TOOLCHAINS=$(plutil -extract CFBundleIdentifier raw "$plist")" >> "$GITHUB_ENV"
 
       - name: Run tests
         run: |
