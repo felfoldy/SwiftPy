@@ -30,8 +30,11 @@ jobs:
           set -o pipefail
           xcodebuild test \
             -scheme SwiftPy \
+            -testPlan SwiftPy \
             -destination 'platform=macOS' \
             -derivedDataPath DerivedData \
+            -parallel-testing-enabled NO \
+            -parallel-testing-worker-count 1 \
             -enableCodeCoverage YES \
             CODE_SIGNING_ALLOWED=NO
 
