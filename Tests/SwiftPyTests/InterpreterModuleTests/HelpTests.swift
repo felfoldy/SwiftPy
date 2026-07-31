@@ -45,7 +45,7 @@ struct HelpTests {
         """)
 
         let publicNames: [String] = try #require(Interpreter.evaluate("_interpreter_public_names"))
-        #expect(publicNames == ["host"])
+        #expect(Set(publicNames) == ["display", "host"])
         #expect(Interpreter.evaluate("_interpreter_has_binder") == false)
         #expect(Interpreter.evaluate("_interpreter_has_old_binder") == false)
     }
@@ -67,6 +67,8 @@ struct HelpTests {
         func printsWelcomeText() throws {
             Interpreter.run("""
             import builtins as _b
+            import help as _help
+            _help._help_text = None
             _na_cap = []
             _na_orig = _b.print
             def _na_cp(msg=''):
@@ -97,6 +99,7 @@ struct HelpTests {
                 _ca_cap.append(str(msg))
             _b.print = _ca_cp
             help()
+            _help._help_text = None
             _b.print = _ca_orig
             _ca_out = "\\n".join(_ca_cap)
             """)

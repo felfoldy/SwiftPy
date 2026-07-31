@@ -13,8 +13,11 @@ import SwiftData
 @MainActor
 @Suite
 struct ContainerTests {
+    private let namespace = PyObject()
+
     init() {
-        Interpreter.run("""
+        py.newdict(namespace.reference)
+        try! run("""
         from modeling import model
         from storage import Container
 
@@ -28,26 +31,26 @@ struct ContainerTests {
     
     @available(macOS 15, *)
     @Test func insert() throws {
-        Interpreter.run("""
+        try run("""
         container = Container('insert_testing', True)
         sword = Item(name='Sword')
         container.insert(sword)
         """)
         
         // Backing data.
-        let data: ModelData = try #require(Interpreter.evaluate("sword._data"))
+        let data: ModelData = try #require(try evaluate("sword._data"))
         #expect(data.json == #"{"name": "Sword", "quantity": 0, "description": null}"#)
         #expect(data.keys?["__name__"] == "Item")
         
         // Is inserted?
-        let container: SwiftPy.Container? = py.main.container
-        let models = try container?.context.fetch(FetchDescriptor<ModelData>())
+        let container: SwiftPy.Container = try #require(try evaluate("container"))
+        let models = try container.context.fetch(FetchDescriptor<ModelData>())
         #expect(models == [data])
     }
     
     @available(macOS 15, *)
     @Test func fetch() throws {
-        Interpreter.run("""
+        try run("""
         container = Container('fetch_testing', True)
         container.insert(Item(name='Sword'))
         items = container.fetch(Item)
@@ -56,24 +59,25 @@ struct ContainerTests {
         print(len(items))
         """)
 
-        #expect(Interpreter.evaluate("len(items)") == 1)
-        let data: ModelData = try #require(Interpreter.evaluate("items[0]._data"))
+        let itemCount: Int = try #require(try evaluate("len(items)"))
+        #expect(itemCount == 1)
+        let data: ModelData = try #require(try evaluate("items[0]._data"))
         #expect(data.json == #"{"name": "Sword", "quantity": 0, "description": null}"#)
     }
     
     @available(macOS 15, *)
     @Test func update() throws {
-        Interpreter.run("""
+        try run("""
         container = Container('update_testing', True)
         sword = Item(name='Sword')
         container.insert(sword)
         """)
         
         // Backing data.
-        let data: ModelData = try #require(Interpreter.evaluate("sword._data"))
+        let data: ModelData = try #require(try evaluate("sword._data"))
         #expect(data.json == #"{"name": "Sword", "quantity": 0, "description": null}"#)
         
-        Interpreter.run("""
+        try run("""
         sword.description = "A great sword"
         sword.quantity += 1
         """)
@@ -83,20 +87,36 @@ struct ContainerTests {
     
     @available(macOS 15, *)
     @Test func delete() throws {
-        Interpreter.run("""
+        try run("""
         container = Container('delete_testing', True)
         sword = Item(name='Sword')
         container.insert(sword)
         """)
         
-        #expect(Interpreter.evaluate("len(container.fetch(Item))") == 1)
+        let insertedCount: Int = try #require(try evaluate("len(container.fetch(Item))"))
+        #expect(insertedCount == 1)
         
-        Interpreter.run("container.delete(sword)")
+        try run("container.delete(sword)")
         
-        #expect(Interpreter.evaluate("len(container.fetch(Item))") == 0)
+        let deletedCount: Int = try #require(try evaluate("len(container.fetch(Item))"))
+        #expect(deletedCount == 0)
         
         // Check reinser
-        Interpreter.run("container.insert(sword)")
-        #expect(Interpreter.evaluate("len(container.fetch(Item))") == 1)
+        try run("container.insert(sword)")
+        let reinsertedCount: Int = try #require(try evaluate("len(container.fetch(Item))"))
+        #expect(reinsertedCount == 1)
+    }
+
+    private func run(_ source: String) throws {
+        let code = try Interpreter.compile(source)
+        try Interpreter.execute(code, globals: namespace)
+    }
+
+    private func evaluate<Result: PythonConvertible>(_ expression: String) throws -> Result? {
+        let code = try Interpreter.compile(expression, mode: .evaluation)
+        guard let result = try Interpreter.execute(code, globals: namespace) else {
+            return nil
+        }
+        return try Result.cast(result.reference)
     }
 }

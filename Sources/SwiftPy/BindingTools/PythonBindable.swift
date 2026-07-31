@@ -77,6 +77,7 @@ public extension PythonValueBindable {
     ) -> Bool {
         PyAPI.return {
             let arg1 = try Arg1.cast(argv, 1)
+            PyBind.overloadArgumentsMatched = true
             try initializer(arg1).storeInPython(argv)
             return .none
         }
@@ -90,6 +91,7 @@ public extension PythonValueBindable {
         PyAPI.return {
             let arg1 = try Arg1.cast(argv, 1)
             let arg2 = try Arg2.cast(argv, 2)
+            PyBind.overloadArgumentsMatched = true
             try initializer(arg1, arg2).storeInPython(argv)
             return .none
         }
@@ -104,6 +106,7 @@ public extension PythonValueBindable {
             let arg1 = try Arg1.cast(argv, 1)
             let arg2 = try Arg2.cast(argv, 2)
             let arg3 = try Arg3.cast(argv, 3)
+            PyBind.overloadArgumentsMatched = true
             try initializer(arg1, arg2, arg3).storeInPython(argv)
             return .none
         }
@@ -116,6 +119,7 @@ public extension PythonValueBindable {
     ) -> Bool {
         PyAPI.return {
             let arg1 = try Arg1.cast(argv, 1)
+            PyBind.overloadArgumentsMatched = true
             try initializer(arg1).storeInPython(argv)
             return .none
         }
@@ -129,6 +133,7 @@ public extension PythonValueBindable {
         PyAPI.return {
             let arg1 = try Arg1.cast(argv, 1)
             let arg2 = try Arg2.cast(argv, 2)
+            PyBind.overloadArgumentsMatched = true
             try initializer(arg1, arg2).storeInPython(argv)
             return .none
         }
@@ -143,6 +148,7 @@ public extension PythonValueBindable {
             let arg1 = try Arg1.cast(argv, 1)
             let arg2 = try Arg2.cast(argv, 2)
             let arg3 = try Arg3.cast(argv, 3)
+            PyBind.overloadArgumentsMatched = true
             try initializer(arg1, arg2, arg3).storeInPython(argv)
             return .none
         }
