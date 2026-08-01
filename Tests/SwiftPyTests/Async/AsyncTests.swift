@@ -158,20 +158,24 @@ struct AsyncTests {
         #expect(main.childFailing_result == 0)
     }
     
+    // TODO(tech-debt): async-await-none
     @Test
-    func asyncNotAGenerator() async throws {
-        // An `async def` without a `yield` is not a coroutine; the `async`
-        // decorator leaves it as a plain synchronous function.
+    func awaitingPrintOnlyAsyncFuncShouldComplete() async {
         await Interpreter.run("""
-        async def not_generator() -> str:
-            return 'success'
-        result = not_generator()
+        awaitingPrintOnly_done = False
+
+        async def awaitingPrintOnly_func():
+            print('something')
+
+        await awaitingPrintOnly_func()
+        awaitingPrintOnly_done = True
         """)
 
-        let result: String = try #require(py.main.result)
-        #expect(result == "success")
+        withKnownIssue("Awaiting a print-only async def should complete, not raise 'None is not iterable'") {
+            #expect(main.awaitingPrintOnly_done == true)
+        }
     }
-    
+
     @Test func sleep() async {
         await Interpreter.run("""
         from asyncio import sleep

@@ -4,6 +4,7 @@
 //
 
 import Testing
+import Foundation
 @testable import SwiftPy
 
 @MainActor
@@ -47,18 +48,20 @@ struct LocalInterpreterConnectionTests {
         let connection = LocalInterpreterConnection()
         let stream = await connection.events
 
+        let token = UUID()
         await connection.perform(.createContext)
-        await connection.perform(.complete(id: 1, lastComponent: ""))
+        await connection.perform(.complete(id: 1, lastComponent: "", token: token))
 
         var iterator = stream.makeAsyncIterator()
         _ = await iterator.next() // contextCreated
         let event = await iterator.next()
 
-        guard case .completions = event?.payload else {
+        guard case let .completions(_, resultToken) = event?.payload else {
             Issue.record("Expected .completions payload")
             return
         }
         #expect(event?.id == 1)
+        #expect(resultToken == token)
     }
 
     // MARK: - compile

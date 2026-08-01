@@ -32,8 +32,8 @@ public actor LocalInterpreterConnection: InterpreterConnection {
             currentContextId += 1
             send(id: currentContextId, .contextCreated)
 
-        case let .complete(id, lastComponent):
-            await complete(id: id, lastComponent: lastComponent)
+        case let .complete(id, lastComponent, token):
+            await complete(id: id, lastComponent: lastComponent, token: token)
 
         case let .compile(id, source):
             await compile(id: id, source: source)
@@ -111,12 +111,12 @@ public actor LocalInterpreterConnection: InterpreterConnection {
         }
     }
     
-    private func complete(id: UInt64, lastComponent: String) async {
+    private func complete(id: UInt64, lastComponent: String, token: UUID) async {
         let completions = await Interpreter.complete(lastComponent)
 
         // Drop the result if a newer context has been created in the meantime.
         guard currentContextId == id else { return }
-        send(id: id, .completions(suggestions: completions))
+        send(id: id, .completions(suggestions: completions, token: token))
     }
 
     private func compile(id: UInt64, source: String) async {

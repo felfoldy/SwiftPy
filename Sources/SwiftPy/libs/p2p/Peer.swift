@@ -46,13 +46,13 @@ public class Peer: NSObject {
 
     /// Makes the peer discoverable.
     public func advertise() {
-        print("[Peer] advertise as '\(id.displayName)' service: 'pocketpy'")
+        print("[Peer] advertising as '\(id.displayName)'")
         advertiser.startAdvertisingPeer()
     }
 
     /// Starts browsing and connects to the peer with the given name.
     public func autoconnect(name: String) {
-        print("[Peer] autoconnect: browsing for '\(name)' as '\(id.displayName)'")
+        print("[Peer] browsing for '\(name)' as '\(id.displayName)'")
         browser.startBrowsingForPeers()
         peerToConnect = name
     }
@@ -60,11 +60,7 @@ public class Peer: NSObject {
     /// Sends data to all connected peers.
     public func send(data: Data) throws {
         let peers = session.connectedPeers
-        guard !peers.isEmpty else {
-            print("[Peer] send skipped: no connected peers (\(data.count) bytes)")
-            return
-        }
-        print("[Peer] send \(data.count) bytes to \(peers.count) peer(s)")
+        guard !peers.isEmpty else { return }
         try session.send(data, toPeers: peers, with: .reliable)
     }
 }
@@ -85,13 +81,6 @@ extension Peer: MCNearbyServiceAdvertiserDelegate {
         print("[Peer] received invitation from '\(peerID.displayName)', accepting")
         // Allways accepts invitations.
         invitationHandler(true, session)
-    }
-
-    nonisolated public func advertiser(
-        _ advertiser: MCNearbyServiceAdvertiser,
-        didNotStartAdvertisingPeer error: any Error
-    ) {
-        print("[Peer] failed to start advertising: \(error.localizedDescription)")
     }
 }
 
@@ -133,7 +122,6 @@ extension Peer: MCSessionDelegate {
     }
 
     nonisolated public func session(_ session: MCSession, didReceive data: Data, fromPeer peerID: MCPeerID) {
-        print("[Peer] received \(data.count) bytes from '\(peerID.displayName)'")
         Task { @MainActor [self] in
             _ = try? onMessage?(data)
             onMessageHandler?(data)
