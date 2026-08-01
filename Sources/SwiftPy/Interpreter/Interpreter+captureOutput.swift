@@ -7,19 +7,28 @@
 
 import Foundation
 
-/// Buffer the temporary `print` callback appends to while
-/// ``Interpreter/withOutputCapture(_:)`` runs.
-@MainActor
-private var capturedOutput = ""
+enum InterpreterExecutionContext {
+    typealias Output = @MainActor @Sendable (String) -> Void
+
+    @TaskLocal static var output: Output?
+
+    static func withOutput<T>(
+        _ output: @escaping Output,
+        operation: @Sendable () async throws -> T
+    ) async rethrows -> T {
+        try await $output.withValue(output) {
+            try await operation()
+        }
+    }
+}
 
 public extension Interpreter {
     /// Runs `operation` while capturing everything Python prints, and returns
     /// the collected text.
     ///
-    /// pocketpy routes `print` through a synchronous C callback, so it is
-    /// swapped for the duration of `operation` and restored afterwards.
-    /// Capturing there is deterministic, unlike the asynchronous stdout relay
-    /// that feeds the console.
+    /// pocketpy routes `print` through a synchronous C callback. The shared
+    /// callback checks a task-local output sink first, so this capture stays
+    /// scoped to `operation` without replacing global callback state.
     ///
     /// ```swift
     /// let code = try Interpreter.compile("print('hi')")
@@ -33,23 +42,15 @@ public extension Interpreter {
     ///
     /// - Parameter operation: The work whose `print` output should be captured.
     /// - Returns: The concatenated text passed to `print` during `operation`.
-    static func withOutputCapture(_ operation: () async throws -> Void) async rethrows -> String {
-        let previousPrint = py.callbacks.print
-        let previousBuffer = capturedOutput
-        capturedOutput = ""
+    static func withOutputCapture(_ operation: @Sendable () async throws -> Void) async rethrows -> String {
+        var capturedOutput = ""
 
-        py.callbacks.print = { cString in
-            guard let cString else { return }
-            MainActor.assumeIsolated {
-                capturedOutput += String(cString: cString)
-            }
-        }
-        defer {
-            py.callbacks.print = previousPrint
-            capturedOutput = previousBuffer
+        try await InterpreterExecutionContext.withOutput({ text in
+            capturedOutput += text
+        }) {
+            try await operation()
         }
 
-        try await operation()
         return capturedOutput
     }
 }

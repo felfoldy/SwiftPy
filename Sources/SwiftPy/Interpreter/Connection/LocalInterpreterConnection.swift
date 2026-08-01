@@ -90,11 +90,15 @@ public actor LocalInterpreterConnection: InterpreterConnection {
         }
     }
 
-    private func time(id: UInt64, _ call: () async throws -> Void) async {
+    private func time(id: UInt64, _ call: @Sendable () async throws -> Void) async {
         do {
             let time = DispatchTime.now().uptimeNanoseconds
             
-            try await call()
+            try await InterpreterExecutionContext.withOutput({ text in
+                self.send(id: id, .stdout(text: text))
+            }) {
+                try await call()
+            }
             
             let delta = DispatchTime.now().uptimeNanoseconds - time
             let executionTime = Duration.nanoseconds(delta)

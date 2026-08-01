@@ -33,6 +33,20 @@ extension Interpreter {
 
             return nil
         }
+
+        py.callbacks.print = { cString in
+            guard let cString else { return }
+            let text = String(cString: cString)
+
+            if let output = InterpreterExecutionContext.output {
+                MainActor.assumeIsolated {
+                    output(text)
+                }
+            } else {
+                fputs(text, stdout)
+                fflush(stdout)
+            }
+        }
         
         py.callbacks.displayhook = { obj in
             if py.istype(obj, type: .None) { return true }

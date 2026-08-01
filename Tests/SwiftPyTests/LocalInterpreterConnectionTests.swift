@@ -143,6 +143,30 @@ struct LocalInterpreterConnectionTests {
         #expect(result == 42)
     }
 
+    @Test func runTagsPrintOutputWithContextId() async {
+        let connection = LocalInterpreterConnection()
+        let stream = await connection.events
+
+        await connection.perform(.compile(id: 1, source: "print('tagged stdout')"))
+
+        var iterator = stream.makeAsyncIterator()
+        _ = await iterator.next() // inputSource
+        _ = await iterator.next() // isExecutable
+
+        await connection.perform(.run(id: 1))
+
+        var taggedStdout: InterpreterEvent?
+        for _ in 0..<2 {
+            guard let event = await iterator.next() else { break }
+            if case let .stdout(text) = event.payload, event.id == 1, text.contains("tagged stdout") {
+                taggedStdout = event
+                break
+            }
+        }
+
+        #expect(taggedStdout != nil)
+    }
+
     @Test func runWithNonMatchingIdDoesNotExecute() async {
         let connection = LocalInterpreterConnection()
         let stream = await connection.events
