@@ -691,7 +691,7 @@ public struct PythonError: LocalizedError {
     public let type: PyType
 
     /// The exception's value, usually the message string.
-    public let value: PythonConvertible
+    public nonisolated(unsafe) let value: PythonConvertible
 
     /// The full formatted traceback captured from the interpreter, when available.
     public let traceback: String?

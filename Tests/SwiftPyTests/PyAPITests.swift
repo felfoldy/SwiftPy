@@ -79,4 +79,17 @@ struct PyAPITests {
         #expect(error.type == .KeyError)
         #expect(String(describing: error.value) == "missing")
     }
+
+    @Test func errorDescriptionFallsBackToValue() {
+        let error = PythonError.ValueError("boom")
+
+        #expect(error.errorDescription == "boom")
+    }
+
+    @Test func errorDescriptionUsesTraceback() {
+        let error = PythonError.ValueError("boom")
+            .withTraceback("Traceback (most recent call last):\nValueError: boom")
+
+        #expect(error.errorDescription == "Traceback (most recent call last):\nValueError: boom")
+    }
 }
