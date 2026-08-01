@@ -250,8 +250,7 @@ public extension Interpreter {
         let result = try shared.execute(code.code, globals: globals, locals: locals, mode: code.mode)
         if py.istype(result.reference, type: .generator) {
             let task = try AsyncTask(generator: result)
-            await task.untilCompletes()
-            return task.result
+            return try await task.untilCompletes()
         }
         return result
     }

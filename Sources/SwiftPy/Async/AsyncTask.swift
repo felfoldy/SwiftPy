@@ -39,25 +39,19 @@ public class AsyncTask {
         let iterator = try py.retain(py.iter(generator.reference))
 
         pendingWork = {
-            do {
-                while true {
-                    do {
-                        let next = try py.next(iterator.reference)
+            while true {
+                do {
+                    let next = try py.next(iterator.reference)
 
-                        // Fix a loop if any child task fails.
-                        if let child = AsyncTask(next) {
-                            child.resume()
-                            _ = await child.task?.value
-                        } else {
-                            try await Task.sleep(nanoseconds: 1)
-                        }
-                    } catch let error as PythonError where error.type == .StopIteration {
-                        return py.retain(error.value)
+                    if let child = AsyncTask(next) {
+                        child.resume()
+                        await child.task?.value
+                    } else {
+                        try await Task.sleep(nanoseconds: 1)
                     }
+                } catch let error as PythonError where error.type == .StopIteration {
+                    return py.retain(error.value)
                 }
-            } catch {
-                // iteration ended with an error
-                return nil
             }
         }
     }
@@ -84,14 +78,9 @@ public class AsyncTask {
 
     func __next__() throws(PythonError) -> AsyncTask {
         resume()
-        switch outcome {
-        case let .success(value):
-            throw .StopIteration(value?.reference)
-        case let .failure(error):
-            throw error
-        case nil:
-            return self
-        }
+        guard let outcome else { return self }
+        let value = try outcome.get()
+        throw .StopIteration(value?.reference)
     }
 
     deinit {
@@ -117,8 +106,10 @@ extension AsyncTask {
         }
     }
 
-    public func untilCompletes() async {
+    @discardableResult
+    public func untilCompletes() async throws(PythonError) -> PyObject? {
         resume()
         await task?.value
+        return try outcome?.get()
     }
 }

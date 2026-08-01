@@ -244,4 +244,27 @@ struct AsyncTests {
 
         #expect(main.errorPropagates_caught == true)
     }
+
+    @Test
+    func asyncExecuteThrowsTaskFailure() async throws {
+        main.def("asyncExecuteThrows_fail() -> AsyncTask") { _, _ in
+            PyAPI.return {
+                AsyncTask { () async throws -> Void in
+                    throw PythonError.RuntimeError("boom")
+                }
+            }
+        }
+
+        let code = try Interpreter.compile("await asyncExecuteThrows_fail()")
+        var thrownError: PythonError?
+
+        do {
+            try await Interpreter.execute(code)
+        } catch {
+            thrownError = error
+        }
+
+        #expect(thrownError?.type == .RuntimeError)
+        #expect(String(describing: thrownError?.value ?? "") == "boom")
+    }
 }
