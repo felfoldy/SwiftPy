@@ -332,7 +332,7 @@ extension PyBind {
                 let overload = py.list.getitem(overloads, i: i)
 
                 do {
-                    let result = try PyAPI.convertRetval(silenceErrors: true) {
+                    let result = try PyAPI.convertRetval {
                         py.push(overload)
                         py.push(argv)
 
@@ -375,26 +375,22 @@ extension PyBind {
 
                         let argc = forwardArgs(argv?[0])
                         let kwargc = forwardKwargs(argv?[1])
-                        
-                        Interpreter.silenceErrors = true
+
                         PyBind.overloadArgumentsMatched = false
-                        
+
                         return py_vectorcall(UInt16(argc), UInt16(kwargc))
                     }
 
-                    Interpreter.silenceErrors = false
                     return result
                 } catch {
                     if !PyBind.overloadArgumentsMatched {
                         continue
                     }
 
-                    Interpreter.silenceErrors = false
                     throw error
                 }
             }
 
-            Interpreter.silenceErrors = false
             throw PythonError.TypeError("no matching overload")
         }
     }

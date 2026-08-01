@@ -107,6 +107,9 @@ public actor LocalInterpreterConnection: InterpreterConnection {
             
             send(id: id, .attachment(items: [.image(name: "checkmark.circle"), .text(text: executionTime)]))
         } catch {
+            if let error = error as? PythonError, let traceback = error.traceback {
+                send(id: id, .stderr(text: traceback))
+            }
             send(id: id, .attachment(items: [.image(name: "xmark.app")]))
         }
     }
@@ -134,6 +137,9 @@ public actor LocalInterpreterConnection: InterpreterConnection {
             send(id: id, .isExecutable(value: true))
         } catch {
             guard latestCompileId == id else { return }
+            if let traceback = error.traceback {
+                send(id: id, .stderr(text: traceback))
+            }
             send(id: id, .isExecutable(value: false))
             send(id: id, .attachment(items: [.image(name: "xmark.square")]))
         }

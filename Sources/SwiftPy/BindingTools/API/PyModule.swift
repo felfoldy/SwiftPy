@@ -18,34 +18,26 @@ public struct PyModule {
     @inlinable
     public subscript(dynamicMember dynamicMember: String) -> PyObject? {
         get {
-            let attribute = try? Interpreter.silenceErrors {
-                try py.getattr(reference, name: dynamicMember)
-            }
+            let attribute = try? py.getattr(reference, name: dynamicMember)
             return PyObject(attribute)
         }
         nonmutating set {
-            try? Interpreter.silenceErrors {
-                try py.setattr(reference, name: dynamicMember, value: newValue?.reference)
-            }
+            try? py.setattr(reference, name: dynamicMember, value: newValue?.reference)
         }
     }
-    
+
     @inlinable
     public subscript<Value: PythonConvertible>(dynamicMember dynamicMember: String) -> Value? {
         get {
-            try? Interpreter.silenceErrors {
-                try .cast(
-                    py.getattr(reference, name: dynamicMember)
-                )
-            }
+            try? .cast(
+                py.getattr(reference, name: dynamicMember)
+            )
         }
         nonmutating set {
-            try? Interpreter.silenceErrors {
-                let tmp = py.pushtmp()
-                defer { py.pop() }
-                newValue?.toPython(tmp)
-                try py.setattr(reference, name: dynamicMember, value: tmp)
-            }
+            let tmp = py.pushtmp()
+            defer { py.pop() }
+            newValue?.toPython(tmp)
+            try? py.setattr(reference, name: dynamicMember, value: tmp)
         }
     }
 

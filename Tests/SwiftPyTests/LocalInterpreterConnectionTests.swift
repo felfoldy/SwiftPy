@@ -96,6 +96,7 @@ struct LocalInterpreterConnectionTests {
 
         var iterator = stream.makeAsyncIterator()
         _ = await iterator.next() // inputSource
+        _ = await iterator.next() // stderr (compile error traceback)
         let event = await iterator.next()
 
         guard case .isExecutable(let value) = event?.payload else {

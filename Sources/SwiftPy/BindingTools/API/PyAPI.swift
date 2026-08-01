@@ -113,7 +113,6 @@ public struct PyAPI {
     @discardableResult
     @inlinable
     public static func convertRetval(
-        silenceErrors: Bool = false,
         _ call: () -> Bool
     ) throws(PythonError) -> PyRef {
         let p0 = py.peek()
@@ -123,7 +122,7 @@ public struct PyAPI {
 
         let ok = py_matchexc(.BaseException)
         precondition(ok)
-        
+
         let retval = py.retain(py.retval)
 
         let traceback: String?
@@ -134,9 +133,6 @@ public struct PyAPI {
             traceback = nil
         }
 
-        if !silenceErrors && !Interpreter.silenceErrors, let traceback {
-            Interpreter.shared.connection.send(id: 0, .stderr(text: traceback))
-        }
         py.clearexc(p0)
 
         let error = try PythonError.cast(retval.reference)
@@ -750,9 +746,7 @@ extension PythonError: PythonConvertible {
     
     public static func fromPython(_ reference: PyRef) -> PythonError {
         let type = py.typeof(reference)
-        let args = try? Interpreter.silenceErrors {
-            try py.getattr(reference, name: "args")
-        }
+        let args = try? py.getattr(reference, name: "args")
 
         var ref: PyRef? = py_None()
         if let args, py.tuple.len(args) > 0 {

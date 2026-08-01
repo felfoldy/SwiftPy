@@ -73,18 +73,14 @@ public final class PyObject: @MainActor PyReferencing, Sendable {
     @inlinable
     public subscript(dynamicMember dynamicMember: String) -> PyObject? {
         get {
-            let attribute = try? Interpreter.silenceErrors {
-                try py.getattr(reference, name: dynamicMember)
-            }
+            let attribute = try? py.getattr(reference, name: dynamicMember)
             if attribute?.isNone == true {
                 return nil
             }
             return PyObject(attribute)
         }
         set {
-            try? Interpreter.silenceErrors {
-                try py.setattr(reference, name: dynamicMember, value: newValue?.reference)
-            }
+            try? py.setattr(reference, name: dynamicMember, value: newValue?.reference)
         }
     }
 
@@ -102,19 +98,15 @@ public final class PyObject: @MainActor PyReferencing, Sendable {
     @inlinable
     public subscript<Value: PythonConvertible>(dynamicMember dynamicMember: String) -> Value? {
         get {
-            try? Interpreter.silenceErrors {
-                try .cast(
-                    py.getattr(reference, name: dynamicMember)
-                )
-            }
+            try? .cast(
+                py.getattr(reference, name: dynamicMember)
+            )
         }
         set {
-            try? Interpreter.silenceErrors {
-                let tmp = py.pushtmp()
-                defer { py.pop() }
-                newValue?.toPython(tmp)
-                try py.setattr(reference, name: dynamicMember, value: tmp)
-            }
+            let tmp = py.pushtmp()
+            defer { py.pop() }
+            newValue?.toPython(tmp)
+            try? py.setattr(reference, name: dynamicMember, value: tmp)
         }
     }
 
@@ -200,22 +192,18 @@ public final class PyObject: @MainActor PyReferencing, Sendable {
     /// - Parameter key: The dictionary key.
     public subscript<Key: PythonConvertible, Value: PythonConvertible>(_ key: Key) -> Value? {
         get {
-            try? Interpreter.silenceErrors {
-                let key = py.retain(key)
-                let item =  try py.dict.getitem(reference, key: key?.reference)
-                return try .cast(item)
-            }
+            let key = py.retain(key)
+            let item = try? py.dict.getitem(reference, key: key?.reference)
+            return try? .cast(item)
         }
         set {
-            try? Interpreter.silenceErrors {
-                let value = py.retain(newValue)
-                let key = py.retain(key)
-                _ = try py.dict.setitem(
-                    reference,
-                    key: key?.reference,
-                    value: value?.reference
-                )
-            }
+            let value = py.retain(newValue)
+            let key = py.retain(key)
+            _ = try? py.dict.setitem(
+                reference,
+                key: key?.reference,
+                value: value?.reference
+            )
         }
     }
 

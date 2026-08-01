@@ -29,8 +29,6 @@ import OSLog
 public final class Interpreter {
     /// Presents a SwiftUI view in the local console, one view at a time.
     public static var onDisplay: (AnyView) -> Void = { _ in }
-    
-    public static var silenceErrors = false
 
     @usableFromInline
     static let shared = Interpreter()
@@ -144,26 +142,36 @@ public final class Interpreter {
 
         return py.retain(retval)
     }
+
+    /// Reports a Python error to the local interpreter output as `stderr`.
+    func report(_ error: PythonError) {
+        guard let traceback = error.traceback else { return }
+        connection.send(id: 0, .stderr(text: traceback))
+    }
 }
 
 public extension Interpreter {
     /// Compiles and runs source synchronously.
     ///
     /// Only plain code is run; source with top-level async is ignored.
-    /// Compilation and execution failures are silently ignored.
+    /// Errors are reported to the interpreter's output as `stderr`.
     /// - Parameters:
     ///   - source: The Python source to execute.
     ///   - filename: Name used to identify the source in tracebacks. Defaults to `"<string>"`.
     ///   - mode: The compilation mode to use. Defaults to `.execution`.
     static func run(_ source: String, filename: String = "<string>", mode: CompileMode = .single) {
-        guard let code = try? compile(source, filename: filename, mode: mode) else { return }
-        _ = try? execute(code)
+        do {
+            let code = try compile(source, filename: filename, mode: mode)
+            try execute(code)
+        } catch {
+            shared.report(error)
+        }
     }
 
     /// Compiles and runs source, awaiting top-level async.
     ///
     /// Source with top-level async is awaited; other source runs synchronously.
-    /// Compilation and execution failures are silently ignored.
+    /// Errors are reported to the interpreter's output as `stderr`.
     ///
     /// ### Example:
     /// Run a script that uses top-level `await`:
@@ -180,10 +188,12 @@ public extension Interpreter {
     ///   - filename: Name used to identify the source in tracebacks. Defaults to `"<string>"`.
     ///   - mode: The compilation mode to use. Defaults to `.execution`.
     static func run(_ source: String, filename: String = "<string>", mode: CompileMode = .single) async {
-        guard let code: CompiledCode = try? compile(source, filename: filename, mode: mode) else {
-            return
+        do {
+            let code = try compile(source, filename: filename, mode: mode)
+            try await execute(code)
+        } catch {
+            shared.report(error)
         }
-        _ = try? await execute(code)
     }
 
     /// Compiles Python source into reusable ``CompiledCode``.
@@ -268,20 +278,6 @@ public extension Interpreter {
     static func complete(_ text: String) -> [String] {
         let result: [String]? = try? py.module("interpreter")?._completions?(text)
         return result ?? []
-    }
-
-    /// Executes a block with Python error output suppressed.
-    ///
-    /// - Parameter block: A throwing closure to execute with errors silenced.
-    /// - Returns: The value returned by `block`.
-    /// - Throws: Any error thrown by `block`.
-    @discardableResult
-    static func silenceErrors<Result, Failure: Error>(
-        block: () throws(Failure) -> Result
-    ) throws(Failure) -> Result {
-        silenceErrors = true
-        defer { silenceErrors = false }
-        return try block()
     }
 
     static var connection: any InterpreterConnection {
