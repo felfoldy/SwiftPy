@@ -1,11 +1,11 @@
 @Tutorial(time: 10) {
     @Intro(title: "Define and Manage Data Models in Python") {
-        This tutorial guides you through defining data models with the built-in `storage` module in the SwiftPy interpreter, storing them in a `Container`, and performing basic Create, Read, Update, and Delete (CRUD) operations.
+        This tutorial guides you through defining data models with the built-in `storage` module in the SwiftPy interpreter, storing them in a `Store`, and performing basic Create, Read, Update, and Delete (CRUD) operations.
     }
 
-    @Section(title: "Setup and Perform CRUD with Container") {
+    @Section(title: "Setup and Perform CRUD with Store") {
         @ContentAndMedia {
-            In this section, you’ll set up a `Container` and walk through creating, fetching, updating, and deleting model instances.
+            In this section, you’ll set up a `Store` and walk through creating, fetching, updating, and deleting model instances.
         }
 
         @Steps {
@@ -18,9 +18,9 @@
             }
 
             @Step {
-                Initialize the container
+                Initialize the store
 
-                Create a `Container` to manage your model instances.
+                Create a `Store` to manage your model instances.
 
                 @Code(name: "main.py", file: 02-create-data-models.py)
             }

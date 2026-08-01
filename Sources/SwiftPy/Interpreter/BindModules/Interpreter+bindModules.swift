@@ -144,7 +144,7 @@ extension Interpreter {
         bindModule("storage.native") { module in
             if #available(macOS 15, iOS 18, visionOS 2, *) {
                 module.classes(
-                    Container.self,
+                    Store.self,
                     ModelData.self,
                     LookupKeyValue.self,
                 )

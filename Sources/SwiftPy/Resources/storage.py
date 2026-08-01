@@ -1,7 +1,5 @@
 from storage.native import *
 
-Store = Container
-
 def _did_change(self):
     if getattr(self, '_data', None) is not None:
         import json

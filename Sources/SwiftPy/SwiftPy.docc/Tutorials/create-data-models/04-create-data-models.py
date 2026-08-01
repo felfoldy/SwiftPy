@@ -1,5 +1,5 @@
 from modeling import model
-from storage import Container
+from storage import Store
 
 @model
 class Item:
@@ -8,7 +8,7 @@ class Item:
     quantity: int = 0
     description: str | None
 
-container = Container('com.company.items-store')
+container = Store('com.company.items-store')
 
 # Create
 sword = Item(name='Sword', type='weapon')

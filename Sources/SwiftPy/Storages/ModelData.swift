@@ -67,10 +67,10 @@ extension [LookupKeyValue] {
 @available(macOS 15, iOS 18, *)
 @MainActor
 @Scriptable
-class Container: PythonBindable {    
+class Store: PythonBindable {    
     internal let container: SwiftData.ModelContainer
     internal let context: SwiftData.ModelContext
-    internal static var containers = [Container]()
+    internal static var containers = [Store]()
     
     init(name: String, inMemoryOnly: Bool = false) throws {
         let schema = Schema([ModelData.self,
@@ -95,7 +95,7 @@ class Container: PythonBindable {
         
         context = container.mainContext
         
-        Container.containers.append(self)
+        Store.containers.append(self)
     }
     
     func insert(model: PyObject) throws {

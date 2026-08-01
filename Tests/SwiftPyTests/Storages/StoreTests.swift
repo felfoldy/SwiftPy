@@ -1,5 +1,5 @@
 //
-//  ContainerTests.swift
+//  StoreTests.swift
 //  SwiftPy
 //
 //  Created by Tibor Felföldy on 2025-05-03.
@@ -12,14 +12,14 @@ import SwiftData
 
 @MainActor
 @Suite
-struct ContainerTests {
+struct StoreTests {
     private let namespace = PyObject()
 
     init() {
         py.newdict(namespace.reference)
         try! run("""
         from modeling import model
-        from storage import Container
+        from storage import Store
 
         @model
         class Item:
@@ -32,7 +32,7 @@ struct ContainerTests {
     @available(macOS 15, *)
     @Test func insert() throws {
         try run("""
-        container = Container('insert_testing', True)
+        container = Store('insert_testing', True)
         sword = Item(name='Sword')
         container.insert(sword)
         """)
@@ -43,7 +43,7 @@ struct ContainerTests {
         #expect(data.keys?["__name__"] == "Item")
         
         // Is inserted?
-        let container: SwiftPy.Container = try #require(try evaluate("container"))
+        let container: SwiftPy.Store = try #require(try evaluate("container"))
         let models = try container.context.fetch(FetchDescriptor<ModelData>())
         #expect(models == [data])
     }
@@ -51,7 +51,7 @@ struct ContainerTests {
     @available(macOS 15, *)
     @Test func fetch() throws {
         try run("""
-        container = Container('fetch_testing', True)
+        container = Store('fetch_testing', True)
         container.insert(Item(name='Sword'))
         items = container.fetch(Item)
         print(items)
@@ -68,7 +68,7 @@ struct ContainerTests {
     @available(macOS 15, *)
     @Test func update() throws {
         try run("""
-        container = Container('update_testing', True)
+        container = Store('update_testing', True)
         sword = Item(name='Sword')
         container.insert(sword)
         """)
@@ -88,7 +88,7 @@ struct ContainerTests {
     @available(macOS 15, *)
     @Test func delete() throws {
         try run("""
-        container = Container('delete_testing', True)
+        container = Store('delete_testing', True)
         sword = Item(name='Sword')
         container.insert(sword)
         """)
