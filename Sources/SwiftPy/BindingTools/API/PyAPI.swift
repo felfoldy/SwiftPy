@@ -123,13 +123,24 @@ public struct PyAPI {
 
         let ok = py_matchexc(.BaseException)
         precondition(ok)
-        if !silenceErrors && !Interpreter.silenceErrors {
-            let exception = py_formatexc()!
-            Interpreter.shared.connection.send(id: 0, .stderr(text: String(cString: exception)))
+        
+        let retval = py.retain(py.retval)
+
+        let traceback: String?
+        if let exception = py_formatexc() {
+            traceback = String(cString: exception)
+            free(exception)
+        } else {
+            traceback = nil
+        }
+
+        if !silenceErrors && !Interpreter.silenceErrors, let traceback {
+            Interpreter.shared.connection.send(id: 0, .stderr(text: traceback))
         }
         py.clearexc(p0)
 
-        throw try PythonError.cast(py.retval)
+        let error = try PythonError.cast(retval.reference)
+        throw error.withTraceback(traceback)
     }
 
     @discardableResult
@@ -675,87 +686,65 @@ public extension PyRef {
     }
 }
 
-@MainActor
-public indirect enum PythonError: LocalizedError {
-    case SyntaxError(PythonConvertible)
-    case RecursionError(PythonConvertible)
-    case OSError(PythonConvertible)
-    case NotImplementedError(PythonConvertible)
-    case TypeError(PythonConvertible)
-    case IndexError(PythonConvertible)
-    case ValueError(PythonConvertible)
-    case RuntimeError(PythonConvertible)
-    case ZeroDivisionError(PythonConvertible)
-    case NameError(PythonConvertible)
-    case UnboundLocalError(PythonConvertible)
-    case AttributeError(PythonConvertible)
-    case ImportError(PythonConvertible)
-    case AssertionError(PythonConvertible)
-    case KeyError(PythonConvertible)
-    case StopIteration(PythonConvertible)
-    case BaseException(PythonConvertible)
-    
-    static func argCountError(_ got: Int32, expected: Int) -> PythonError {
-        .TypeError("expected \(expected) arguments, got \(got)")
-    }
-    
-    public var value: PythonConvertible {
-        switch self {
-        case let .SyntaxError(value): value
-        case let .RecursionError(value): value
-        case let .OSError(value): value
-        case let .NotImplementedError(value): value
-        case let .TypeError(value): value
-        case let .IndexError(value): value
-        case let .ValueError(value): value
-        case let .RuntimeError(value): value
-        case let .ZeroDivisionError(value): value
-        case let .NameError(value): value
-        case let .UnboundLocalError(value): value
-        case let .AttributeError(value): value
-        case let .ImportError(value): value
-        case let .AssertionError(value): value
-        case let .KeyError(value): value
-        case let .StopIteration(value): value
-        case let .BaseException(value): value
-        }
+public struct PythonError: LocalizedError {
+    /// The kind of exception that was raised.
+    public let type: PyType
+
+    /// The exception's value, usually the message string.
+    public let value: PythonConvertible
+
+    /// The full formatted traceback captured from the interpreter, when available.
+    public let traceback: String?
+
+    public init(type: PyType, value: PythonConvertible, traceback: String? = nil) {
+        self.type = type
+        self.value = value
+        self.traceback = traceback
     }
 
-    public var description: String? {
-        String(describing: value)
+    public var errorDescription: String? {
+        traceback ?? String(describing: value)
+    }
+
+    /// Returns a copy of this error carrying the given traceback.
+    public func withTraceback(_ traceback: String?) -> PythonError {
+        PythonError(type: type, value: value, traceback: traceback)
     }
 
     @MainActor
-    @inlinable
-    public var type: PyType {
-        switch self {
-        case .SyntaxError: .SyntaxError
-        case .RecursionError: .RecursionError
-        case .OSError: .OSError
-        case .NotImplementedError: .NotImplementedError
-        case .TypeError: .TypeError
-        case .IndexError: .IndexError
-        case .ValueError: .ValueError
-        case .RuntimeError: .RuntimeError
-        case .ZeroDivisionError: .ZeroDivisionError
-        case .NameError: .NameError
-        case .UnboundLocalError: .UnboundLocalError
-        case .AttributeError: .AttributeError
-        case .ImportError: .ImportError
-        case .AssertionError: .AssertionError
-        case .KeyError: .KeyError
-        case .StopIteration: .StopIteration
-        case .BaseException: .BaseException
-        }
+    static func argCountError(_ got: Int32, expected: Int) -> PythonError {
+        .TypeError("expected \(expected) arguments, got \(got)")
     }
 
-    public static let pyType = PyType.BaseException
+    @MainActor
+    public static var pyType: PyType { .BaseException }
+}
+
+// MARK: - Exception constructors
+
+public extension PythonError {
+    static func SyntaxError(_ value: PythonConvertible) -> PythonError { .init(type: .SyntaxError, value: value) }
+    static func RecursionError(_ value: PythonConvertible) -> PythonError { .init(type: .RecursionError, value: value) }
+    static func OSError(_ value: PythonConvertible) -> PythonError { .init(type: .OSError, value: value) }
+    static func NotImplementedError(_ value: PythonConvertible) -> PythonError { .init(type: .NotImplementedError, value: value) }
+    static func TypeError(_ value: PythonConvertible) -> PythonError { .init(type: .TypeError, value: value) }
+    static func IndexError(_ value: PythonConvertible) -> PythonError { .init(type: .IndexError, value: value) }
+    static func ValueError(_ value: PythonConvertible) -> PythonError { .init(type: .ValueError, value: value) }
+    static func RuntimeError(_ value: PythonConvertible) -> PythonError { .init(type: .RuntimeError, value: value) }
+    static func ZeroDivisionError(_ value: PythonConvertible) -> PythonError { .init(type: .ZeroDivisionError, value: value) }
+    static func NameError(_ value: PythonConvertible) -> PythonError { .init(type: .NameError, value: value) }
+    static func UnboundLocalError(_ value: PythonConvertible) -> PythonError { .init(type: .UnboundLocalError, value: value) }
+    static func AttributeError(_ value: PythonConvertible) -> PythonError { .init(type: .AttributeError, value: value) }
+    static func ImportError(_ value: PythonConvertible) -> PythonError { .init(type: .ImportError, value: value) }
+    static func AssertionError(_ value: PythonConvertible) -> PythonError { .init(type: .AssertionError, value: value) }
+    static func KeyError(_ value: PythonConvertible) -> PythonError { .init(type: .KeyError, value: value) }
+    static func StopIteration(_ value: PythonConvertible) -> PythonError { .init(type: .StopIteration, value: value) }
+    static func BaseException(_ value: PythonConvertible) -> PythonError { .init(type: .BaseException, value: value) }
 }
 
 extension PythonError: PythonConvertible {
-    // TODO: test
     public func toPython(_ reference: PyRef) {
-        let error = try! py.call(py.tpobject(type)!, args: description)
+        let error = try! py.call(py.tpobject(type)!, args: value)
         reference.assign(error)
     }
     
@@ -776,25 +765,6 @@ extension PythonError: PythonConvertible {
             ref
         }
 
-        return switch type {
-        case .SyntaxError: .SyntaxError(value)
-        case .OSError: .OSError(value)
-        case .NotImplementedError: .NotImplementedError(value)
-        case .RecursionError: .RecursionError(value)
-        case .RuntimeError: .RuntimeError(value)
-        case .TypeError: .TypeError(value)
-        case .IndexError: .IndexError(value)
-        case .ValueError: .ValueError(value)
-        case .ZeroDivisionError: .ZeroDivisionError(value)
-        case .UnboundLocalError: .UnboundLocalError(value)
-        case .NameError: .NameError(value)
-        case .AttributeError: .AttributeError(value)
-        case .ImportError: .ImportError(value)
-        case .AssertionError: .AssertionError(value)
-        case .KeyError: .KeyError(value)
-
-        case .StopIteration: .StopIteration(value)
-        default: .BaseException(value)
-        }
+        return PythonError(type: type, value: value)
     }
 }

@@ -51,8 +51,8 @@ public class AsyncTask {
                         } else {
                             try await Task.sleep(nanoseconds: 1)
                         }
-                    } catch let PythonError.StopIteration(result) {
-                        return py.retain(result)
+                    } catch let error as PythonError where error.type == .StopIteration {
+                        return py.retain(error.value)
                     }
                 }
             } catch {

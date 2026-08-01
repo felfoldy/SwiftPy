@@ -51,9 +51,32 @@ struct PyAPITests {
         def referenceCallThrows():
             raise ValueError('incorrect')
         """)
-        
+
         #expect(throws: PythonError.self) {
             try py.main.referenceCallThrows?()
         }
+    }
+
+    @Test func errorToPython() {
+        py.main.err = PythonError.ValueError("boom")
+
+        Interpreter.run("""
+        def reraise():
+            raise err
+        """)
+
+        let error = #expect(throws: PythonError.self) {
+            try py.main.reraise?()
+        }
+        #expect(error?.type == .ValueError)
+        #expect(String(describing: error?.value ?? "") == "boom")
+    }
+
+    @Test func errorToPythonRoundTrip() throws {
+        py.main.err = PythonError.KeyError("missing")
+
+        let error = try #require(PythonError(py.main.err))
+        #expect(error.type == .KeyError)
+        #expect(String(describing: error.value) == "missing")
     }
 }

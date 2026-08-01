@@ -7,7 +7,6 @@
 
 import pocketpy
 
-@MainActor
 public extension PyType {
     static let None = PyType(tp_NoneType.rawValue)
     static let bool = PyType(tp_bool.rawValue)
@@ -43,7 +42,10 @@ public extension PyType {
     static let AssertionError = PyType(tp_AssertionError.rawValue)
     static let KeyError = PyType(tp_KeyError.rawValue)
     static let StopIteration = PyType(tp_StopIteration.rawValue)
+}
 
+@MainActor
+public extension PyType {
     // MARK: - Convenient extensions.
 
     @inlinable
