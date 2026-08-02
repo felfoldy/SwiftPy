@@ -343,6 +343,8 @@ struct HelpTests {
 
         @Test("lists registered modules")
         func listsRegisteredModules() throws {
+            PyBind.module("testing.helper") { _ in }
+
             Interpreter.run("""
             import builtins as _b
             _mods_cap = []
@@ -364,6 +366,7 @@ struct HelpTests {
             #expect(output.contains("  p2p"))
             #expect(output.contains("  pathlib"))
             #expect(!output.contains("interpreter.native"))
+            #expect(!output.contains("testing.helper"))
             #expect(!output.contains("help"))
             #expect(!output.contains("rlcompleter"))
         }

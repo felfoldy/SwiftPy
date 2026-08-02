@@ -71,7 +71,7 @@ public final class Interpreter {
 
         return Array(Set(nativeModules).union(sourceModules))
             .filter { name in
-                !name.hasSuffix(".native") && !hiddenModules.contains(name)
+                !name.contains(".") && !name.contains("/") && !hiddenModules.contains(name)
             }
             .sorted()
     }
