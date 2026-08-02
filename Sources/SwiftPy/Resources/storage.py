@@ -1,3 +1,5 @@
+__doc__ = "Provides persistent storage for model instances via Store."
+
 from storage.native import *
 
 def _did_change(self):
