@@ -42,6 +42,15 @@ struct InterpreterTests {
         #expect(py.main.isolated_marker == nil)
     }
 
+    @Test func clearMain_removesUserDefinedVariables() {
+        Interpreter.run("_test_clear_x = 42")
+        #expect(Interpreter.evaluate("_test_clear_x") == 42 as Int?)
+
+        py.clearMain()
+
+        #expect(py.main._test_clear_x == nil)
+    }
+
     @Test func isolatedExecuteCapturesResultsInProvidedNamespace() async throws {
         let namespace = PyObject()
         py.newdict(namespace.reference)

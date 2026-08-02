@@ -376,6 +376,28 @@ public extension PyAPI {
     }
 }
 
+// MARK: - Main module
+
+public extension PyAPI {
+    /// Removes all non-dunder names from `__main__`'s namespace.
+    func clearMain() {
+        let mainRef = main.reference
+        var namesToDelete = [py_Name]()
+        _ = withUnsafeMutablePointer(to: &namesToDelete) { ctx in
+            py_applydict(mainRef, { name, _, ctx in
+                guard let name,
+                      let cStr = py_name2str(name),
+                      !String(cString: cStr).hasPrefix("__") else { return true }
+                ctx!.assumingMemoryBound(to: [py_Name].self).pointee.append(name)
+                return true
+            }, ctx)
+        }
+        for name in namesToDelete {
+            py_deldict(mainRef, name)
+        }
+    }
+}
+
 // MARK: - Native type conversions
 
 public extension PyAPI {
