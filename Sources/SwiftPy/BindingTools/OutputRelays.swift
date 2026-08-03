@@ -54,16 +54,21 @@ class OutputRelayHandler {
 @MainActor
 public struct OutputRelays {
     let outputRelayHandler: OutputRelayHandler
-    let errorRelayHandler: OutputRelayHandler
+    let errorRelayHandler: OutputRelayHandler?
 
     init(interpreter: Interpreter, filterOSLog: Bool = true) {
         setvbuf(stdout, nil, _IONBF, 0)
         setvbuf(stderr, nil, _IONBF, 0)
 
         let connection = interpreter.connection
-        
+
         outputRelayHandler = OutputRelayHandler(stream: STDOUT_FILENO) { value in
             connection.send(id: 0, .stdout(text: value))
+        }
+
+        if ProcessInfo.processInfo.environment["SWIFTPY_DISABLE_STDERR_RELAY"] != nil {
+            errorRelayHandler = nil
+            return
         }
 
         errorRelayHandler = OutputRelayHandler(stream: STDERR_FILENO) { value in
