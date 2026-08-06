@@ -121,7 +121,7 @@ extension Interpreter {
             }
 
             module.def("set_timeout(milliseconds: int | None) -> None",
-                       docstring: "Sets the execution timeout in milliseconds, or None to disable it.") { argc, argv in
+                       docstring: "Sets the execution timeout, or None to disable it.") { argc, argv in
                 PyBind.function(argc, argv) { (milliseconds: Int?) in
                     Interpreter.timeout = milliseconds
                 }

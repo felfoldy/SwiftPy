@@ -96,30 +96,32 @@ public actor LocalInterpreterConnection: InterpreterConnection {
     }
 
     private func time(id: UInt64, _ call: @Sendable () async throws -> Void) async {
-        do {
-            let time = DispatchTime.now().uptimeNanoseconds
-            
-            try await InterpreterExecutionContext.withOutput({ text in
-                self.send(id: id, .stdout(text: text))
-            }) {
-                try await call()
-            }
-            
+        let time = DispatchTime.now().uptimeNanoseconds
+
+        func executionTime() -> String {
             let delta = DispatchTime.now().uptimeNanoseconds - time
-            let executionTime = Duration.nanoseconds(delta)
+            return Duration.nanoseconds(delta)
                 .formatted(
                     .units(
                         allowed: [.milliseconds, .seconds],
                         fractionalPart: .show(length: 2, rounded: .up)
                     )
                 )
-            
-            send(id: id, .attachment(items: [.image(name: "checkmark.circle"), .text(text: executionTime)]))
+        }
+
+        do {
+            try await InterpreterExecutionContext.withOutput({ text in
+                self.send(id: id, .stdout(text: text))
+            }) {
+                try await call()
+            }
+
+            send(id: id, .attachment(items: [.image(name: "checkmark.circle"), .text(text: executionTime())]))
         } catch {
             if let error = error as? PythonError, let traceback = error.traceback {
                 send(id: id, .stderr(text: traceback))
             }
-            send(id: id, .attachment(items: [.image(name: "xmark.app")]))
+            send(id: id, .attachment(items: [.image(name: "exclamationmark.triangle"), .text(text: executionTime())]))
         }
     }
     
