@@ -54,11 +54,10 @@ class OutputRelayHandler {
 @MainActor
 public struct OutputRelays {
     let outputRelayHandler: OutputRelayHandler
-    let errorRelayHandler: OutputRelayHandler?
+    var errorRelayHandler: OutputRelayHandler?
 
-    init(interpreter: Interpreter, filterOSLog: Bool = true) {
+    init(interpreter: Interpreter) {
         setvbuf(stdout, nil, _IONBF, 0)
-        setvbuf(stderr, nil, _IONBF, 0)
 
         let connection = interpreter.connection
 
@@ -66,11 +65,14 @@ public struct OutputRelays {
             connection.send(id: 0, .stdout(text: value))
         }
 
-        if ProcessInfo.processInfo.environment["SWIFTPY_DISABLE_STDERR_RELAY"] != nil {
-            errorRelayHandler = nil
-            return
-        }
+        errorRelayHandler = nil
+    }
 
+    mutating func enableStderrRelay() {
+        guard errorRelayHandler == nil else { return }
+
+        setvbuf(stderr, nil, _IONBF, 0)
+        let connection = Interpreter.shared.connection
         errorRelayHandler = OutputRelayHandler(stream: STDERR_FILENO) { value in
             #if DEBUG
             let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)

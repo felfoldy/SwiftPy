@@ -151,6 +151,11 @@ public final class Interpreter {
 }
 
 public extension Interpreter {
+    /// Enables relaying process `stderr` output to the local interpreter output.
+    static func enableStderrRelay() {
+        shared.relays?.enableStderrRelay()
+    }
+
     /// Compiles and runs source synchronously.
     ///
     /// Only plain code is run; source with top-level async is ignored.
