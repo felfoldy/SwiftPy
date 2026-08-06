@@ -30,6 +30,13 @@ public final class Interpreter {
     /// Presents a SwiftUI view in the local console, one view at a time.
     public static var onDisplay: (AnyView) -> Void = { _ in }
 
+    /// CPU-time budget, in milliseconds, for an execution
+    /// before the interpreter aborts it with a `TimeoutError`.
+    ///
+    /// Defaults to `1000`. Set to `nil` to disable the watchdog and allow
+    /// unbounded execution.
+    public static var timeout: Int? = 1000
+
     @usableFromInline
     static let shared = Interpreter()
 
@@ -125,6 +132,11 @@ public final class Interpreter {
         locals: PyObject? = nil,
         mode: CompileMode = .execution
     ) throws(PythonError) -> PyObject {
+        if let timeout = Interpreter.timeout {
+            py.beginWatchdog(milliseconds: timeout)
+        }
+        defer { py.endWatchdog() }
+
         if let globals {
             let function = py.getbuiltin(mode == .evaluation ? "eval" : "exec")!
             let retval = try py.call(function, args: code, globals, locals ?? globals)
