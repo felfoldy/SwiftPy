@@ -80,7 +80,10 @@ public class AsyncTask {
 
         Interpreter.shared.connection.send(
             id: contextId,
-            .attachment(items: isActive ? [.stopwatch, .task(lineNumber: entry.lineNumber, progress: nil)] : [.stopwatch])
+            .feedback(item: ExecutionFeedback(
+                lineNumber: entry.lineNumber,
+                type: isActive ? .task(progress: nil) : nil
+            ))
         )
     }
 

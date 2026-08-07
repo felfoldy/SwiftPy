@@ -49,7 +49,24 @@ public struct InterpreterEvent: Codable, Sendable {
         case stdout(text: String)
         case stderr(text: String)
 
+        case feedback(item: ExecutionFeedback)
         case attachment(items: [InputAttachment])
+    }
+}
+
+public struct ExecutionFeedback: Codable, Sendable, Hashable, Identifiable {
+    public enum FeedbackType: Codable, Sendable, Hashable {
+        case task(progress: Double?)
+    }
+
+    public let lineNumber: Int
+    public let type: FeedbackType?
+
+    public var id: Self { self }
+
+    public init(lineNumber: Int, type: FeedbackType?) {
+        self.lineNumber = lineNumber
+        self.type = type
     }
 }
 
@@ -57,7 +74,6 @@ public enum InputAttachment: Codable, Sendable, Hashable, Identifiable {
     case image(name: String)
     case text(text: String)
     case stopwatch
-    case task(lineNumber: Int, progress: Double?)
     case play
 
     public var id: Self { self }
