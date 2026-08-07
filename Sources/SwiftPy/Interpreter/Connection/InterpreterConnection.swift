@@ -74,7 +74,6 @@ public enum InputAttachment: Codable, Sendable, Hashable, Identifiable {
     case image(name: String)
     case text(text: String)
     case stopwatch
-    case play
 
     public var id: Self { self }
 }
