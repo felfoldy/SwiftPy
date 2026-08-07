@@ -11,6 +11,12 @@ public final class LineTracer {
         public let source: String
         public let lineNumber: Int
         public let time: Duration
+
+        public var contextId: UInt64? {
+            let prefix = "<script>/"
+            guard source.hasPrefix(prefix) else { return nil }
+            return UInt64(source.dropFirst(prefix.count))
+        }
     }
 
     private let clock = ContinuousClock()

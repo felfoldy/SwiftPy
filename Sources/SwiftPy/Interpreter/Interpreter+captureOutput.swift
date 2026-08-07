@@ -9,7 +9,6 @@ import Foundation
 
 enum InterpreterExecutionContext {
     typealias Output = @MainActor @Sendable (String) -> Void
-
     struct Context {
         var output: Output?
         var traceRecorder: LineTracer?

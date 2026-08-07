@@ -126,6 +126,10 @@ public actor LocalInterpreterConnection: InterpreterConnection {
         }
     }
     
+    private func sourceLocation(for id: UInt64) -> String {
+        "<script>/\(id)"
+    }
+
     private func complete(id: UInt64, lastComponent: String, token: UUID) async {
         let completions = await Interpreter.complete(lastComponent)
 
@@ -142,7 +146,11 @@ public actor LocalInterpreterConnection: InterpreterConnection {
         send(id: id, .inputSource(text: source))
 
         do {
-            let code = try await Interpreter.shared.compile(source, filename: "<stdin>", mode: .single)
+            let code = try await Interpreter.shared.compile(
+                source,
+                filename: sourceLocation(for: id),
+                mode: .single
+            )
 
             guard latestCompileId == id else { return }
             compiled = CompileResult(id: id, code: code)

@@ -60,6 +60,7 @@ public class AsyncTask {
     public func resume() {
         guard let work = pendingWork else { return }
         pendingWork = nil
+        notifyTaskActivity(isActive: true)
         task = Task { [self] in
             do {
                 outcome = .success(try await work())
@@ -68,7 +69,19 @@ public class AsyncTask {
             } catch {
                 outcome = .failure(.RuntimeError(error.localizedDescription))
             }
+            notifyTaskActivity(isActive: false)
         }
+    }
+
+    private func notifyTaskActivity(isActive: Bool) {
+        guard let entry = InterpreterExecutionContext.current.traceRecorder?.entries.last,
+              let contextId = entry.contextId
+        else { return }
+
+        Interpreter.shared.connection.send(
+            id: contextId,
+            .attachment(items: isActive ? [.stopwatch, .task(lineNumber: entry.lineNumber, progress: nil)] : [.stopwatch])
+        )
     }
 
     func __iter__() -> AsyncTask {
