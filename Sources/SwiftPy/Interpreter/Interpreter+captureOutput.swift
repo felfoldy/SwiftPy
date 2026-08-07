@@ -12,18 +12,21 @@ enum InterpreterExecutionContext {
     struct Context {
         var output: Output?
         var traceRecorder: LineTracer?
+        var cancellation: RunCancellation?
     }
 
     @TaskLocal static var current = Context()
 
     static func withOutput<T>(
         _ traceRecorder: LineTracer? = nil,
+        cancellation: RunCancellation? = nil,
         operation: @Sendable () async throws -> T,
         stdout: @escaping Output
     ) async rethrows -> T {
         var context = current
         context.output = stdout
         context.traceRecorder = traceRecorder
+        context.cancellation = cancellation
 
         return try await $current.withValue(context) {
             try await operation()

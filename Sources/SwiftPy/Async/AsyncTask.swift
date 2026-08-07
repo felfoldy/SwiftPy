@@ -40,6 +40,10 @@ public class AsyncTask {
 
         pendingWork = {
             while true {
+                // A stop request cancels this task; unwind instead of driving
+                // the coroutine forward again.
+                try Task.checkCancellation()
+
                 do {
                     let next = try py.next(iterator.reference)
 
@@ -61,7 +65,8 @@ public class AsyncTask {
         guard let work = pendingWork else { return }
         pendingWork = nil
         notifyTaskActivity(isActive: true)
-        task = Task { [self] in
+        let cancellation = InterpreterExecutionContext.current.cancellation
+        let task = Task { [self] in
             do {
                 outcome = .success(try await work())
             } catch let error as PythonError {
@@ -71,6 +76,10 @@ public class AsyncTask {
             }
             notifyTaskActivity(isActive: false)
         }
+        self.task = task
+        // A stop request must reach this task even though it runs unstructured
+        // and would not inherit cancellation otherwise.
+        cancellation?.onCancel { task.cancel() }
     }
 
     private func notifyTaskActivity(isActive: Bool) {

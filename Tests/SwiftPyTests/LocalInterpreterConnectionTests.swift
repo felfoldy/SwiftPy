@@ -181,4 +181,88 @@ struct LocalInterpreterConnectionTests {
         let result: Int? = Interpreter.evaluate("_test_no_run_y")
         #expect(result == nil)
     }
+
+    // MARK: - stop
+
+    @Test func stopCancelsRunningExecutionAndEmitsStopped() async {
+        let connection = LocalInterpreterConnection()
+        let stream = await connection.events
+
+        await connection.perform(.compile(id: 1, source: """
+        import asyncio
+        _test_stop_flag = False
+        await asyncio.sleep(2)
+        _test_stop_flag = True
+        """))
+
+        var iterator = stream.makeAsyncIterator()
+        _ = await iterator.next() // inputSource
+        _ = await iterator.next() // isExecutable
+
+        // Start the run; it suspends on the awaited sleep and yields the actor.
+        let runTask = Task { await connection.perform(.run(id: 1)) }
+        try? await Task.sleep(for: .milliseconds(50))
+
+        await connection.perform(.stop(id: 1))
+        await runTask.value
+
+        var stopped = false
+        while let event = await iterator.next() {
+            if case .stopped = event.payload, event.id == 1 {
+                stopped = true
+                break
+            }
+        }
+
+        #expect(stopped)
+        // The continuation after the awaited sleep must not have run.
+        #expect(Interpreter.evaluate("_test_stop_flag") == false)
+    }
+
+    @Test func stopCancelsAllConcurrentlyAwaitedTasks() async {
+        let connection = LocalInterpreterConnection()
+        let stream = await connection.events
+
+        // Two tasks awaited concurrently: a single-slot handler would only
+        // cancel one of them, so the continuation would still run.
+        await connection.perform(.compile(id: 1, source: """
+        import asyncio
+
+        _test_gather_flag = False
+
+        async def _test_gather_wait():
+            await asyncio.sleep(2)
+
+        await asyncio.gather(_test_gather_wait(), _test_gather_wait())
+        _test_gather_flag = True
+        """))
+
+        var iterator = stream.makeAsyncIterator()
+        _ = await iterator.next() // inputSource
+        _ = await iterator.next() // isExecutable
+
+        let runTask = Task { await connection.perform(.run(id: 1)) }
+        try? await Task.sleep(for: .milliseconds(50))
+
+        await connection.perform(.stop(id: 1))
+        await runTask.value
+
+        #expect(Interpreter.evaluate("_test_gather_flag") == false)
+    }
+
+    @Test func stopWithUnknownIdDoesNotEmitStopped() async {
+        let connection = LocalInterpreterConnection()
+        let stream = await connection.events
+
+        await connection.perform(.stop(id: 999)) // nothing running
+        await connection.perform(.compile(id: 1, source: "1 + 1"))
+
+        // The next event should be the compile's inputSource, not a `.stopped`.
+        var iterator = stream.makeAsyncIterator()
+        let event = await iterator.next()
+        guard case .inputSource = event?.payload else {
+            Issue.record("Expected .inputSource, stop on an unknown id should emit nothing")
+            return
+        }
+    }
 }

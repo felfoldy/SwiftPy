@@ -17,6 +17,8 @@ public actor LocalInterpreterConnection: InterpreterConnection {
     var continuations: [UUID: AsyncStream<InterpreterEvent>.Continuation] = [:]
     var latestCompileId: UInt64 = 0
     var compiled: CompileResult?
+    /// Cancellation tokens for executions currently in flight, keyed by context id.
+    private var running: [UInt64: RunCancellation] = [:]
 
     private let _sendContinuation: AsyncStream<InterpreterEvent>.Continuation
 
@@ -40,9 +42,19 @@ public actor LocalInterpreterConnection: InterpreterConnection {
 
         case let .run(id):
             guard let compiled, compiled.id == id else { return }
-            await time(id: id) {
-                try await Interpreter.execute(compiled.code)
+            let code = compiled.code
+            let cancellation = RunCancellation()
+            running[id] = cancellation
+            await time(id: id, cancellation: cancellation) {
+                try await Interpreter.execute(code)
             }
+            running[id] = nil
+
+        case let .stop(id):
+            // Reentrancy: this runs while `.run` is suspended awaiting execution.
+            guard let cancellation = running.removeValue(forKey: id) else { return }
+            await cancellation.cancel()
+            send(id: id, .stopped)
 
         case let .execute(source):
             // Reuse the standard flow: allocate a fresh context, then compile and run it.
@@ -95,7 +107,7 @@ public actor LocalInterpreterConnection: InterpreterConnection {
         }
     }
 
-    private func time(id: UInt64, _ call: @Sendable () async throws -> Void) async {
+    private func time(id: UInt64, cancellation: RunCancellation? = nil, _ call: @Sendable () async throws -> Void) async {
         let time = DispatchTime.now().uptimeNanoseconds
         let tracer = await LineTracer()
 
@@ -111,14 +123,18 @@ public actor LocalInterpreterConnection: InterpreterConnection {
         }
 
         do {
-            try await InterpreterExecutionContext.withOutput(tracer) {
+            try await InterpreterExecutionContext.withOutput(tracer, cancellation: cancellation) {
                 try await call()
             } stdout: { text in
                 self.send(id: id, .stdout(text: text))
             }
 
+            // A stop request already acknowledged with `.stopped`; don't also
+            // report success for the unwound execution.
+            if await cancellation?.isCancelled == true { return }
             send(id: id, .attachment(items: [.image(name: "checkmark.circle"), .text(text: executionTime())]))
         } catch {
+            if await cancellation?.isCancelled == true { return }
             if let error = error as? PythonError, let traceback = error.traceback {
                 send(id: id, .stderr(text: traceback))
             }

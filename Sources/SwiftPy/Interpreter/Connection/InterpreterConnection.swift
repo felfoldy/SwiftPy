@@ -28,6 +28,8 @@ public enum ConsoleCommand: Codable, Sendable {
     case complete(id: UInt64, lastComponent: String, token: UUID)
     case compile(id: UInt64, source: String)
     case run(id: UInt64)
+    /// Cooperatively cancels the awaited work of a running execution.
+    case stop(id: UInt64)
     /// Compiles and runs a source in one step, assigning it a fresh context id.
     case execute(source: String)
 }
@@ -45,6 +47,8 @@ public struct InterpreterEvent: Codable, Sendable {
         case isExecutable(value: Bool)
 
         case isRunning(value: Bool)
+        /// Acknowledges that a running execution was stopped before completing.
+        case stopped
 
         case stdout(text: String)
         case stderr(text: String)
