@@ -127,6 +127,20 @@ extension Interpreter {
                 }
             }
 
+            module.def("enable_trace() -> None",
+                       docstring: "Enables Python line tracing for the current interpreter.") { argc, argv in
+                PyBind.function(argc, argv) {
+                    Interpreter.enableTrace()
+                }
+            }
+
+            module.def("disable_trace() -> None",
+                       docstring: "Disables Python line tracing for the current interpreter.") { argc, argv in
+                PyBind.function(argc, argv) {
+                    Interpreter.disableTrace()
+                }
+            }
+
             let appVersion = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? ""
             module.app_version = appVersion
             module.pocketpy_version = py.version

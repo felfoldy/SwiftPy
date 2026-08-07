@@ -58,7 +58,7 @@ public actor LocalInterpreterConnection: InterpreterConnection {
         if let view = viewObject?.view {
             Interpreter.onDisplay(view)
         } else if let repr = try? py.repr(viewObject) {
-            if let output = InterpreterExecutionContext.output {
+            if let output = InterpreterExecutionContext.current.output {
                 output(repr)
             } else {
                 print(repr)
@@ -97,6 +97,7 @@ public actor LocalInterpreterConnection: InterpreterConnection {
 
     private func time(id: UInt64, _ call: @Sendable () async throws -> Void) async {
         let time = DispatchTime.now().uptimeNanoseconds
+        let tracer = await LineTracer()
 
         func executionTime() -> String {
             let delta = DispatchTime.now().uptimeNanoseconds - time
@@ -110,10 +111,10 @@ public actor LocalInterpreterConnection: InterpreterConnection {
         }
 
         do {
-            try await InterpreterExecutionContext.withOutput({ text in
-                self.send(id: id, .stdout(text: text))
-            }) {
+            try await InterpreterExecutionContext.withOutput(tracer) {
                 try await call()
+            } stdout: { text in
+                self.send(id: id, .stdout(text: text))
             }
 
             send(id: id, .attachment(items: [.image(name: "checkmark.circle"), .text(text: executionTime())]))
@@ -156,4 +157,3 @@ public actor LocalInterpreterConnection: InterpreterConnection {
         }
     }
 }
-

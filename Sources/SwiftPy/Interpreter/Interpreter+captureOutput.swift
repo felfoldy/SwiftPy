@@ -10,13 +10,23 @@ import Foundation
 enum InterpreterExecutionContext {
     typealias Output = @MainActor @Sendable (String) -> Void
 
-    @TaskLocal static var output: Output?
+    struct Context {
+        var output: Output?
+        var traceRecorder: LineTracer?
+    }
+
+    @TaskLocal static var current = Context()
 
     static func withOutput<T>(
-        _ output: @escaping Output,
-        operation: @Sendable () async throws -> T
+        _ traceRecorder: LineTracer? = nil,
+        operation: @Sendable () async throws -> T,
+        stdout: @escaping Output
     ) async rethrows -> T {
-        try await $output.withValue(output) {
+        var context = current
+        context.output = stdout
+        context.traceRecorder = traceRecorder
+
+        return try await $current.withValue(context) {
             try await operation()
         }
     }
@@ -40,15 +50,20 @@ public extension Interpreter {
     /// Nested calls are supported: each returns only the text printed within
     /// its own scope, and the enclosing capture resumes afterwards.
     ///
-    /// - Parameter operation: The work whose `print` output should be captured.
+    /// - Parameters:
+    ///   - traceRecorder: Optional line tracer scoped to the operation.
+    ///   - operation: The work whose `print` output should be captured.
     /// - Returns: The concatenated text passed to `print` during `operation`.
-    static func withOutputCapture(_ operation: @Sendable () async throws -> Void) async rethrows -> String {
+    static func withOutputCapture(
+        _ traceRecorder: LineTracer? = nil,
+        operation: @Sendable () async throws -> Void
+    ) async rethrows -> String {
         var capturedOutput = ""
 
-        try await InterpreterExecutionContext.withOutput({ text in
-            capturedOutput += text
-        }) {
+        try await InterpreterExecutionContext.withOutput(traceRecorder) {
             try await operation()
+        } stdout: { text in
+            capturedOutput += text
         }
 
         return capturedOutput

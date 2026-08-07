@@ -58,7 +58,7 @@ public extension PyAPI {
     }
 
     /// A trace callback invoked by the VM as it executes Python code.
-    typealias TraceFunction = (Frame, TraceEvent) -> Void
+    typealias TraceFunction = @MainActor (Frame, TraceEvent) -> Void
 
     /// Installs a trace function invoked by the VM on every source line and on
     /// every frame push/pop, or removes the current one when `trace` is `nil`.

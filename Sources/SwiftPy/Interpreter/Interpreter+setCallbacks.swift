@@ -38,10 +38,8 @@ extension Interpreter {
             guard let cString else { return }
             let text = String(cString: cString)
 
-            if let output = InterpreterExecutionContext.output {
-                MainActor.assumeIsolated {
-                    output(text)
-                }
+            if let output = InterpreterExecutionContext.current.output {
+                output(text)
             } else {
                 fputs(text, stdout)
                 fflush(stdout)
