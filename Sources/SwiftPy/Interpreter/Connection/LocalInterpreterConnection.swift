@@ -30,25 +30,8 @@ public actor LocalInterpreterConnection: InterpreterConnection {
 
     public func perform(_ command: ConsoleCommand) async {
         switch command {
-        case .createContext:
-            currentContextId += 1
-            send(id: currentContextId, .contextCreated)
-
-        case let .complete(id, lastComponent, token):
-            await complete(id: id, lastComponent: lastComponent, token: token)
-
-        case let .compile(id, source):
-            await compile(id: id, source: source)
-
-        case let .run(id):
-            guard let compiled, compiled.id == id else { return }
-            let code = compiled.code
-            let cancellation = RunCancellation()
-            running[id] = cancellation
-            await time(id: id, cancellation: cancellation) {
-                try await Interpreter.execute(code)
-            }
-            running[id] = nil
+        case let .complete(token, lastComponent):
+            await complete(lastComponent: lastComponent, token: token)
 
         case let .stop(id):
             // Reentrancy: this runs while `.run` is suspended awaiting execution.
@@ -56,13 +39,26 @@ public actor LocalInterpreterConnection: InterpreterConnection {
             await cancellation.cancel()
             send(id: id, .stopped)
 
-        case let .execute(source):
-            // Reuse the standard flow: allocate a fresh context, then compile and run it.
-            await perform(.createContext)
+        case let .execute(token, source):
+            // Allocate a fresh context id, report it back, then compile and run.
+            currentContextId += 1
             let id = currentContextId
+            send(id: id, .started(token: token))
             await compile(id: id, source: source)
-            await perform(.run(id: id))
+            await run(id: id)
         }
+    }
+
+    /// Executes the code compiled for `id`, provided it is still the latest compile.
+    func run(id: UInt64) async {
+        guard let compiled, compiled.id == id else { return }
+        let code = compiled.code
+        let cancellation = RunCancellation()
+        running[id] = cancellation
+        await time(id: id, cancellation: cancellation) {
+            try await Interpreter.execute(code)
+        }
+        running[id] = nil
     }
     
     @MainActor
@@ -146,20 +142,16 @@ public actor LocalInterpreterConnection: InterpreterConnection {
         "<script>/\(id)"
     }
 
-    private func complete(id: UInt64, lastComponent: String, token: UUID) async {
+    private func complete(lastComponent: String, token: UUID) async {
         let completions = await Interpreter.complete(lastComponent)
-
-        // Drop the result if a newer context has been created in the meantime.
-        guard currentContextId == id else { return }
-        send(id: id, .completions(suggestions: completions, token: token))
+        // The requesting console dedupes by `token`; no context id is needed.
+        send(id: 0, .completions(suggestions: completions, token: token))
     }
 
-    private func compile(id: UInt64, source: String) async {
+    func compile(id: UInt64, source: String) async {
         log.trace("compile: \(id)")
         guard id > latestCompileId else { return }
         latestCompileId = id
-
-        send(id: id, .inputSource(text: source))
 
         do {
             let code = try await Interpreter.shared.compile(
@@ -170,13 +162,11 @@ public actor LocalInterpreterConnection: InterpreterConnection {
 
             guard latestCompileId == id else { return }
             compiled = CompileResult(id: id, code: code)
-            send(id: id, .isExecutable(value: true))
         } catch {
             guard latestCompileId == id else { return }
             if let traceback = error.traceback {
                 send(id: id, .stderr(text: traceback))
             }
-            send(id: id, .isExecutable(value: false))
             send(id: id, .attachment(items: [.image(name: "xmark.square")]))
         }
     }

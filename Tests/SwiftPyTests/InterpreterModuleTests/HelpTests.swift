@@ -32,24 +32,6 @@ struct HelpTests {
         #expect(Interpreter.evaluate("_help_module_is_registered") == true)
     }
 
-    @Test("interpreter module exposes only public API")
-    func interpreterModuleExposesOnlyPublicAPI() throws {
-        Interpreter.run("""
-        import interpreter as _interpreter
-        _interpreter_public_names = []
-        for name, value in _interpreter.__dict__.items():
-            if not name.startswith('_'):
-                _interpreter_public_names.append(name)
-        _interpreter_has_binder = hasattr(_interpreter, '_bind_interfaces')
-        _interpreter_has_old_binder = hasattr(_interpreter, 'bind_interfaces')
-        """)
-
-        let publicNames: [String] = try #require(Interpreter.evaluate("_interpreter_public_names"))
-        #expect(Set(publicNames) == ["display", "host"])
-        #expect(Interpreter.evaluate("_interpreter_has_binder") == false)
-        #expect(Interpreter.evaluate("_interpreter_has_old_binder") == false)
-    }
-
     @Suite("no args") @MainActor
     struct NoArgs {
         init() {

@@ -22,16 +22,16 @@ public extension InterpreterConnection {
 }
 
 public enum ConsoleCommand: Codable, Sendable {
-    case createContext
+    // Commands in lifecycle order: complete while typing, execute to run, stop to cancel.
+
     /// `token` uniquely identifies the requesting console so it can pick its own
     /// result out of the shared event bus (see the `completions` event).
-    case complete(id: UInt64, lastComponent: String, token: UUID)
-    case compile(id: UInt64, source: String)
-    case run(id: UInt64)
+    case complete(token: UUID, lastComponent: String)
+    /// Compiles and runs a source in one step, assigning it a fresh context id.
+    /// `token` correlates the request with the caller's input card via `started`.
+    case execute(token: UUID, source: String)
     /// Cooperatively cancels the awaited work of a running execution.
     case stop(id: UInt64)
-    /// Compiles and runs a source in one step, assigning it a fresh context id.
-    case execute(source: String)
 }
 
 public struct InterpreterEvent: Codable, Sendable {
@@ -39,21 +39,21 @@ public struct InterpreterEvent: Codable, Sendable {
     public let payload: Payload
 
     public enum Payload: Codable, Sendable {
-        case contextCreated
-        case inputSource(text: String)
+        // Events in lifecycle order: completions feed typing; the rest track one
+        // execution from `started` through its terminal `stopped`/`attachment`.
+
         /// Echoes the `token` from the originating `complete` command so only the
         /// requesting console applies the result.
         case completions(suggestions: [String], token: UUID)
-        case isExecutable(value: Bool)
 
-        case isRunning(value: Bool)
-        /// Acknowledges that a running execution was stopped before completing.
-        case stopped
-
+        /// Reports the context id assigned to an `execute`, echoing its `token` so
+        /// the caller can bind the id to the input card it already created.
+        case started(token: UUID)
         case stdout(text: String)
         case stderr(text: String)
-
         case feedback(item: ExecutionFeedback)
+        /// Acknowledges that a running execution was stopped before completing.
+        case stopped
         case attachment(items: [InputAttachment])
     }
 }
