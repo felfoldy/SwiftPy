@@ -78,6 +78,22 @@ extension Interpreter {
                     AsyncSleep(seconds: seconds).task
                 }
             }
+
+            module.def(
+                "gather(*tasks)",
+                docstring: "Run awaitables concurrently and return their results as a list, in order."
+            ) { argc, argv in
+                PyBind.function(argc, argv) { (tuple: PyTuple) in
+                    let tasks = tuple.values.compactMap(AsyncTask.init)
+                    for task in tasks { task.resume() }
+                    var result = [PyObject?]()
+                    for task in tasks {
+                        let value = try await task.untilCompletes()
+                        result.append(value)
+                    }
+                    return result
+                }
+            }
         }
     }
     
