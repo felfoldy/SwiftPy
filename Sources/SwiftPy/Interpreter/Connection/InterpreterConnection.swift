@@ -63,6 +63,8 @@ public struct ExecutionFeedback: Codable, Sendable, Hashable, Identifiable {
         case task(progress: Double?)
         /// The line that raised the currently reported error.
         case error
+        /// The line that just produced output; a transient flash, not persistent.
+        case output
     }
 
     public let lineNumber: Int

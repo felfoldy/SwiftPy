@@ -122,6 +122,13 @@ public actor LocalInterpreterConnection: InterpreterConnection {
             try await InterpreterExecutionContext.withOutput(tracer, cancellation: cancellation) {
                 try await call()
             } stdout: { text in
+                // Flash the line the output came from. Skip past library frames to
+                // the last line that belongs to a script context, so output that
+                // originates in a lib still flashes the user's call site.
+                if let entry = tracer.entries.last(where: { $0.contextId != nil }),
+                   let lineId = entry.contextId {
+                    self.send(id: lineId, .feedback(item: ExecutionFeedback(lineNumber: entry.lineNumber, type: .output)))
+                }
                 self.send(id: id, .stdout(text: text))
             }
 
