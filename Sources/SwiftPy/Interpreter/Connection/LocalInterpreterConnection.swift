@@ -40,12 +40,16 @@ public actor LocalInterpreterConnection: InterpreterConnection {
             send(id: id, .stopped)
 
         case let .execute(token, source):
-            // Allocate a fresh context id, report it back, then compile and run.
+            // Allocate a fresh context id and return after reporting it. The
+            // execution task keeps event delivery responsive while plain Python
+            // code runs synchronously.
             currentContextId += 1
             let id = currentContextId
             send(id: id, .started(token: token))
-            await compile(id: id, source: source)
-            await run(id: id)
+            Task {
+                await compile(id: id, source: source)
+                await run(id: id)
+            }
         }
     }
 
