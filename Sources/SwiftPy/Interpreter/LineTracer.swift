@@ -27,6 +27,11 @@ public final class LineTracer {
         startInstant = clock.now
     }
 
+    /// The last line executed in the given context, e.g. where an error was raised.
+    public func lastLine(forContext id: UInt64) -> Int? {
+        entries.last { $0.contextId == id }?.lineNumber
+    }
+
     func record(_ frame: PyAPI.Frame, _ event: PyAPI.TraceEvent) {
         guard event == .line,
               let source = frame.sourceLocation,

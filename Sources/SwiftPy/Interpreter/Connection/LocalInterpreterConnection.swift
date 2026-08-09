@@ -134,6 +134,10 @@ public actor LocalInterpreterConnection: InterpreterConnection {
             if let error = error as? PythonError, let traceback = error.traceback {
                 send(id: id, .stderr(text: traceback))
             }
+            // Flag the last line executed in this context as the one that raised.
+            if let line = await tracer.lastLine(forContext: id) {
+                send(id: id, .feedback(item: ExecutionFeedback(lineNumber: line, type: .error)))
+            }
             send(id: id, .attachment(items: [.image(name: "exclamationmark.triangle"), .text(text: executionTime())]))
         }
     }

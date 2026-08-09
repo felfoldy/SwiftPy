@@ -61,6 +61,8 @@ public struct InterpreterEvent: Codable, Sendable {
 public struct ExecutionFeedback: Codable, Sendable, Hashable, Identifiable {
     public enum FeedbackType: Codable, Sendable, Hashable {
         case task(progress: Double?)
+        /// The line that raised the currently reported error.
+        case error
     }
 
     public let lineNumber: Int
