@@ -262,10 +262,21 @@ extension PyRef {
         _ signature: String,
         docstring: String? = nil,
         overloads: Bool = false,
+        isAsync: Bool = false,
         function: PyAPI.CFunction
     ) {
         let functionObj = PyObject()
         let name = py.newfunction(functionObj.reference, signature: signature, docstring: docstring, function: function)
+
+        // Mark awaitable bindings so introspection (e.g. `help`) can render
+        // them as `async def`. Mirrors Python detecting coroutines via a flag
+        // rather than the signature text.
+        if isAsync {
+            let flag = py.pushtmp()
+            py.newbool(flag, value: true)
+            py.setdict(functionObj.reference, name: "_is_async", value: flag)
+            py.pop()
+        }
 
         if overloads,
            let existing = py.getdict(self, name: name) {

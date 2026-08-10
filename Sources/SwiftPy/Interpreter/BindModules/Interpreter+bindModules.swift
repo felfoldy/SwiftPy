@@ -28,6 +28,7 @@ extension Interpreter {
             @functools.wraps(func)
             def coroutine(*args,**kwargs):
                 return asyncio.AsyncTask(func(*args,**kwargs))
+            coroutine._is_async = True
             return coroutine
         """
 
@@ -70,7 +71,7 @@ extension Interpreter {
         bindModule("asyncio", docs: "Async task utilities.") { module in
             module.class(AsyncTask.self)
 
-            module.def(
+            module.asyncDef(
                 "sleep(seconds: float) -> None",
                 docstring: "Coroutine that completes after a given time (in seconds)."
             ) { argc, argv in
@@ -79,7 +80,7 @@ extension Interpreter {
                 }
             }
 
-            module.def(
+            module.asyncDef(
                 "gather(*tasks)",
                 docstring: "Run awaitables concurrently and return their results as a list, in order."
             ) { argc, argv in

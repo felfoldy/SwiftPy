@@ -25,9 +25,12 @@ def _callable_signature(obj, fallback_name=None):
 
 def _callable_definition(obj, fallback_name=None):
     signature = _callable_signature(obj, fallback_name)
+    prefix = "async " if getattr(obj, '_is_async', False) else ""
     if signature.startswith("def "):
-        return signature if signature.endswith(":") else signature + ":"
-    return "def " + signature + ":"
+        signature = signature[len("def "):]
+    if not signature.endswith(":"):
+        signature = signature + ":"
+    return prefix + "def " + signature
 
 
 def _docstring(doc, indent="\t"):

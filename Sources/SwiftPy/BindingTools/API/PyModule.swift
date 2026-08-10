@@ -45,6 +45,12 @@ public struct PyModule {
         reference.bind(signature, docstring: docstring, function: function)
     }
 
+    /// Binds an awaitable function, marking it so introspection renders it as
+    /// `async def`. Use for bindings that return an awaitable (via ``AsyncTask``).
+    public func asyncDef(_ signature: String, docstring: String? = nil, function: PyAPI.CFunction) {
+        reference.bind(signature, docstring: docstring, isAsync: true, function: function)
+    }
+
     public func classes(_ types: PythonBindable.Type...) {
         for type in types { `class`(type) }
     }

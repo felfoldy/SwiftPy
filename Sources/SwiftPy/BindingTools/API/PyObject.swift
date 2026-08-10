@@ -216,6 +216,12 @@ public final class PyObject: @MainActor PyReferencing, Sendable {
     public func def(_ signature: String, docs: String? = nil, function: PyAPI.CFunction) {
         reference.bind(signature, docstring: docs, function: function)
     }
+
+    /// Binds an awaitable method, marking it so introspection renders it as
+    /// `async def`. Use for bindings that return an awaitable (via ``AsyncTask``).
+    public func asyncDef(_ signature: String, docs: String? = nil, function: PyAPI.CFunction) {
+        reference.bind(signature, docstring: docs, isAsync: true, function: function)
+    }
 }
 
 // MARK: - Convenience initializers.
