@@ -85,7 +85,7 @@ extension Interpreter {
                 docstring: "Run awaitables concurrently and return their results as a list, in order."
             ) { argc, argv in
                 PyBind.function(argc, argv) { (tuple: PyTuple) in
-                    let tasks = tuple.values.compactMap(AsyncTask.init)
+                    let tasks = try tuple.values.map(AsyncTask.init)
                     for task in tasks { task.resume() }
                     var result = [PyObject?]()
                     for task in tasks {
