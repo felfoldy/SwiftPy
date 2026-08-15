@@ -81,10 +81,16 @@ extension PyModule {
             self.init(module)
             return
         }
-        guard let imported = try? py.import(name) else {
+
+        // An import returns the shared return register, which the next
+        // interpreter call overwrites. Take the module's own reference instead,
+        // so the handle stays valid for as long as the caller holds it.
+        guard (try? py.import(name)) != nil,
+              let module = py.getmodule(name) else {
             return nil
         }
-        self.init(imported)
+
+        self.init(module)
     }
 }
 
