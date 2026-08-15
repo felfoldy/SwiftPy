@@ -2,15 +2,6 @@ import inspect
 from interpreter.native import modules as _registered_modules
 
 
-def _print_doc(doc, indent="    "):
-    for line in doc.strip().split("\n"):
-        print(indent + line)
-
-
-def _section(title):
-    print("## " + title)
-
-
 def _callable_signature(obj, fallback_name=None):
     interface = getattr(obj, '_interface', None)
     if interface:
@@ -33,24 +24,25 @@ def _callable_definition(obj, fallback_name=None):
     return prefix + "def " + signature
 
 
-def _docstring(doc, indent="\t"):
+def _docstring_lines(doc, indent="    "):
     lines = doc.strip().split("\n")
     if len(lines) == 1:
-        print(indent + '"""' + lines[0] + '"""')
-        return
+        return [indent + '"""' + lines[0] + '"""']
 
-    print(indent + '"""')
-    for line in lines:
-        print(indent + line)
-    print(indent + '"""')
+    body = [indent + '"""' + lines[0]]
+    body += [indent + line for line in lines[1:]]
+    body.append(indent + '"""')
+    return body
 
 
-def _callable(obj, fallback_name=None, indent=""):
-    print(indent + _callable_definition(obj, fallback_name))
+def _callable_lines(obj, fallback_name=None, indent=""):
+    definition = indent + _callable_definition(obj, fallback_name)
 
     doc = getattr(obj, '__doc__', None)
-    if doc:
-        _docstring(doc, indent + "\t")
+    if not doc:
+        return [definition + " ..."]
+
+    return [definition] + _docstring_lines(doc, indent + "    ")
 
 
 def _class_signature(cls):
@@ -60,33 +52,37 @@ def _class_signature(cls):
     return "class " + cls.__name__ + ":"
 
 
-def _class(cls):
+def _class_lines(cls):
     interface = getattr(cls, '_interface', None)
     if interface:
-        print(interface)
-        return
+        return [interface]
 
-    print(_class_signature(cls))
+    lines = [_class_signature(cls)]
 
     doc = getattr(cls, '__doc__', None)
     if doc:
-        print()
-        _print_doc(doc)
+        lines += _docstring_lines(doc)
 
-    methods = []
     for attr_name in dir(cls):
         if attr_name.startswith('_'):
             continue
         try:
             attr = getattr(cls, attr_name)
-            if callable(attr):
-                methods.append((attr_name, attr))
         except:
-            pass
+            continue
+        if not callable(attr):
+            continue
 
-    for attr_name, attr in methods:
-        print()
-        _callable(attr, fallback_name=attr_name, indent="\t")
+        # A blank line separates members, but not the first one from its class.
+        if len(lines) > 1:
+            lines.append("")
+        lines += _callable_lines(attr, fallback_name=attr_name, indent="    ")
+
+    # An empty class body still needs one, as in a stub file.
+    if len(lines) == 1:
+        return [lines[0] + " ..."]
+
+    return lines
 
 
 def _module_summary(name):
@@ -99,22 +95,21 @@ def _module_summary(name):
     return name
 
 
-def _modules():
-    print("Registered modules:")
-    print()
+def _modules_lines():
+    lines = ["Registered modules:", ""]
     for name in _registered_modules():
-        print("  " + _module_summary(name))
+        lines.append("  " + _module_summary(name))
+    return lines
 
 
-def _module(module):
+def _module_lines(module):
     name = getattr(module, '__name__', None) or str(module)
-    print("Help on module " + name + ":")
-    print()
+    lines = ["Help on module " + name + ":", ""]
 
     doc = getattr(module, '__doc__', None)
     if doc:
-        print(doc)
-        print()
+        lines.append(doc)
+        lines.append("")
 
     classes = []
     functions = []
@@ -131,17 +126,19 @@ def _module(module):
             functions.append((attr_name, attr))
 
     if classes:
-        _section("Classes")
+        lines.append("## Classes")
         for _, cls in classes:
-            print()
-            _class(cls)
-        print()
+            lines.append("")
+            lines += _class_lines(cls)
+        lines.append("")
 
     if functions:
-        _section("Functions")
+        lines.append("## Functions")
         for name, function in functions:
-            print()
-            _callable(function, fallback_name=name)
+            lines.append("")
+            lines += _callable_lines(function, fallback_name=name)
+
+    return lines
 
 
 _help_text = None
@@ -157,30 +154,29 @@ Useful functions:
 """.strip()
 
 
-def help(obj=None):
+def _help_lines(obj):
     if obj is None:
-        print(_help_text or _default_help_text())
-        return
+        return [_help_text or _default_help_text()]
 
     module_type = type(__import__('math'))
 
     if isinstance(obj, str):
         if obj == "modules":
-            _modules()
-            return
+            return _modules_lines()
 
         try:
-            module = __import__(obj)
-            _module(module)
+            return _module_lines(__import__(obj))
         except ImportError:
-            print("No help found for " + repr(obj))
-        return
+            return ["No help found for " + repr(obj)]
 
     if isinstance(obj, module_type):
-        _module(obj)
-    elif isinstance(obj, type):
-        _class(obj)
-    elif callable(obj):
-        _callable(obj)
-    else:
-        _class(type(obj))
+        return _module_lines(obj)
+    if isinstance(obj, type):
+        return _class_lines(obj)
+    if callable(obj):
+        return _callable_lines(obj)
+    return _class_lines(type(obj))
+
+
+def help(obj=None):
+    print("\n".join(_help_lines(obj)))

@@ -21,6 +21,25 @@ struct HelpTests {
         #expect(Interpreter.evaluate("callable(help)") == true)
     }
 
+    @Test("composes the output into a single print")
+    func printsOnce() throws {
+        Interpreter.run("""
+        import math
+        import builtins as _b
+        _once_cap = []
+        _once_orig = _b.print
+        def _once_cp(msg=''):
+            _once_cap.append(str(msg))
+        _b.print = _once_cp
+        help(math)
+        help(int)
+        _b.print = _once_orig
+        _once_calls = len(_once_cap)
+        """)
+
+        #expect(Interpreter.evaluate("_once_calls") == 2)
+    }
+
     @Test("module is importable")
     func moduleIsImportable() {
         Interpreter.run("""
@@ -115,7 +134,7 @@ struct HelpTests {
 
             let output: String = try #require(Interpreter.evaluate("_fn_out"))
             #expect(output.contains("def _my_fn(x):"))
-            #expect(output.contains("\t\"\"\"Synthetic function docs.\"\"\""))
+            #expect(output.contains("    \"\"\"Synthetic function docs.\"\"\""))
         }
 
         @Test("prints Swift-bound function signature")
@@ -181,6 +200,31 @@ struct HelpTests {
             #expect(output.contains("_Animal"))
             #expect(output.contains("speak"))
             #expect(output.contains("move"))
+        }
+
+        // The interpreter drops class docstrings, so documentation has to be
+        // assigned to __doc__ to be visible here.
+        @Test("prints class documentation")
+        func printsClassDocumentation() throws {
+            Interpreter.run("""
+            import builtins as _b
+            _doc_cap = []
+            _doc_orig = _b.print
+            def _doc_cp(msg=''):
+                _doc_cap.append(str(msg))
+            class _Documented:
+                __doc__ = 'A documented class.'
+            _b.print = _doc_cp
+            help(_Documented)
+            _b.print = _doc_orig
+            _doc_out = "\\n".join(_doc_cap)
+            """)
+
+            let output: String = try #require(Interpreter.evaluate("_doc_out"))
+            #expect(output == """
+            class _Documented:
+                \"\"\"A documented class.\"\"\"
+            """)
         }
 
         @Test("uses class interface when available")
