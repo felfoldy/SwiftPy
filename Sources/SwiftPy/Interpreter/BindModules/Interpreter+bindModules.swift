@@ -68,10 +68,10 @@ extension Interpreter {
     }
 
     func bindAsyncio() {
-        bindModule("asyncio", docs: "Async task utilities.") { module in
-            module.class(AsyncTask.self)
+        bindModule("asyncio", docs: "Async task utilities.") { asyncio in
+            asyncio.class(AsyncTask.self)
 
-            module.asyncDef(
+            asyncio.asyncDef(
                 "sleep(seconds: float) -> None",
                 docstring: "Coroutine that completes after a given time (in seconds)."
             ) { argc, argv in
@@ -80,7 +80,7 @@ extension Interpreter {
                 }
             }
 
-            module.asyncDef(
+            asyncio.asyncDef(
                 "gather(*tasks)",
                 docstring: "Run awaitables concurrently and return their results as a list, in order."
             ) { argc, argv in
@@ -94,6 +94,10 @@ extension Interpreter {
                     }
                     return result
                 }
+            }
+
+            asyncio.def("current_task() -> asyncio.AsyncTask | None") { argc, argv in
+                PyBind.function(argc, argv) { () -> (any PythonConvertible) in AsyncTask.current }
             }
         }
     }

@@ -12,11 +12,12 @@ typealias TaskResult = PythonConvertible & Sendable
 
 @Scriptable
 @MainActor
-public class AsyncTask {
+public class AsyncTask: PythonBindable {
     /// Whether the task has finished, successfully or with an error.
     public var isDone: Bool { outcome != nil }
 
     internal var task: Task<Void, Never>?
+    private var traceEntry: LineTracer.Entry?
 
     /// The task's outcome once finished: the produced value or a raised error.
     var outcome: Result<PyObject?, PythonError>?
@@ -64,11 +65,15 @@ public class AsyncTask {
     public func resume() {
         guard let work = pendingWork else { return }
         pendingWork = nil
+        traceEntry = InterpreterExecutionContext.current.traceRecorder?.entries.last
         notifyTaskActivity(isActive: true)
         let cancellation = InterpreterExecutionContext.current.cancellation
         let task = Task { [self] in
             do {
-                outcome = .success(try await work())
+                let result = try await AsyncTask.$current.withValue(self) {
+                    try await work()
+                }
+                outcome = .success(result)
             } catch let error as PythonError {
                 outcome = .failure(error)
             } catch {
@@ -82,16 +87,14 @@ public class AsyncTask {
         cancellation?.onCancel { task.cancel() }
     }
 
-    private func notifyTaskActivity(isActive: Bool) {
-        guard let entry = InterpreterExecutionContext.current.traceRecorder?.entries.last,
-              let contextId = entry.contextId
-        else { return }
+    private func notifyTaskActivity(isActive: Bool, progress: Double? = nil) {
+        guard let traceEntry, let contextId = traceEntry.contextId else { return }
 
         Interpreter.shared.connection.send(
             id: contextId,
             .feedback(item: ExecutionFeedback(
-                lineNumber: entry.lineNumber,
-                type: isActive ? .task(progress: nil) : nil
+                lineNumber: traceEntry.lineNumber,
+                type: isActive ? .task(progress: progress) : nil
             ))
         )
     }
@@ -115,6 +118,17 @@ public class AsyncTask {
     public func cancel() {
         task?.cancel()
     }
+
+    /// Reports how far the work has got, from 0 to 1, or `None` if indeterminate.
+    public func setProgress(_ progress: Double?) {
+        notifyTaskActivity(isActive: true, progress: progress)
+    }
+}
+
+public extension AsyncTask {
+    /// The task whose awaited work is running, available to that work and to
+    /// everything it awaits.
+    @TaskLocal static var current: AsyncTask?
 }
 
 extension AsyncTask {
