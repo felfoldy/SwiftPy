@@ -100,6 +100,22 @@ struct InterpreterTests {
         #expect(output == "hello\nworld\n")
     }
 
+    @Test func displayHookTerminatesRepresentationWithNewline() async throws {
+        let code = try Interpreter.compile(
+            """
+            "Test"
+            print("Exit")
+            """,
+            mode: .single
+        )
+
+        let output = try await Interpreter.withOutputCapture {
+            try await Interpreter.execute(code)
+        }
+
+        #expect(output == "'Test'\nExit\n")
+    }
+
     @Test(
         .disabled("Performance benchmark")
     )

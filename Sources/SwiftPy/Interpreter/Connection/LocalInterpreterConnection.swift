@@ -71,7 +71,7 @@ public actor LocalInterpreterConnection: InterpreterConnection {
             Interpreter.onDisplay(view)
         } else if let repr = try? py.repr(viewObject) {
             if let output = InterpreterExecutionContext.current.output {
-                output(repr)
+                output(repr + "\n")
             } else {
                 print(repr)
             }
