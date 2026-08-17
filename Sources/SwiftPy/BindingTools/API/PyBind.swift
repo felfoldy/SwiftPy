@@ -265,8 +265,10 @@ extension PyRef {
         isAsync: Bool = false,
         function: PyAPI.CFunction
     ) {
-        let functionObj = PyObject()
-        let name = py.newfunction(functionObj.reference, signature: signature, docstring: docstring, function: function)
+        var name = ""
+        let functionObj = PyObject {
+            name = py.newfunction($0, signature: signature, docstring: docstring, function: function)
+        }
 
         // Mark awaitable bindings so introspection (e.g. `help`) can render
         // them as `async def`. Mirrors Python detecting coroutines via a flag
@@ -287,13 +289,13 @@ extension PyRef {
             }
 
             // Create dispatcher function.
-            let overload = PyObject()
-            
-            makeFunctionOverload(
-                overload.reference,
-                name: name,
-                isInstance: signature.contains("(self")
-            )
+            let overload = PyObject {
+                makeFunctionOverload(
+                    $0,
+                    name: name,
+                    isInstance: signature.contains("(self")
+                )
+            }
             
             let list = py.pushtmp()
             defer { py.pop() }

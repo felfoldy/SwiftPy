@@ -33,8 +33,7 @@ struct InterpreterTests {
     #endif
 
     @Test func isolatedExecuteDoesNotLeakToMain() async throws {
-        let namespace = PyObject()
-        py.newdict(namespace.reference)
+        let namespace = PyObject { py.newdict($0) }
         let code = try Interpreter.compile("isolated_marker = 7")
 
         try await Interpreter.execute(code, globals: namespace)
@@ -52,8 +51,7 @@ struct InterpreterTests {
     }
 
     @Test func isolatedExecuteCapturesResultsInProvidedNamespace() async throws {
-        let namespace = PyObject()
-        py.newdict(namespace.reference)
+        let namespace = PyObject { py.newdict($0) }
         let code = try Interpreter.compile("answer = len([1, 2, 3]) + 39")
 
         // `len` proves builtins are still reachable from the isolated namespace.
@@ -64,8 +62,7 @@ struct InterpreterTests {
     }
 
     @Test func isolatedExecuteSharesGlobalsAndLocals() async throws {
-        let namespace = PyObject()
-        py.newdict(namespace.reference)
+        let namespace = PyObject { py.newdict($0) }
         let code = try Interpreter.compile(
             """
             base = 40

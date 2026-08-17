@@ -25,16 +25,18 @@ extension Interpreter {
 
 @MainActor
 private func wraps(wrapped: PyObject) -> PyObject {
-    let decorator = PyObject()
-    py.newfunction(
-        decorator.reference,
-        signature: "decorator(wrapper)",
-        docstring: nil
-    ) { argc, argv in
-        PyBind.function(argc, argv, decorator(wrapper:))
+    // named `deco` so the closure below resolves `decorator(wrapper:)` globally
+    let deco = PyObject {
+        py.newfunction(
+            $0,
+            signature: "decorator(wrapper)",
+            docstring: nil
+        ) { argc, argv in
+            PyBind.function(argc, argv, decorator(wrapper:))
+        }
     }
-    decorator._wrapped = wrapped
-    return decorator
+    deco._wrapped = wrapped
+    return deco
 }
 
 @MainActor
@@ -46,28 +48,30 @@ func decorator(wrapper: PyObject) throws(PythonError) -> PyObject {
     }
     let doc: String? = wrapped.__doc__
 
-    let forwarder = PyObject()
+    var plan: PyObject?
+    var sig = "\(name)(*args, **kwargs)"
 
     if let inspect = py.module("inspect"),
        let signatureData = inspect._signature_data,
        let signature = inspect.signature,
-       let plan = try? signatureData(wrapped),
+       let signaturePlan = try? signatureData(wrapped),
        let sigObj = try? signature(wrapped),
        let sigText = try? py.str(sigObj.reference) {
+        plan = signaturePlan
+        sig = name + sigText
+    }
+
+    let forwarder = PyObject {
         py.newfunction(
-            forwarder.reference,
-            signature: name + sigText,
+            $0,
+            signature: sig,
             docstring: doc,
             function: wrapsForwarder
         )
+    }
+
+    if let plan {
         forwarder._plan = plan
-    } else {
-        py.newfunction(
-            forwarder.reference,
-            signature: "\(name)(*args, **kwargs)",
-            docstring: doc,
-            function: wrapsForwarder
-        )
     }
 
     forwarder._wrapper = wrapper

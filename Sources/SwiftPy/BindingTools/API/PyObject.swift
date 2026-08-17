@@ -235,12 +235,18 @@ public extension PyObject {
         self.init(reference)
     }
     
-    convenience init() {
+    /// Creates a handle to a value that `build` writes into the given reference.
+    ///
+    /// `build` receives a temporary stack slot, which the collector scans while
+    /// the value is constructed. Writing through ``reference`` after
+    /// initialization would not be seen by the collector.
+    convenience init(_ build: (PyRef) -> Void) {
         let tmp = py.pushtmp()
         defer { py.pop() }
+        build(tmp)
         self.init(tmp)
     }
-    
+
     /// Creates a handle to the object representing a Python type.
     ///
     /// - Parameter type: The Python type to wrap.

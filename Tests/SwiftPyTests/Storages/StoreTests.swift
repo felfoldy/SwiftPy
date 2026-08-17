@@ -13,10 +13,9 @@ import SwiftData
 @MainActor
 @Suite
 struct StoreTests {
-    private let namespace = PyObject()
+    private let namespace = PyObject { py.newdict($0) }
 
     init() {
-        py.newdict(namespace.reference)
         try! run("""
         from modeling import model
         from storage import Store
