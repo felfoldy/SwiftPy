@@ -53,6 +53,7 @@ let package = Package(
                 .headerSearchPath("./include"),
                 .define("PK_ENABLE_THREADS", to: "0"),
                 .define("PK_ENABLE_WATCHDOG", to: "1"),
+                .define("PK_ENABLE_ASYNC_AWAIT", to: "1"),
             ]
         ),
         .plugin(
