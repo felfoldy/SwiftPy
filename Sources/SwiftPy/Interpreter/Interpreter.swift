@@ -30,6 +30,12 @@ public final class Interpreter {
     /// Presents a SwiftUI view in the local console, one view at a time.
     public static var onDisplay: (AnyView) -> Void = { _ in }
 
+    /// The context id of the execution running on the current task, or `0`
+    /// outside an execution.
+    public static var currentExecutionId: UInt64 {
+        InterpreterExecutionContext.current.contextId
+    }
+
     /// CPU-time budget for an execution before the interpreter aborts it with
     /// a `TimeoutError`.
     ///

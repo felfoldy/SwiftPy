@@ -123,7 +123,7 @@ public actor LocalInterpreterConnection: InterpreterConnection {
         }
 
         do {
-            try await InterpreterExecutionContext.withOutput(tracer, cancellation: cancellation) {
+            try await InterpreterExecutionContext.withOutput(tracer, cancellation: cancellation, contextId: id) {
                 try await call()
             } stdout: { text in
                 // Flash the line the output came from. Skip past library frames to
