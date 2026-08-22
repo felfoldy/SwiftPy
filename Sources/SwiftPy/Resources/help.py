@@ -273,7 +273,7 @@ def help(obj=None):
     Returns a markdown view where the console can render one, and falls back to
     printing plain text on hosts without it."""
     try:
-        from console import Markdown
+        from views import Markdown
     except:
         print("\n".join(_help_lines(obj)))
         return
