@@ -109,6 +109,15 @@ def _modules_lines():
     return lines
 
 
+def _resolve_name(name):
+    """Resolve a module name or a dotted member path from its root module."""
+    parts = name.split('.')
+    obj = __import__(parts[0])
+    for part in parts[1:]:
+        obj = getattr(obj, part)
+    return obj
+
+
 def _module_members(module):
     """The module's public classes and functions, each as (name, object)."""
     classes = []
@@ -156,6 +165,10 @@ def _module_lines(module):
 
 _help_text = None
 
+# What a reference link starts with, up to the name itself. Hosts that render
+# markdown and take reference links set this; without it names stay plain code.
+_reference_url_prefix = None
+
 
 def _default_help_text():
     return """
@@ -178,9 +191,16 @@ def _help_lines(obj):
             return _modules_lines()
 
         try:
-            return _module_lines(__import__(obj))
-        except ImportError:
+            resolved = _resolve_name(obj)
+        except (ImportError, AttributeError):
             return ["No help found for " + repr(obj)]
+        if isinstance(resolved, module_type):
+            return _module_lines(resolved)
+        if isinstance(resolved, type):
+            return _class_lines(resolved)
+        if callable(resolved):
+            return _callable_lines(resolved)
+        return _class_lines(type(resolved))
 
     if isinstance(obj, module_type):
         return _module_lines(obj)
@@ -207,12 +227,25 @@ def _fenced_stubs(stubs):
     return _fenced(body)
 
 
+def _reference_markdown(name):
+    """A name as markdown, linked where the host takes references.
+
+    The scheme belongs to the host, so it sets ``_reference_url_prefix`` (as it
+    sets ``_help_text``) and the name is appended to it. Module and member
+    names are identifiers, so nothing in them needs escaping.
+    """
+    code = "`" + name + "`"
+    if not _reference_url_prefix:
+        return code
+    return "[" + code + "](" + _reference_url_prefix + name + ")"
+
+
 def _modules_markdown():
     lines = ["# Registered modules", "", "| Module | Description |", "| --- | --- |"]
     for name in _registered_modules():
         doc = _module_doc(name) or ""
         # A pipe in a summary would end the cell early.
-        lines.append("| `" + name + "` | " + doc.replace("|", "\\|") + " |")
+        lines.append("| " + _reference_markdown(name) + " | " + doc.replace("|", "\\|") + " |")
     return lines
 
 
@@ -254,9 +287,16 @@ def _markdown_lines(obj):
             return _modules_markdown()
 
         try:
-            return _module_markdown(__import__(obj))
-        except ImportError:
+            resolved = _resolve_name(obj)
+        except (ImportError, AttributeError):
             return ["No help found for `" + obj + "`"]
+        if isinstance(resolved, module_type):
+            return _module_markdown(resolved)
+        if isinstance(resolved, type):
+            return _fenced(_class_lines(resolved))
+        if callable(resolved):
+            return _fenced(_callable_lines(resolved))
+        return _fenced(_class_lines(type(resolved)))
 
     if isinstance(obj, module_type):
         return _module_markdown(obj)

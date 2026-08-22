@@ -84,7 +84,10 @@ public final class Interpreter {
 
         return Array(Set(nativeModules).union(sourceModules))
             .filter { name in
-                !name.contains(".") && !name.contains("/") && !hiddenModules.contains(name)
+                // A leading underscore marks a module as private, the way it
+                // marks anything else in Python.
+                !name.contains(".") && !name.contains("/")
+                    && !name.hasPrefix("_") && !hiddenModules.contains(name)
             }
             .sorted()
     }

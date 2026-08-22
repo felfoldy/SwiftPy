@@ -367,6 +367,30 @@ struct HelpTests {
             Interpreter.run("help('math')")
         }
 
+        @Test("resolves a member inside a module")
+        func resolvesModuleMember() throws {
+            Interpreter.run("""
+            import builtins as _b
+            import help as _help_module
+            _member_cap = []
+            _member_orig = _b.print
+            def _member_cp(msg=''):
+                _member_cap.append(str(msg))
+            _b.print = _member_cp
+            help('math.sqrt')
+            _b.print = _member_orig
+            _member_out = "\\n".join(_member_cap)
+            _member_markdown = "\\n".join(_help_module._markdown_lines('math.sqrt'))
+            """)
+
+            let output: String = try #require(Interpreter.evaluate("_member_out"))
+            let markdown: String = try #require(Interpreter.evaluate("_member_markdown"))
+            #expect(output.contains("sqrt"))
+            #expect(markdown.contains("sqrt"))
+            #expect(!output.contains("No help found"))
+            #expect(!markdown.contains("No help found"))
+        }
+
         @Test("lists registered modules")
         func listsRegisteredModules() throws {
             PyBind.module("testing.helper") { _ in }
