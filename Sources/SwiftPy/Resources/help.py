@@ -207,13 +207,6 @@ def _fenced_stubs(stubs):
     return _fenced(body)
 
 
-def _hard_wrapped(text):
-    """Keeps a plain text block's line breaks when it is rendered as markdown.
-    The help text is free-form - a host may write markdown or not - so its
-    newlines are made explicit rather than collapsed into a paragraph."""
-    return text.replace("\n", "  \n")
-
-
 def _modules_markdown():
     lines = ["# Registered modules", "", "| Module | Description |", "| --- | --- |"]
     for name in _registered_modules():
@@ -250,7 +243,9 @@ def _module_markdown(module):
 
 def _markdown_lines(obj):
     if obj is None:
-        return [_hard_wrapped(_help_text or _default_help_text())]
+        # The help text is the host's to write, markdown included, so it is
+        # passed through as it is.
+        return [_help_text or _default_help_text()]
 
     module_type = type(__import__('math'))
 
