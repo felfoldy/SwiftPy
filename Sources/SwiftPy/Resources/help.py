@@ -85,13 +85,20 @@ def _class_lines(cls):
     return lines
 
 
-def _module_summary(name):
+def _module_doc(name):
     try:
         doc = getattr(__import__(name), '__doc__', None)
         if doc:
-            return name + " - " + doc.strip().split("\n")[0]
+            return doc.strip().split("\n")[0]
     except:
         pass
+    return None
+
+
+def _module_summary(name):
+    doc = _module_doc(name)
+    if doc:
+        return name + " - " + doc
     return name
 
 
@@ -102,15 +109,8 @@ def _modules_lines():
     return lines
 
 
-def _module_lines(module):
-    name = getattr(module, '__name__', None) or str(module)
-    lines = ["Help on module " + name + ":", ""]
-
-    doc = getattr(module, '__doc__', None)
-    if doc:
-        lines.append(doc)
-        lines.append("")
-
+def _module_members(module):
+    """The module's public classes and functions, each as (name, object)."""
     classes = []
     functions = []
     for attr_name in dir(module):
@@ -124,6 +124,19 @@ def _module_lines(module):
             classes.append((attr_name, attr))
         elif callable(attr):
             functions.append((attr_name, attr))
+    return classes, functions
+
+
+def _module_lines(module):
+    name = getattr(module, '__name__', None) or str(module)
+    lines = ["Help on module " + name + ":", ""]
+
+    doc = getattr(module, '__doc__', None)
+    if doc:
+        lines.append(doc)
+        lines.append("")
+
+    classes, functions = _module_members(module)
 
     if classes:
         lines.append("## Classes")
@@ -178,5 +191,96 @@ def _help_lines(obj):
     return _class_lines(type(obj))
 
 
+def _fenced(lines):
+    """Python source as a markdown code block."""
+    return ["```python"] + lines + ["```"]
+
+
+def _fenced_stubs(stubs):
+    """Several stubs in one code block, a blank line apart, so a section reads
+    as one listing instead of a stack of separate blocks."""
+    body = []
+    for stub in stubs:
+        if body:
+            body.append("")
+        body += stub
+    return _fenced(body)
+
+
+def _hard_wrapped(text):
+    """Keeps a plain text block's line breaks when it is rendered as markdown.
+    The help text is free-form - a host may write markdown or not - so its
+    newlines are made explicit rather than collapsed into a paragraph."""
+    return text.replace("\n", "  \n")
+
+
+def _modules_markdown():
+    lines = ["# Registered modules", "", "| Module | Description |", "| --- | --- |"]
+    for name in _registered_modules():
+        doc = _module_doc(name) or ""
+        # A pipe in a summary would end the cell early.
+        lines.append("| `" + name + "` | " + doc.replace("|", "\\|") + " |")
+    return lines
+
+
+def _module_markdown(module):
+    name = getattr(module, '__name__', None) or str(module)
+    lines = ["# " + name, ""]
+
+    doc = getattr(module, '__doc__', None)
+    if doc:
+        lines += [doc.strip(), ""]
+
+    classes, functions = _module_members(module)
+
+    if classes:
+        stubs = []
+        for _, cls in classes:
+            stubs.append(_class_lines(cls))
+        lines += ["## Classes", ""] + _fenced_stubs(stubs) + [""]
+
+    if functions:
+        stubs = []
+        for member_name, function in functions:
+            stubs.append(_callable_lines(function, fallback_name=member_name))
+        lines += ["## Functions", ""] + _fenced_stubs(stubs) + [""]
+
+    return lines
+
+
+def _markdown_lines(obj):
+    if obj is None:
+        return [_hard_wrapped(_help_text or _default_help_text())]
+
+    module_type = type(__import__('math'))
+
+    if isinstance(obj, str):
+        if obj == "modules":
+            return _modules_markdown()
+
+        try:
+            return _module_markdown(__import__(obj))
+        except ImportError:
+            return ["No help found for `" + obj + "`"]
+
+    if isinstance(obj, module_type):
+        return _module_markdown(obj)
+    if isinstance(obj, type):
+        return _fenced(_class_lines(obj))
+    if callable(obj):
+        return _fenced(_callable_lines(obj))
+    return _fenced(_class_lines(type(obj)))
+
+
 def help(obj=None):
-    print("\n".join(_help_lines(obj)))
+    """Show help for a module, class, function, or instance.
+
+    Returns a markdown view where the console can render one, and falls back to
+    printing plain text on hosts without it."""
+    try:
+        from console import Markdown
+    except:
+        print("\n".join(_help_lines(obj)))
+        return
+
+    return Markdown("\n".join(_markdown_lines(obj)))
