@@ -44,14 +44,26 @@ def _callable_doc(obj):
     return None
 
 
-def _signature_cards(definitions):
-    """One fenced code card per concrete callable definition."""
-    if len(definitions) == 1:
-        return _fenced([_without_trailing_colon(definitions[0])])
+def _signature_card(entry, definition, overload=False):
+    """A fenced card for one concrete definition, under its decorators."""
+    declaration = []
+    if overload:
+        declaration.append("@overload")
+    if getattr(entry, '_is_static', False):
+        declaration.append("@staticmethod")
+    declaration.append(_without_trailing_colon(definition))
+    return _fenced(declaration)
 
+
+def _signature_cards(obj, definitions):
+    """One fenced code card per concrete callable definition."""
+    overloads = getattr(obj, '_overloads', None)
+    entries = overloads if overloads else [obj]
     lines = []
-    for definition in definitions:
-        lines += _fenced(["@overload", _without_trailing_colon(definition)])
+    for index in range(len(definitions)):
+        lines += _signature_card(
+            entries[index], definitions[index], overload=bool(overloads)
+        )
         lines.append("")
     lines.pop()
     return lines
@@ -151,13 +163,21 @@ def _resolve_name(name):
     return obj
 
 
+# Topics help documents without resolving a name for them.
+_topics = ('modules',)
+
+
 def _is_reference(name):
-    """Whether a dotted path resolves from its root module.
+    """Whether a topic of its own, or a dotted path that resolves from its root
+    module.
 
     A host holding a reference asks this to choose between handing ``help`` the
     path, which is what names the module a function came from, and handing it
     an object bound in the session, which no module owns.
     """
+    if name in _topics:
+        return True
+
     try:
         _resolve_name(name)
         return True
@@ -220,18 +240,14 @@ def _module_lines(module):
 
 _help_text = None
 
-# What a reference link starts with, up to the name itself. Hosts that render
-# markdown and take reference links set this; without it names stay plain code.
-_reference_url_prefix = None
-
 
 def _default_help_text():
     return """
 SwiftPy Python help
 
-Useful functions:
-  help('modules')   List available modules
-  help('<module>')  Show help for a module
+Pass a name to `help` to see what it documents.
+
+See also ``modules``.
 """.strip()
 
 
@@ -475,29 +491,13 @@ def _owning_module_name(path):
     return name
 
 
-def _function_markdown(obj, fallback_name=None, module_name=None):
-    """A function's help laid out as reference documentation."""
-    definitions = _callable_definitions(obj, fallback_name)
-    definition = definitions[0]
-    parameter_names = []
-    for item in definitions:
-        for name in _parameter_names(item):
-            if name not in parameter_names:
-                parameter_names.append(name)
+def _doc_markdown(doc, definition):
+    """A docstring as its summary and the sections that sit below it."""
     summary, parameters, discussion = _doc_sections(
-        _callable_doc(obj), parameter_names
+        doc, _parameter_names(definition)
     )
 
-    lines = ["# " + _definition_name(definition), ""]
-
-    if module_name:
-        lines += [_reference_markdown(module_name), ""]
-
-    if summary:
-        lines += [summary, ""]
-
-    lines += _signature_cards(definitions)
-
+    lines = []
     if parameters:
         lines += ["", "## Parameters", ""]
         for name, description in parameters:
@@ -506,26 +506,67 @@ def _function_markdown(obj, fallback_name=None, module_name=None):
     if discussion:
         lines += ["", "## Discussion", ""] + discussion
 
+    return summary, lines
+
+
+def _overload_sections(overloads, definitions):
+    """Each overload with the documentation belonging to its own signature.
+
+    The sections repeat rather than merge: what is documented for one signature
+    says nothing about the others.
+    """
+    lines = []
+    for index in range(len(definitions)):
+        entry = overloads[index]
+        definition = definitions[index]
+        summary, body = _doc_markdown(getattr(entry, '__doc__', None), definition)
+
+        # A blank line separates an overload from the one above it.
+        if index:
+            lines.append("")
+
+        lines += _signature_card(entry, definition, overload=True)
+        if summary:
+            lines += ["", summary]
+        lines += body
+
     return lines
 
 
-def _reference_markdown(name, text=None, code=True):
-    """A name as markdown, linked where the host takes references.
+def _function_markdown(obj, fallback_name=None, module_name=None):
+    """A function's help laid out as reference documentation."""
+    definitions = _callable_definitions(obj, fallback_name)
 
-    The scheme belongs to the host, so it sets ``_reference_url_prefix`` (as it
-    sets ``_help_text``) and the name is appended to it. Module and member
-    names are identifiers, so nothing in them needs escaping.
+    lines = ["# " + _definition_name(definitions[0]), ""]
 
-    text: Shown in place of the name.
-    code: Whether the text is code, which a heading doesn't want.
+    if module_name:
+        lines += [_reference_markdown(module_name), ""]
+
+    overloads = getattr(obj, '_overloads', None)
+    if overloads:
+        # Of the dispatcher's own documentation, only a summary can speak for
+        # every signature.
+        summary, _ = _doc_markdown(getattr(obj, '__doc__', None), definitions[0])
+        if summary:
+            lines += [summary, ""]
+        return lines + _overload_sections(overloads, definitions)
+
+    summary, body = _doc_markdown(_callable_doc(obj), definitions[0])
+    if summary:
+        lines += [summary, ""]
+
+    return lines + _signature_cards(obj, definitions) + body
+
+
+def _reference_markdown(path):
+    """A name as a reference span, in the double backticks DocC uses.
+
+    Whatever link a host makes of it is the host's own, so no scheme belongs
+    here; a host that renders markdown plainly shows a code span instead.
+
+    path: The name, with a ``/`` before the part to show on its own.
     """
-    label = text or name
-    if code:
-        label = "`" + label + "`"
-
-    if not _reference_url_prefix:
-        return label
-    return "[" + label + "](" + _reference_url_prefix + name + ")"
+    return "``" + path + "``"
 
 
 def _modules_markdown():
@@ -584,7 +625,7 @@ def _interface_summary(interface):
 
 
 def _linked_doc_references(text):
-    """Links resolvable dotted names written as Markdown code spans."""
+    """Turns resolvable dotted names in code spans into reference spans."""
     parts = text.split("`")
     for index in range(1, len(parts), 2):
         name = parts[index]
@@ -612,11 +653,8 @@ def _class_summary(cls):
 def _listing_entry(owner_path, member_name, declaration, summary=None):
     """A shared class or function card in an API listing."""
     if owner_path:
-        heading = _reference_markdown(
-            owner_path + "." + member_name,
-            text=member_name,
-            code=False
-        )
+        # The slash keeps the heading down to the member's own name.
+        heading = _reference_markdown(owner_path + "/" + member_name)
     else:
         heading = member_name
 
@@ -650,7 +688,12 @@ def _function_entries(owner_path, functions, of_class=False):
             definition = _callable_definition(entry, member_name)
             summary, _, _ = _doc_sections(getattr(entry, '__doc__', None), [])
             signature = _without_trailing_colon(definition)
-            declaration = ["@overload", signature] if overloads else [signature]
+            declaration = []
+            if overloads:
+                declaration.append("@overload")
+            if getattr(entry, '_is_static', False):
+                declaration.append("@staticmethod")
+            declaration.append(signature)
             lines += _listing_entry(owner_path, member_name, declaration, summary)
 
     return lines
@@ -685,12 +728,83 @@ def _class_methods(cls):
     return methods
 
 
+def _class_property_names(cls):
+    """The class's public properties, bound as one or declared as an annotation.
+    """
+    names = []
+    for attr_name in dir(cls):
+        if attr_name.startswith('_'):
+            continue
+        try:
+            attr = getattr(cls, attr_name)
+        except:
+            continue
+        # `property` isn't a name to compare against here.
+        if type(attr).__name__ == 'property':
+            names.append(attr_name)
+
+    for attr_name in getattr(cls, '__annotations__', None) or {}:
+        if not attr_name.startswith('_') and attr_name not in names:
+            names.append(attr_name)
+
+    names.sort()
+    return names
+
+
+def _property_declaration(cls, name):
+    """The property as its class declares it, annotated where it says so."""
+    annotation = (getattr(cls, '__annotations__', None) or {}).get(name)
+    return name + ": " + annotation if annotation else name
+
+
+def _property_summary(cls, name):
+    """What a property is for, which its getter is what documents."""
+    getter = getattr(getattr(cls, name, None), 'fget', None)
+    doc = getattr(getter, '__doc__', None)
+    if not doc:
+        return None
+
+    summary, _, _ = _doc_sections(doc, [])
+    return summary
+
+
+def _property_entries(cls, names):
+    """One shared-format card per property. A property carries no signature, so
+    its declaration stands in for one. Properties aren't reference destinations,
+    so their headings remain plain names even when their class has a path."""
+    lines = []
+    for name in names:
+        lines += _listing_entry(
+            None,
+            name,
+            [_property_declaration(cls, name)],
+            _property_summary(cls, name)
+        )
+    return lines
+
+
+def _property_markdown(path):
+    """A property's help: what it declares, and what it is for."""
+    parts = path.split('.')
+    name = parts[-1]
+    cls = _resolve_name('.'.join(parts[:-1]))
+
+    lines = ["# " + name, ""]
+
+    module_name = _owning_module_name(path)
+    if module_name:
+        lines += [_reference_markdown(module_name), ""]
+
+    summary = _property_summary(cls, name)
+    if summary:
+        lines += [summary, ""]
+
+    return lines + _fenced([_property_declaration(cls, name)])
+
+
 def _class_markdown(cls, path=None):
     """A class's help, laid out as a module's is: what it is, then what it
     offers.
-
-    Properties are left out for now; a bound property is not callable, so it
-    carries neither a signature nor documentation of its own.
     """
     header = _class_header(cls)
     lines = ["# " + (getattr(cls, '__name__', None) or header), ""]
@@ -709,6 +823,10 @@ def _class_markdown(cls, path=None):
     initializers = _class_initializers(cls)
     if initializers:
         lines += ["## Initializers", ""] + _function_entries(path, initializers)
+
+    properties = _class_property_names(cls)
+    if properties:
+        lines += ["## Properties", ""] + _property_entries(cls, properties)
 
     methods = _class_methods(cls)
     if methods:
@@ -743,6 +861,10 @@ def _markdown_lines(obj):
                 fallback_name=obj.split('.')[-1],
                 module_name=_owning_module_name(obj)
             )
+        # A property documents itself; the class it is reached through is what
+        # declares it.
+        if type(resolved).__name__ == 'property' and "." in obj:
+            return _property_markdown(obj)
         # An instance is documented by the class it is of.
         return _class_markdown(type(resolved))
 

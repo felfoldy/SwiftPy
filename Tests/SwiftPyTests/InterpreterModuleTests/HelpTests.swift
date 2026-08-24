@@ -82,9 +82,9 @@ struct HelpTests {
 
             let output: String = try #require(Interpreter.evaluate("_na_out"))
             #expect(output.contains("SwiftPy Python help"))
-            #expect(output.contains("Useful functions"))
-            #expect(output.contains("help('modules')   List available modules"))
-            #expect(output.contains("help('<module>')  Show help for a module"))
+            #expect(output.contains("Pass a name to `help`"))
+            // The listing is reached as a reference rather than as a call.
+            #expect(output.contains("See also ``modules``"))
             #expect(!output.contains("Welcome to PyPrompt"))
         }
 
@@ -116,10 +116,7 @@ struct HelpTests {
     struct ClassMarkdown {
         init() {
             Interpreter.run("import interpreter")
-            Interpreter.run("""
-            import help as _help_module
-            _help_module._reference_url_prefix = 'pyprompt://reference?v=1&code='
-            """)
+            Interpreter.run("import help as _help_module")
         }
 
         private func markdown(of path: String) throws -> String {
@@ -137,7 +134,7 @@ struct HelpTests {
             #expect(output.hasPrefix("""
             # Peer
 
-            [`p2p`](pyprompt://reference?v=1&code=p2p)
+            ``p2p``
 
             ```python
             class Peer
@@ -156,13 +153,27 @@ struct HelpTests {
             #expect(output.contains("""
             ## Functions
 
-            ### [advertise](pyprompt://reference?v=1&code=p2p.Peer.advertise)
+            ### ``p2p.Peer/advertise``
 
             ```python
             def advertise(self) -> None
             ```
 
             Makes the peer discoverable.
+            """))
+        }
+
+        @Test("marks static methods in their declarations")
+        func staticMethods() throws {
+            let output = try markdown(of: "pathlib.Path")
+
+            #expect(output.contains("""
+            ### ``pathlib.Path/cwd``
+
+            ```python
+            @staticmethod
+            def cwd() -> Path
+            ```
             """))
         }
 
@@ -175,7 +186,7 @@ struct HelpTests {
             #expect(output.contains("""
             ## Initializers
 
-            ### [__init__](pyprompt://reference?v=1&code=p2p.Peer.__init__)
+            ### ``p2p.Peer/__init__``
 
             ```python
             def __init__(self, name: str) -> None
@@ -218,8 +229,75 @@ struct HelpTests {
             #expect(!output.contains("\"\"\""))
         }
 
+        /// A property carries no signature, so its declaration stands in for
+        /// one, and what documents it is its getter.
+        @Test("lists the properties with what declares and describes them")
+        func properties() throws {
+            Interpreter.run("""
+            class _Card:
+                title: str
+
+                @property
+                def summary(self) -> str:
+                    '''One line about the card.'''
+                    return self.title
+
+            _prop_out = "\\n".join(_help_module._markdown_lines(_Card))
+            """)
+            let output: String = try #require(Interpreter.evaluate("_prop_out"))
+
+            #expect(output.contains("""
+            ## Properties
+
+            ### summary
+
+            ```python
+            summary
+            ```
+
+            One line about the card.
+            """))
+            // An annotated attribute is declared by the class rather than bound.
+            #expect(output.contains("""
+            ### title
+
+            ```python
+            title: str
+            ```
+            """))
+        }
+
+        @Test("uses plain headings for properties")
+        func plainPropertyHeadings() throws {
+            let output = try markdown(of: "pathlib.Path")
+
+            #expect(output.contains("""
+            ## Properties
+
+            ### name
+            """))
+            #expect(!output.contains("### ``pathlib.Path/name``"))
+        }
+
+        /// Reached by its path, a property documents itself rather than the
+        /// `property` it is an instance of.
+        @Test("documents a property of its own")
+        func propertyPage() throws {
+            let output = try markdown(of: "pathlib.Path.name")
+
+            #expect(output == """
+            # name
+
+            ``pathlib``
+
+            ```python
+            name
+            ```
+            """)
+        }
+
         /// Nothing names the module when help is handed the class itself, so
-        /// the methods keep their headings without links.
+        /// the methods keep their headings without references.
         @Test("documents a class reached without a path")
         func withoutPath() throws {
             Interpreter.run("""
@@ -230,7 +308,7 @@ struct HelpTests {
 
             #expect(output.hasPrefix("# Peer"))
             #expect(output.contains("### advertise"))
-            #expect(!output.contains("](pyprompt://"))
+            #expect(!output.contains("### ``"))
         }
     }
 
@@ -240,10 +318,7 @@ struct HelpTests {
     struct ModuleClassListing {
         init() {
             Interpreter.run("import interpreter")
-            Interpreter.run("""
-            import help as _help_module
-            _help_module._reference_url_prefix = 'pyprompt://reference?v=1&code='
-            """)
+            Interpreter.run("import help as _help_module")
         }
 
         private func markdown(of module: String) throws -> String {
@@ -259,7 +334,7 @@ struct HelpTests {
             let output = try markdown(of: "p2p")
 
             #expect(output.contains("""
-            ### [Peer](pyprompt://reference?v=1&code=p2p.Peer)
+            ### ``p2p/Peer``
 
             ```python
             class Peer
@@ -274,7 +349,7 @@ struct HelpTests {
             let output = try markdown(of: "asyncio")
 
             #expect(output.contains("""
-            ### [AsyncTask](pyprompt://reference?v=1&code=asyncio.AsyncTask)
+            ### ``asyncio/AsyncTask``
 
             ```python
             class AsyncTask
@@ -379,58 +454,87 @@ struct HelpTests {
             #expect(!output.contains("-> None:"))
         }
 
-        @Test("shows concrete signatures for an overload dispatcher")
-        func overloadSignatures() throws {
-            Interpreter.run("""
-            def _text_response(): pass
-            _text_response._interface = 'respond(self, prompt: str) -> str'
-            _text_response._is_async = True
-            def _structured_response(): pass
-            _structured_response._interface = 'respond(self, prompt: str, schema: Any) -> Any'
-            _structured_response._is_async = True
-            def _respond(*args, **kwargs): pass
-            _respond._overloads = [_text_response, _structured_response]
+        /// Each overload documents its own signature, so the page repeats the
+        /// sections rather than merging what belongs to one of them.
+        @Test("documents each overload under its own signature")
+        func overloadSections() throws {
+            bindResponder()
+
+            let output = try markdown(of: "Responder.respond")
+
+            #expect(output == """
+            # respond
+
+            ```python
+            @overload
+            def respond(self, prompt: str) -> str
+            ```
+
+            Produces a response to a prompt.
+
+            ## Parameters
+
+            - `prompt`: What to respond to.
+
+            ```python
+            @overload
+            def respond(self, prompt: str, schema: Any) -> Any
+            ```
+
+            Produces a structured response to a prompt.
+
+            ## Parameters
+
+            - `prompt`: What to respond to.
+            - `schema`: The type the response conforms to.
             """)
+            // The dispatcher's own signature documents nothing.
+            #expect(!output.contains("*args"))
+        }
 
-            let output = try markdown(of: "_respond")
-
-            #expect(output.contains("""
-            ```python
-            @overload
-            async def respond(self, prompt: str) -> str
-            ```
-
-            ```python
-            @overload
-            async def respond(self, prompt: str, schema: Any) -> Any
-            ```
-            """))
-            #expect(!output.contains("def _respond(*args, **kwargs)"))
-
+        /// A listing heads every overload with the same name, each over the
+        /// signature it documents.
+        @Test("lists an overload dispatcher as one entry per overload")
+        func overloadEntries() throws {
+            bindResponder()
             Interpreter.run("""
-            _saved_prefix = _help_module._reference_url_prefix
-            _help_module._reference_url_prefix = None
             _overload_entries = "\\n".join(
-                _help_module._function_entries('agents.Agent', [('respond', _respond)])
+                _help_module._function_entries(
+                    'agents.Agent', [('respond', Responder.respond)]
+                )
             )
-            _help_module._reference_url_prefix = _saved_prefix
             """)
             let entries: String = try #require(Interpreter.evaluate("_overload_entries"))
+
             #expect(entries.contains("""
-            ### respond
+            ### ``agents.Agent/respond``
 
             ```python
             @overload
-            async def respond(self, prompt: str) -> str
+            def respond(self, prompt: str) -> str
             ```
 
-            ### respond
+            Produces a response to a prompt.
+
+            ### ``agents.Agent/respond``
 
             ```python
             @overload
-            async def respond(self, prompt: str, schema: Any) -> Any
+            def respond(self, prompt: str, schema: Any) -> Any
             ```
             """))
+        }
+
+        /// Python can no longer set attributes on a function, so an overload
+        /// dispatcher has to come from a real binding.
+        private func bindResponder() {
+            PyBind.module("HelpOverloadTests") { module in
+                module.class(Responder.self)
+            }
+            Interpreter.run("""
+            import help as _help_module
+            from HelpOverloadTests import Responder
+            """)
         }
 
         @Test("lists the documented parameters and leaves the rest out")
@@ -530,12 +634,15 @@ struct HelpTests {
             _ref_math = _help_module._is_reference('math.sqrt')
             _ref_missing = _help_module._is_reference('math.no_such_member')
             _ref_local = _help_module._is_reference('_session_only')
+            _ref_topic = _help_module._is_reference('modules')
             """)
 
             #expect(Interpreter.evaluate("_ref_math") == true)
             // A host uses this to fall back to the object it is bound to.
             #expect(Interpreter.evaluate("_ref_missing") == false)
             #expect(Interpreter.evaluate("_ref_local") == false)
+            // A topic resolves no name, but help documents it all the same.
+            #expect(Interpreter.evaluate("_ref_topic") == true)
         }
 
         @Test("shows the signature where there is no docstring")
@@ -869,5 +976,32 @@ struct HelpTests {
         func handlesUnknown() {
             Interpreter.run("help('_no_such_module_xyz')")
         }
+    }
+}
+
+/// An overloaded method whose overloads document different parameters. Bound
+/// rather than assembled in Python, which can't set `_overloads` on a function.
+private class Responder: PythonBindable {
+    var _pythonCache = PythonBindingCache()
+
+    static let pyType = PyType.make("Responder", base: .object) { type in
+        type.function(
+            "respond(self, prompt: str) -> str",
+            """
+            Produces a response to a prompt.
+
+            prompt: What to respond to.
+            """
+        ) { _, _ in true }
+
+        type.function(
+            "respond(self, prompt: str, schema: Any) -> Any",
+            """
+            Produces a structured response to a prompt.
+
+            prompt: What to respond to.
+            schema: The type the response conforms to.
+            """
+        ) { _, _ in true }
     }
 }

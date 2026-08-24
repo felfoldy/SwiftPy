@@ -92,6 +92,10 @@ public extension PyType {
         let functionRef = py.pushtmp()
         defer { py.pop() }
         let name = py.newfunction(functionRef, signature: signature, docstring: docstring, function: function)
+        let staticFlag = py.pushtmp()
+        py.newbool(staticFlag, value: true)
+        py.setdict(functionRef, name: "_is_static", value: staticFlag)
+        py.pop()
 
         // Overload an existing static method of the same name.
         if let existing = py.getdict(typeObject, name: name) {
