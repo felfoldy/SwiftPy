@@ -110,6 +110,130 @@ struct HelpTests {
         }
     }
 
+    /// A class's own page reads as a module's does: what it is, then what it
+    /// offers. Properties are left out for now.
+    @Suite("class markdown") @MainActor
+    struct ClassMarkdown {
+        init() {
+            Interpreter.run("import interpreter")
+            Interpreter.run("""
+            import help as _help_module
+            _help_module._reference_url_prefix = 'pyprompt://reference?v=1&code='
+            """)
+        }
+
+        private func markdown(of path: String) throws -> String {
+            Interpreter.run("""
+            import \(path.split(separator: ".")[0])
+            _cm_out = "\\n".join(_help_module._markdown_lines('\(path)'))
+            """)
+            return try #require(Interpreter.evaluate("_cm_out"))
+        }
+
+        @Test("opens with the name, its module, the declaration, and the summary")
+        func opening() throws {
+            let output = try markdown(of: "p2p.Peer")
+
+            #expect(output.hasPrefix("""
+            # Peer
+
+            [`p2p`](pyprompt://reference?v=1&code=p2p)
+
+            ```python
+            class Peer
+            ```
+
+            An object represents a peer in a multipeer session.
+            """))
+        }
+
+        /// The macro binds each method's comment, so the summary comes from the
+        /// method rather than from the class's interface stub.
+        @Test("lists the methods with their own summaries")
+        func methods() throws {
+            let output = try markdown(of: "p2p.Peer")
+
+            #expect(output.contains("""
+            ## Functions
+
+            #### [advertise](pyprompt://reference?v=1&code=p2p.Peer.advertise)
+
+            ```python
+            def advertise(self) -> None
+            ```
+
+            Makes the peer discoverable.
+            """))
+        }
+
+        /// The macro binds the initializer's comment too, so it reads as a
+        /// method does rather than being buried in the class stub.
+        @Test("lists the initializer above the methods")
+        func initializers() throws {
+            let output = try markdown(of: "p2p.Peer")
+
+            #expect(output.contains("""
+            ## Initializers
+
+            #### [__init__](pyprompt://reference?v=1&code=p2p.Peer.__init__)
+
+            ```python
+            def __init__(self, name: str) -> None
+            ```
+
+            Initializes a peer with a display name.
+            """))
+
+            let initializers = try #require(output.range(of: "## Initializers"))
+            let functions = try #require(output.range(of: "## Functions"))
+            #expect(initializers.lowerBound < functions.lowerBound)
+        }
+
+        /// A class that declares no initializer binds no `__init__`, so it gets
+        /// no empty section.
+        @Test("leaves the section out where nothing is initialized")
+        func withoutInitializer() throws {
+            Interpreter.run("""
+            _no_init = "\\n".join(_help_module._markdown_lines(int))
+            """)
+            let output: String = try #require(Interpreter.evaluate("_no_init"))
+
+            #expect(!output.contains("## Initializers"))
+        }
+
+        @Test("takes the method signature from the binding")
+        func methodSignature() throws {
+            let output = try markdown(of: "p2p.Peer")
+
+            #expect(output.contains("def autoconnect(self, name: str) -> None"))
+            // The trailing colon belongs to a source stub, not to a signature.
+            #expect(!output.contains("-> None:"))
+        }
+
+        @Test("is not the plain stub it used to be")
+        func isNotAStub() throws {
+            let output = try markdown(of: "p2p.Peer")
+
+            #expect(!output.hasPrefix("```python"))
+            #expect(!output.contains("\"\"\""))
+        }
+
+        /// Nothing names the module when help is handed the class itself, so
+        /// the methods keep their headings without links.
+        @Test("documents a class reached without a path")
+        func withoutPath() throws {
+            Interpreter.run("""
+            import p2p
+            _np_out = "\\n".join(_help_module._markdown_lines(p2p.Peer))
+            """)
+            let output: String = try #require(Interpreter.evaluate("_np_out"))
+
+            #expect(output.hasPrefix("# Peer"))
+            #expect(output.contains("#### advertise"))
+            #expect(!output.contains("](pyprompt://"))
+        }
+    }
+
     /// A module lists its classes the way it lists its functions: the name
     /// linked to its own help, over what it declares and what it is for.
     @Suite("module class listing") @MainActor

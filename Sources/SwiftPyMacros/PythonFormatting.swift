@@ -8,12 +8,16 @@ import Foundation
 
 struct PythonSignatureFormatStyle: FormatStyle {
     var hasSelf: Bool
+    /// Parameters are keyword arguments, so they are named the way the members
+    /// around them are.
+    var convertsToSnakeCase: Bool = true
 
     func format(_ signature: FunctionSignatureSyntax) -> String {
         var parameters: [String] = hasSelf ? ["self"] : []
 
         parameters += signature.parameterClause.parameters.map { parameter in
-            let name = (parameter.secondName ?? parameter.firstName)
+            let swiftName = (parameter.secondName ?? parameter.firstName).text
+            let name = convertsToSnakeCase ? swiftName.snakeCased : swiftName
             let type = parameter.type.description.singleLine.pyType
             let defaultExpression = parameter.defaultValue?.value.description.singleLine.pyLiteralExpression ?? ""
 
@@ -177,6 +181,24 @@ extension String {
             .replacingOccurrences(of: "\"", with: "'")
             .replacingOccurrences(of: "true", with: "True")
             .replacingOccurrences(of: "false", with: "False")
+    }
+
+    /// camelCase as the snake_case Python names it.
+    var snakeCased: String {
+        var text = self
+        guard !text.isEmpty else { return text }
+
+        var result = [String(text.removeFirst().lowercased())]
+
+        for character in text {
+            if character.isUppercase {
+                result.append("_")
+            }
+
+            result.append(character.lowercased())
+        }
+
+        return result.joined()
     }
 
     static let tab = "    "

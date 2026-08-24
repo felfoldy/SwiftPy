@@ -33,14 +33,22 @@ struct InitializerExtractor: MemberExtractor {
             let swiftInitializer = "\(metadata.className).init(\(swiftParameterLabels))"
                 .replacingOccurrences(of: "()", with: "")
 
-            let paramsString = PythonSignatureFormatStyle(hasSelf: true)
-                .format(initializer.signature)
+            let paramsString = PythonSignatureFormatStyle(
+                hasSelf: true,
+                convertsToSnakeCase: metadata.convertsToSnakeCase
+            )
+            .format(initializer.signature)
 
             let pySignature = "__init__(\(paramsString)) -> None"
+            let docstring = initializer.description.docstring
+
+            // Bound to the initializer as well as written into the stub, so
+            // that `help()` can read it the way it reads a method's.
+            let boundDocstring = docstring.map { ", " + $0.asSwiftLiteral } ?? ""
 
             metadata.bindings.append(
             """
-            type.function("\(pySignature)") {
+            type.function("\(pySignature)"\(boundDocstring)) {
                 __init__($1, \(swiftInitializer))
             }
             """
@@ -50,7 +58,7 @@ struct InitializerExtractor: MemberExtractor {
 
             let initSyntax = "def \(pySignature):"
 
-            if let docstring = initializer.description.docstring {
+            if let docstring {
                 metadata.initSyntax.append(initSyntax)
                 metadata.initSyntax.append(.tab + docstring.inPythonTrippleQuotes)
                 metadata.initSyntax.append("")
@@ -157,7 +165,11 @@ struct FunctionExtractor: MemberExtractor {
         let isStatic = function.modifiers.isStatic
         let signature = function.signature
 
-        let paramsString = PythonSignatureFormatStyle(hasSelf: !isStatic).format(signature)
+        let paramsString = PythonSignatureFormatStyle(
+            hasSelf: !isStatic,
+            convertsToSnakeCase: metadata.convertsToSnakeCase
+        )
+        .format(signature)
 
         let returnType = signature.returnClause?.type.description.singleLine.pyType ?? "None"
         let pythonIdentifier = metadata.identifier(identifier)
@@ -172,7 +184,9 @@ struct FunctionExtractor: MemberExtractor {
             ? "async def \(pySignature):"
             : "def \(pySignature):"
 
-        if let docstring = function.description.docstring {
+        let docstring = function.description.docstring
+
+        if let docstring {
             metadata.functionSyntax.append(functionSyntax)
             metadata.functionSyntax.append(.tab + docstring.inPythonTrippleQuotes)
             metadata.functionSyntax.append("")
@@ -185,10 +199,14 @@ struct FunctionExtractor: MemberExtractor {
             .joined()
         let swiftReference = labels.isEmpty ? identifier : "\(identifier)(\(labels))"
 
+        // Bound to the method as well as written into the stub, so that `help()`
+        // can read it from the method the way it reads a module's functions.
+        let boundDocstring = docstring.map { ", " + $0.asSwiftLiteral } ?? ""
+
         if isStatic {
             metadata.bindings.append(
             """
-            type.staticmethod("\(pySignature)") { argc, argv in
+            type.staticmethod("\(pySignature)"\(boundDocstring)) { argc, argv in
                 PyBind.function(argc, argv, \(swiftReference))
             }
             """
@@ -196,7 +214,7 @@ struct FunctionExtractor: MemberExtractor {
         } else {
             metadata.bindings.append(
             """
-            type.function("\(pySignature)") {
+            type.function("\(pySignature)"\(boundDocstring)) {
                 _bind_function($1, \(swiftReference))
             }
             """

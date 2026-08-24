@@ -31,7 +31,7 @@ struct StoreTests {
     @available(macOS 15, *)
     @Test func insert() throws {
         try run("""
-        container = Store('insert_testing', True)
+        container = Store('insert_testing', in_memory=True)
         sword = Item(name='Sword')
         container.insert(sword)
         """)

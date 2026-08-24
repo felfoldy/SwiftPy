@@ -101,6 +101,16 @@ extension String {
     static let trippleQuotes = "\"\"\""
 }
 
+extension String {
+    /// Documentation as a Swift literal, raw so that quotes and backslashes in
+    /// the comment stay as written.
+    var asSwiftLiteral: String {
+        contains("\n")
+            ? "#\"\"\"\n\(self)\n\"\"\"#"
+            : "#\"\(self)\"#"
+    }
+}
+
 extension ClassMetadata {
     /// The class documentation as `__doc__`, which is what `help()` reads for a
     /// summary. Only the class's own comment, not the attribute documentation

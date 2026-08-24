@@ -188,7 +188,7 @@ class ScriptableMacroTests: XCTestCase {
         extension TestClass: PythonBindable {
             @MainActor static let pyType: PyType = .make("TestClass", base: .object) { type in
                 \(initializer("__init__(self) -> None", "TestClass.init"))
-                \(initializer("__init__(self, number: int) -> None", "TestClass.init(number:)"))
+                \(initializer("__init__(self, number: int) -> None", "TestClass.init(number:)", docstring: "documents"))
                 \(newAndRepr)
                 \(interfaceBegin)
                 class TestClass:
@@ -320,7 +320,7 @@ class ScriptableMacroTests: XCTestCase {
             extension TestClass: PythonBindable {
                 @MainActor static let pyType: PyType = .make("TestClass", base: .object) { type in
                     \(property("number", python: "number"))
-                    type.function("do_something(self) -> int") {
+                    type.function("do_something(self) -> int", #"Do something."#) {
                         _bind_function($1, doSomething)
                     }
                     \(newAndRepr)
@@ -469,9 +469,15 @@ private func function(_ name: String, _ syntax: String) -> String {
     """
 }
 
-private func initializer(_ syntax: String, _ initializer: String) -> String {
-    """
-    type.function("\(syntax)") {
+private func initializer(
+    _ syntax: String,
+    _ initializer: String,
+    docstring: String? = nil
+) -> String {
+    let documented = docstring.map { ", #\"\($0)\"#" } ?? ""
+
+    return """
+    type.function("\(syntax)"\(documented)) {
                 __init__($1, \(initializer))
             }
     """

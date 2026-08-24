@@ -41,23 +41,7 @@ struct ClassMetadata {
     }
 
     func identifier(_ attribute: String) -> String {
-        guard convertsToSnakeCase else {
-            return attribute
-        }
-
-        // Converts to snake_case.
-        var text = attribute
-        var result = [String(text.removeFirst().lowercased())]
-
-        for character in text {
-            if character.isUppercase {
-                result.append("_")
-            }
-
-            result.append(character.lowercased())
-        }
-
-        return result.joined()
+        convertsToSnakeCase ? attribute.snakeCased : attribute
     }
 }
 

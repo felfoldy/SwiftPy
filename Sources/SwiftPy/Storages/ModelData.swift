@@ -72,7 +72,7 @@ class Store: PythonBindable {
     internal let context: SwiftData.ModelContext
     internal static var containers = [Store]()
     
-    init(name: String, inMemoryOnly: Bool = false) throws {
+    init(name: String, inMemory: Bool = false) throws {
         let schema = Schema([ModelData.self,
                              LookupKeyValue.self,
                              ModelMetadata.self],
@@ -81,7 +81,7 @@ class Store: PythonBindable {
         let configuration = ModelConfiguration(
             name,
             schema: schema,
-            isStoredInMemoryOnly: inMemoryOnly,
+            isStoredInMemoryOnly: inMemory,
             groupContainer: .automatic,
             cloudKitDatabase: .automatic
         )

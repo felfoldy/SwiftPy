@@ -275,16 +275,16 @@ def _split_top_level(text):
     return parts
 
 
-def _parameter_names(definition):
-    """The parameters a ``def name(...):`` line declares."""
+def _parameter_text(definition):
+    """What a ``def name(...):`` line declares between its brackets, or
+    ``None``."""
     start = definition.find("(")
     if start == -1:
-        return []
+        return None
 
     # An annotation can hold brackets of its own, so the closing one is the
     # bracket that returns to depth zero.
     depth = 0
-    end = -1
     index = start
     while index < len(definition):
         char = definition[index]
@@ -293,14 +293,32 @@ def _parameter_names(definition):
         elif char in ")]}":
             depth -= 1
             if depth == 0:
-                end = index
-                break
+                return definition[start + 1:index]
         index += 1
-    if end == -1:
+    return None
+
+
+def _takes_self(definition):
+    """Whether a definition takes ``self``.
+
+    Nothing at runtime tells a bound static method from an instance one; the
+    signature is what says so, as it does in Python.
+    """
+    text = _parameter_text(definition)
+    if not text:
+        return False
+
+    return _split_top_level(text)[0].strip() == "self"
+
+
+def _parameter_names(definition):
+    """The parameters a ``def name(...):`` line declares."""
+    text = _parameter_text(definition)
+    if text is None:
         return []
 
     names = []
-    for part in _split_top_level(definition[start + 1:end]):
+    for part in _split_top_level(text):
         name = part.strip()
         for separator in (":", "="):
             cut = name.find(separator)
@@ -558,29 +576,100 @@ def _class_entries(module_name, classes):
     return lines
 
 
-def _function_entries(module_name, functions):
+def _function_entries(owner_path, functions, of_class=False):
     """One entry per function: its name, linked to its own help, over the
     signature and what it does.
 
     The signature sits in a code block rather than in the link, because a link
     long enough to wrap loses its frame and spills over the line.
+
+    owner_path: The dotted path the functions are reached by, or ``None`` where
+        there is none to link to.
+    of_class: Whether these are members, whose signature says whether they are
+        static.
     """
     lines = []
     for member_name, function in functions:
         definition = _callable_definition(function, member_name)
         summary, _, _ = _doc_sections(getattr(function, '__doc__', None), [])
 
-        lines.append("#### " + _reference_markdown(
-            module_name + "." + member_name,
-            text=member_name,
-            code=False
-        ))
+        if owner_path:
+            heading = _reference_markdown(
+                owner_path + "." + member_name,
+                text=member_name,
+                code=False
+            )
+        else:
+            heading = member_name
+
+        lines.append("#### " + heading)
         lines.append("")
         lines += _fenced([_without_trailing_colon(definition)])
         lines.append("")
 
         if summary:
             lines += [summary, ""]
+
+    return lines
+
+
+def _class_initializers(cls):
+    """The class's initializer, as (name, object), where it binds one.
+
+    A class that declares none has no `__init__` to find, so the section stays
+    out rather than showing an empty one."""
+    initializer = getattr(cls, '__init__', None)
+
+    if initializer is None or not callable(initializer):
+        return []
+
+    return [('__init__', initializer)]
+
+
+def _class_methods(cls):
+    """The class's public methods, each as (name, object)."""
+    methods = []
+    for attr_name in dir(cls):
+        if attr_name.startswith('_'):
+            continue
+        try:
+            attr = getattr(cls, attr_name)
+        except:
+            continue
+        if callable(attr):
+            methods.append((attr_name, attr))
+    methods.sort()
+    return methods
+
+
+def _class_markdown(cls, path=None):
+    """A class's help, laid out as a module's is: what it is, then what it
+    offers.
+
+    Properties are left out for now; a bound property is not callable, so it
+    carries neither a signature nor documentation of its own.
+    """
+    header = _class_header(cls)
+    lines = ["# " + (getattr(cls, '__name__', None) or header), ""]
+
+    module_name = _owning_module_name(path) if path else None
+    if module_name:
+        lines += [_reference_markdown(module_name), ""]
+
+    lines += _fenced([header])
+    lines.append("")
+
+    summary = _class_summary(cls)
+    if summary:
+        lines += [summary, ""]
+
+    initializers = _class_initializers(cls)
+    if initializers:
+        lines += ["## Initializers", ""] + _function_entries(path, initializers)
+
+    methods = _class_methods(cls)
+    if methods:
+        lines += ["## Functions", ""] + _function_entries(path, methods)
 
     return lines
 
@@ -604,22 +693,23 @@ def _markdown_lines(obj):
         if isinstance(resolved, module_type):
             return _module_markdown(resolved)
         if isinstance(resolved, type):
-            return _fenced(_class_lines(resolved))
+            return _class_markdown(resolved, path=obj)
         if callable(resolved):
             return _function_markdown(
                 resolved,
                 fallback_name=obj.split('.')[-1],
                 module_name=_owning_module_name(obj)
             )
-        return _fenced(_class_lines(type(resolved)))
+        # An instance is documented by the class it is of.
+        return _class_markdown(type(resolved))
 
     if isinstance(obj, module_type):
         return _module_markdown(obj)
     if isinstance(obj, type):
-        return _fenced(_class_lines(obj))
+        return _class_markdown(obj)
     if callable(obj):
         return _function_markdown(obj)
-    return _fenced(_class_lines(type(obj)))
+    return _class_markdown(type(obj))
 
 
 def help(obj=None):
