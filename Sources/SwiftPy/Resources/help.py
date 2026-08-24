@@ -118,6 +118,20 @@ def _resolve_name(name):
     return obj
 
 
+def _is_reference(name):
+    """Whether a dotted path resolves from its root module.
+
+    A host holding a reference asks this to choose between handing ``help`` the
+    path, which is what names the module a function came from, and handing it
+    an object bound in the session, which no module owns.
+    """
+    try:
+        _resolve_name(name)
+        return True
+    except (ImportError, AttributeError):
+        return False
+
+
 def _module_members(module):
     """The module's public classes and functions, each as (name, object)."""
     classes = []
@@ -133,6 +147,9 @@ def _module_members(module):
             classes.append((attr_name, attr))
         elif callable(attr):
             functions.append((attr_name, attr))
+    # `dir` hands them back in no order worth showing.
+    classes.sort()
+    functions.sort()
     return classes, functions
 
 
@@ -227,17 +244,225 @@ def _fenced_stubs(stubs):
     return _fenced(body)
 
 
-def _reference_markdown(name):
+def _definition_name(definition):
+    """The name in a ``def name(...):`` line."""
+    start = definition.find("def ")
+    start = 0 if start == -1 else start + len("def ")
+    end = definition.find("(", start)
+    if end == -1:
+        return _without_trailing_colon(definition[start:])
+    return definition[start:end].strip()
+
+
+def _split_top_level(text):
+    """``text`` split on the commas that aren't inside brackets."""
+    parts = []
+    current = ""
+    depth = 0
+    for char in text:
+        if char in "([{":
+            depth += 1
+        elif char in ")]}":
+            depth -= 1
+        if char == "," and depth == 0:
+            parts.append(current)
+            current = ""
+        else:
+            current += char
+    parts.append(current)
+    return parts
+
+
+def _parameter_names(definition):
+    """The parameters a ``def name(...):`` line declares."""
+    start = definition.find("(")
+    if start == -1:
+        return []
+
+    # An annotation can hold brackets of its own, so the closing one is the
+    # bracket that returns to depth zero.
+    depth = 0
+    end = -1
+    index = start
+    while index < len(definition):
+        char = definition[index]
+        if char in "([{":
+            depth += 1
+        elif char in ")]}":
+            depth -= 1
+            if depth == 0:
+                end = index
+                break
+        index += 1
+    if end == -1:
+        return []
+
+    names = []
+    for part in _split_top_level(definition[start + 1:end]):
+        name = part.strip()
+        for separator in (":", "="):
+            cut = name.find(separator)
+            if cut != -1:
+                name = name[:cut].strip()
+        name = name.lstrip("*").strip()
+        if name and name != "self":
+            names.append(name)
+    return names
+
+
+def _dedented(doc):
+    """A docstring's lines, with the indentation its body was written at
+    removed. The first line follows the quotes, so it carries none."""
+    lines = doc.split("\n")
+    body = lines[1:]
+
+    indents = []
+    for line in body:
+        if line.strip():
+            indents.append(len(line) - len(line.lstrip()))
+    indent = min(indents) if indents else 0
+
+    return [lines[0].strip()] + [line[indent:] for line in body]
+
+
+def _parameter_description(line, parameter_names):
+    """A ``name: description`` line for one of the declared parameters, or
+    ``None``. Matching the name is what keeps prose holding a colon out."""
+    cut = line.find(":")
+    if cut <= 0:
+        return None
+
+    name = line[:cut].strip()
+    if name not in parameter_names:
+        return None
+
+    return (name, line[cut + 1:].strip())
+
+
+def _doc_sections(doc, parameter_names):
+    """A docstring as its summary, its documented parameters, and the rest."""
+    if not doc:
+        return None, [], []
+
+    lines = _dedented(doc)
+
+    summary = []
+    index = 0
+    while index < len(lines) and lines[index].strip():
+        summary.append(lines[index].strip())
+        index += 1
+
+    parameters = []
+    discussion = []
+    # A line directly under a parameter carries on its description; a blank
+    # line ends it, so prose after the parameters stays discussion.
+    in_parameter = False
+    for line in lines[index:]:
+        stripped = line.strip()
+        parameter = _parameter_description(stripped, parameter_names)
+
+        if parameter:
+            parameters.append(parameter)
+            in_parameter = True
+        elif not stripped:
+            in_parameter = False
+            discussion.append("")
+        elif in_parameter:
+            name, description = parameters[-1]
+            parameters[-1] = (name, description + " " + stripped)
+        else:
+            discussion.append(line)
+
+    while discussion and not discussion[0].strip():
+        discussion.pop(0)
+    while discussion and not discussion[-1].strip():
+        discussion.pop()
+
+    return " ".join(summary), parameters, discussion
+
+
+def _without_trailing_colon(text):
+    """pocketpy has no ``str.rstrip``, so the stub's colon comes off by hand."""
+    text = text.strip()
+    return text[:-1].strip() if text.endswith(":") else text
+
+
+def _return_annotation(definition):
+    """The type a ``def name(...) -> type:`` line returns, or ``None``."""
+    parts = definition.split("->")
+    if len(parts) == 1:
+        return None
+    return _without_trailing_colon(parts[-1])
+
+
+def _owning_module_name(path):
+    """The module a dotted path lives in, or ``None``.
+
+    A function carries no module of its own, so the path it was looked up by is
+    what says where it came from. The longest prefix that is still a module owns
+    it, which keeps a method under its module rather than its class."""
+    parts = path.split('.')
+    module_type = type(__import__('math'))
+
+    name = None
+    for index in range(1, len(parts)):
+        prefix = '.'.join(parts[:index])
+        try:
+            resolved = _resolve_name(prefix)
+        except (ImportError, AttributeError):
+            break
+        if not isinstance(resolved, module_type):
+            break
+        name = prefix
+    return name
+
+
+def _function_markdown(obj, fallback_name=None, module_name=None):
+    """A function's help laid out as reference documentation."""
+    definition = _callable_definition(obj, fallback_name)
+    signature = definition[:-1] if definition.endswith(":") else definition
+    summary, parameters, discussion = _doc_sections(
+        getattr(obj, '__doc__', None), _parameter_names(definition)
+    )
+
+    lines = ["# " + _definition_name(definition), ""]
+
+    if module_name:
+        lines += [_reference_markdown(module_name), ""]
+
+    if summary:
+        lines += [summary, ""]
+
+    lines += _fenced([signature])
+
+    if parameters:
+        lines += ["", "## Parameters", ""]
+        for name, description in parameters:
+            lines.append("- `" + name + "`: " + description)
+
+    if discussion:
+        lines += ["", "## Discussion", ""] + discussion
+
+    return lines
+
+
+def _reference_markdown(name, text=None, code=True):
     """A name as markdown, linked where the host takes references.
 
     The scheme belongs to the host, so it sets ``_reference_url_prefix`` (as it
     sets ``_help_text``) and the name is appended to it. Module and member
     names are identifiers, so nothing in them needs escaping.
+
+    text: Shown in place of the name.
+    code: Whether the text is code, which a heading doesn't want.
     """
-    code = "`" + name + "`"
+    label = text or name
+    if code:
+        label = "`" + label + "`"
+
     if not _reference_url_prefix:
-        return code
-    return "[" + code + "](" + _reference_url_prefix + name + ")"
+        return label
+    return "[" + label + "](" + _reference_url_prefix + name + ")"
 
 
 def _modules_markdown():
@@ -266,10 +491,34 @@ def _module_markdown(module):
         lines += ["## Classes", ""] + _fenced_stubs(stubs) + [""]
 
     if functions:
-        stubs = []
-        for member_name, function in functions:
-            stubs.append(_callable_lines(function, fallback_name=member_name))
-        lines += ["## Functions", ""] + _fenced_stubs(stubs) + [""]
+        lines += ["## Functions", ""] + _function_entries(name, functions)
+
+    return lines
+
+
+def _function_entries(module_name, functions):
+    """One entry per function: its name, linked to its own help, over the
+    signature and what it does.
+
+    The signature sits in a code block rather than in the link, because a link
+    long enough to wrap loses its frame and spills over the line.
+    """
+    lines = []
+    for member_name, function in functions:
+        definition = _callable_definition(function, member_name)
+        summary, _, _ = _doc_sections(getattr(function, '__doc__', None), [])
+
+        lines.append("#### " + _reference_markdown(
+            module_name + "." + member_name,
+            text=member_name,
+            code=False
+        ))
+        lines.append("")
+        lines += _fenced([_without_trailing_colon(definition)])
+        lines.append("")
+
+        if summary:
+            lines += [summary, ""]
 
     return lines
 
@@ -295,7 +544,11 @@ def _markdown_lines(obj):
         if isinstance(resolved, type):
             return _fenced(_class_lines(resolved))
         if callable(resolved):
-            return _fenced(_callable_lines(resolved))
+            return _function_markdown(
+                resolved,
+                fallback_name=obj.split('.')[-1],
+                module_name=_owning_module_name(obj)
+            )
         return _fenced(_class_lines(type(resolved)))
 
     if isinstance(obj, module_type):
@@ -303,7 +556,7 @@ def _markdown_lines(obj):
     if isinstance(obj, type):
         return _fenced(_class_lines(obj))
     if callable(obj):
-        return _fenced(_callable_lines(obj))
+        return _function_markdown(obj)
     return _fenced(_class_lines(type(obj)))
 
 

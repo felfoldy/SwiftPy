@@ -110,6 +110,174 @@ struct HelpTests {
         }
     }
 
+    /// The markdown a function's help renders as. The reference for the layout
+    /// is `help('requests.get')`, checked against the real module in
+    /// swiftpy-requests; these cover the parsing on its own.
+    @Suite("function markdown") @MainActor
+    struct FunctionMarkdown {
+        init() { Interpreter.run("import interpreter") }
+
+        private func markdown(of expression: String) throws -> String {
+            Interpreter.run("""
+            import help as _help_module
+            _fm_out = "\\n".join(_help_module._markdown_lines(\(expression)))
+            """)
+            return try #require(Interpreter.evaluate("_fm_out"))
+        }
+
+        @Test("titles the function and shows its summary")
+        func titleAndSummary() throws {
+            Interpreter.run("""
+            def _summarized(value):
+                '''Does a thing.'''
+                pass
+            """)
+
+            let output = try markdown(of: "_summarized")
+
+            #expect(output.hasPrefix("""
+            # _summarized
+
+            Does a thing.
+            """))
+        }
+
+        @Test("shows a bound signature without its trailing colon")
+        func boundSignature() throws {
+            Interpreter.run("import asyncio")
+
+            let output = try markdown(of: "asyncio.sleep")
+
+            #expect(output.contains("""
+            ```python
+            async def sleep(seconds: float) -> None
+            ```
+            """))
+            // The trailing colon belongs to a source stub, not to a signature.
+            #expect(!output.contains("-> None:"))
+        }
+
+        @Test("lists the documented parameters and leaves the rest out")
+        func parameters() throws {
+            Interpreter.run("""
+            def _fetch(url, params, timeout):
+                '''Sends a request.
+
+                params: Mapping appended to the URL's query.
+                timeout: Seconds allowed to pass without receiving data.
+                '''
+                pass
+            """)
+
+            let output = try markdown(of: "_fetch")
+
+            #expect(output.contains("""
+            ## Parameters
+
+            - `params`: Mapping appended to the URL's query.
+            - `timeout`: Seconds allowed to pass without receiving data.
+            """))
+            #expect(!output.contains("- `url`"))
+            #expect(!output.contains("## Discussion"))
+        }
+
+        @Test("keeps prose out of the parameters")
+        func discussion() throws {
+            Interpreter.run("""
+            def _documented(value, other):
+                '''Does a thing.
+
+                Some discussion of the thing.
+                It runs on for a second line.
+
+                value: What to do it to.
+                '''
+                pass
+            """)
+
+            let output = try markdown(of: "_documented")
+
+            #expect(output.contains("""
+            ## Parameters
+
+            - `value`: What to do it to.
+            """))
+            #expect(output.contains("""
+            ## Discussion
+
+            Some discussion of the thing.
+            It runs on for a second line.
+            """))
+        }
+
+        @Test("carries a wrapped parameter description onto one line")
+        func wrappedParameterDescription() throws {
+            Interpreter.run("""
+            def _wrapped(count):
+                '''Wraps.
+
+                count: How many, described at
+                    length over two lines.
+                '''
+                pass
+            """)
+
+            let output = try markdown(of: "_wrapped")
+
+            #expect(output.contains("- `count`: How many, described at length over two lines."))
+            #expect(!output.contains("## Discussion"))
+        }
+
+        @Test("a colon in prose isn't a parameter")
+        func colonInProse() throws {
+            Interpreter.run("""
+            def _prose(value):
+                '''Explains.
+
+                Note: this is prose, not a parameter.
+                '''
+                pass
+            """)
+
+            let output = try markdown(of: "_prose")
+
+            #expect(!output.contains("## Parameters"))
+            #expect(output.contains("Note: this is prose, not a parameter."))
+        }
+
+        @Test("tells a module-rooted path from a name only the session owns")
+        func isReference() throws {
+            Interpreter.run("""
+            import help as _help_module
+            def _session_only(x):
+                pass
+            _ref_math = _help_module._is_reference('math.sqrt')
+            _ref_missing = _help_module._is_reference('math.no_such_member')
+            _ref_local = _help_module._is_reference('_session_only')
+            """)
+
+            #expect(Interpreter.evaluate("_ref_math") == true)
+            // A host uses this to fall back to the object it is bound to.
+            #expect(Interpreter.evaluate("_ref_missing") == false)
+            #expect(Interpreter.evaluate("_ref_local") == false)
+        }
+
+        @Test("shows the signature where there is no docstring")
+        func noDocstring() throws {
+            Interpreter.run("""
+            def _bare(x):
+                pass
+            """)
+
+            let output = try markdown(of: "_bare")
+
+            #expect(output.contains("# _bare"))
+            #expect(output.contains("def _bare(x)"))
+            #expect(!output.contains("## Parameters"))
+            #expect(!output.contains("## Discussion"))
+        }
+    }
+
     @Suite("callable") @MainActor
     struct Callable {
         init() { Interpreter.run("import interpreter") }
