@@ -24,6 +24,38 @@ def _callable_definition(obj, fallback_name=None):
     return prefix + "def " + signature
 
 
+def _callable_definitions(obj, fallback_name=None):
+    """Concrete definitions for a callable, expanding an overload dispatcher."""
+    overloads = getattr(obj, '_overloads', None)
+    if not overloads:
+        return [_callable_definition(obj, fallback_name)]
+    return [_callable_definition(overload, fallback_name) for overload in overloads]
+
+
+def _callable_doc(obj):
+    """A dispatcher's documentation, falling back to its concrete overloads."""
+    doc = getattr(obj, '__doc__', None)
+    if doc:
+        return doc
+    for overload in getattr(obj, '_overloads', None) or []:
+        doc = getattr(overload, '__doc__', None)
+        if doc:
+            return doc
+    return None
+
+
+def _overload_signature_lines(definitions):
+    """Signatures for a Python fence, decorated when more than one is valid."""
+    signatures = [_without_trailing_colon(definition) for definition in definitions]
+    if len(signatures) == 1:
+        return signatures
+
+    lines = []
+    for signature in signatures:
+        lines += ["@overload", signature]
+    return lines
+
+
 def _docstring_lines(doc, indent="    "):
     lines = doc.strip().split("\n")
     if len(lines) == 1:
@@ -136,8 +168,11 @@ def _module_members(module):
     """The module's public classes and functions, each as (name, object)."""
     classes = []
     functions = []
-    for attr_name in dir(module):
-        if attr_name.startswith('_'):
+    exported_names = getattr(module, '__all__', None)
+    names = exported_names if exported_names is not None else dir(module)
+
+    for attr_name in names:
+        if not isinstance(attr_name, str) or attr_name.startswith('_'):
             continue
         try:
             attr = getattr(module, attr_name)
@@ -147,9 +182,11 @@ def _module_members(module):
             classes.append((attr_name, attr))
         elif callable(attr):
             functions.append((attr_name, attr))
-    # `dir` hands them back in no order worth showing.
-    classes.sort()
-    functions.sort()
+    # Preserve an explicit public API's declared order. `dir` hands fallback
+    # names back in no order worth showing.
+    if exported_names is None:
+        classes.sort()
+        functions.sort()
     return classes, functions
 
 
@@ -439,10 +476,15 @@ def _owning_module_name(path):
 
 def _function_markdown(obj, fallback_name=None, module_name=None):
     """A function's help laid out as reference documentation."""
-    definition = _callable_definition(obj, fallback_name)
-    signature = definition[:-1] if definition.endswith(":") else definition
+    definitions = _callable_definitions(obj, fallback_name)
+    definition = definitions[0]
+    parameter_names = []
+    for item in definitions:
+        for name in _parameter_names(item):
+            if name not in parameter_names:
+                parameter_names.append(name)
     summary, parameters, discussion = _doc_sections(
-        getattr(obj, '__doc__', None), _parameter_names(definition)
+        _callable_doc(obj), parameter_names
     )
 
     lines = ["# " + _definition_name(definition), ""]
@@ -453,7 +495,7 @@ def _function_markdown(obj, fallback_name=None, module_name=None):
     if summary:
         lines += [summary, ""]
 
-    lines += _fenced([signature])
+    lines += _fenced(_overload_signature_lines(definitions))
 
     if parameters:
         lines += ["", "## Parameters", ""]
@@ -590,8 +632,8 @@ def _function_entries(owner_path, functions, of_class=False):
     """
     lines = []
     for member_name, function in functions:
-        definition = _callable_definition(function, member_name)
-        summary, _, _ = _doc_sections(getattr(function, '__doc__', None), [])
+        definitions = _callable_definitions(function, member_name)
+        summary, _, _ = _doc_sections(_callable_doc(function), [])
 
         if owner_path:
             heading = _reference_markdown(
@@ -602,9 +644,9 @@ def _function_entries(owner_path, functions, of_class=False):
         else:
             heading = member_name
 
-        lines.append("#### " + heading)
+        lines.append("### " + heading)
         lines.append("")
-        lines += _fenced([_without_trailing_colon(definition)])
+        lines += _fenced(_overload_signature_lines(definitions))
         lines.append("")
 
         if summary:

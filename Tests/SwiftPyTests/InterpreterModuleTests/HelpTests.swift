@@ -156,7 +156,7 @@ struct HelpTests {
             #expect(output.contains("""
             ## Functions
 
-            #### [advertise](pyprompt://reference?v=1&code=p2p.Peer.advertise)
+            ### [advertise](pyprompt://reference?v=1&code=p2p.Peer.advertise)
 
             ```python
             def advertise(self) -> None
@@ -175,7 +175,7 @@ struct HelpTests {
             #expect(output.contains("""
             ## Initializers
 
-            #### [__init__](pyprompt://reference?v=1&code=p2p.Peer.__init__)
+            ### [__init__](pyprompt://reference?v=1&code=p2p.Peer.__init__)
 
             ```python
             def __init__(self, name: str) -> None
@@ -229,7 +229,7 @@ struct HelpTests {
             let output: String = try #require(Interpreter.evaluate("_np_out"))
 
             #expect(output.hasPrefix("# Peer"))
-            #expect(output.contains("#### advertise"))
+            #expect(output.contains("### advertise"))
             #expect(!output.contains("](pyprompt://"))
         }
     }
@@ -304,6 +304,22 @@ struct HelpTests {
             #expect(!output.contains("More prose."))
         }
 
+        @Test("uses __all__ as the documented public API in declared order")
+        func explicitPublicAPI() throws {
+            Interpreter.run("""
+            class _DocumentedModule:
+                __all__ = ['second', 'first']
+                def first(self): pass
+                def second(self): pass
+                def hidden(self): pass
+            _all_classes, _all_functions = _help_module._module_members(_DocumentedModule())
+            _all_names = [name for name, _ in _all_functions]
+            """)
+
+            let names: [String] = try #require(Interpreter.evaluate("_all_names"))
+            #expect(names == ["second", "first"])
+        }
+
         @Test("no longer stacks the classes into one code block")
         func notOneCodeBlock() throws {
             let output = try markdown(of: "p2p")
@@ -361,6 +377,32 @@ struct HelpTests {
             """))
             // The trailing colon belongs to a source stub, not to a signature.
             #expect(!output.contains("-> None:"))
+        }
+
+        @Test("shows concrete signatures for an overload dispatcher")
+        func overloadSignatures() throws {
+            Interpreter.run("""
+            def _text_response(): pass
+            _text_response._interface = 'respond(self, prompt: str) -> str'
+            _text_response._is_async = True
+            def _structured_response(): pass
+            _structured_response._interface = 'respond(self, prompt: str, schema: Any) -> Any'
+            _structured_response._is_async = True
+            def _respond(*args, **kwargs): pass
+            _respond._overloads = [_text_response, _structured_response]
+            """)
+
+            let output = try markdown(of: "_respond")
+
+            #expect(output.contains("""
+            ```python
+            @overload
+            async def respond(self, prompt: str) -> str
+            @overload
+            async def respond(self, prompt: str, schema: Any) -> Any
+            ```
+            """))
+            #expect(!output.contains("def _respond(*args, **kwargs)"))
         }
 
         @Test("lists the documented parameters and leaves the rest out")

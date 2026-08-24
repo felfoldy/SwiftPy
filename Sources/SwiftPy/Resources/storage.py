@@ -1,4 +1,5 @@
 __doc__ = "Provides persistent storage for model instances via Store."
+__all__ = ["Store"]
 
 from storage.native import *
 

@@ -64,6 +64,10 @@ extension [LookupKeyValue] {
     }
 }
 
+/// A persistent collection of instances created with the `model` decorator.
+///
+/// Stores are saved between launches by default. Pass `in_memory=True` to create
+/// a temporary store whose contents are discarded when the process exits.
 @available(macOS 15, iOS 18, *)
 @MainActor
 @Scriptable
@@ -72,6 +76,10 @@ class Store: PythonBindable {
     internal let context: SwiftData.ModelContext
     internal static var containers = [Store]()
     
+    /// Creates a store with the given name.
+    ///
+    /// name: A stable name identifying the store.
+    /// in_memory: Whether the store should keep its contents only in memory. Defaults to False.
     init(name: String, inMemory: Bool = false) throws {
         let schema = Schema([ModelData.self,
                              LookupKeyValue.self,
@@ -98,6 +106,9 @@ class Store: PythonBindable {
         Store.containers.append(self)
     }
     
+    /// Inserts a model instance into the store.
+    ///
+    /// model: The model instance to insert.
     func insert(model: PyObject) throws {
         let type = py.typeof(model.reference)
         let typeName = type.name
@@ -120,6 +131,9 @@ class Store: PythonBindable {
         context.insert(modelData)
     }
 
+    /// Returns all stored instances of a model type.
+    ///
+    /// type: A class created with the `model` decorator.
     func fetch(_ type: PyObject) throws -> PyObject? {
         let typeName = py.totype(type.reference).name
         try py.module("storage")?._extend?(type)
@@ -128,6 +142,9 @@ class Store: PythonBindable {
         return result
     }
 
+    /// Deletes a model instance from the store.
+    ///
+    /// model: The model instance to delete.
     func delete(model: PyObject) throws {
         guard let modelData = ModelData(model._data) else {
             throw PythonError.ValueError("Invalid model data")
