@@ -44,15 +44,16 @@ def _callable_doc(obj):
     return None
 
 
-def _overload_signature_lines(definitions):
-    """Signatures for a Python fence, decorated when more than one is valid."""
-    signatures = [_without_trailing_colon(definition) for definition in definitions]
-    if len(signatures) == 1:
-        return signatures
+def _signature_cards(definitions):
+    """One fenced code card per concrete callable definition."""
+    if len(definitions) == 1:
+        return _fenced([_without_trailing_colon(definitions[0])])
 
     lines = []
-    for signature in signatures:
-        lines += ["@overload", signature]
+    for definition in definitions:
+        lines += _fenced(["@overload", _without_trailing_colon(definition)])
+        lines.append("")
+    lines.pop()
     return lines
 
 
@@ -495,7 +496,7 @@ def _function_markdown(obj, fallback_name=None, module_name=None):
     if summary:
         lines += [summary, ""]
 
-    lines += _fenced(_overload_signature_lines(definitions))
+    lines += _signature_cards(definitions)
 
     if parameters:
         lines += ["", "## Parameters", ""]
@@ -582,6 +583,18 @@ def _interface_summary(interface):
     return None
 
 
+def _linked_doc_references(text):
+    """Links resolvable dotted names written as Markdown code spans."""
+    parts = text.split("`")
+    for index in range(1, len(parts), 2):
+        name = parts[index]
+        if "." in name and _is_reference(name):
+            parts[index] = _reference_markdown(name)
+        else:
+            parts[index] = "`" + name + "`"
+    return "".join(parts)
+
+
 def _class_summary(cls):
     """What a class is for, in one line.
 
@@ -590,67 +603,55 @@ def _class_summary(cls):
     doc = getattr(cls, '__doc__', None)
     if doc:
         summary, _, _ = _doc_sections(doc, [])
-        return summary
+        return _linked_doc_references(summary)
 
     interface = getattr(cls, '_interface', None)
     return _interface_summary(interface) if interface else None
 
 
-def _class_entries(module_name, classes):
-    """One entry per class: its name, linked to its own help, over what it
-    declares and what it is for. The listing reads as ``_function_entries``
-    does."""
-    lines = []
-    for member_name, cls in classes:
-        lines.append("#### " + _reference_markdown(
-            module_name + "." + member_name,
+def _listing_entry(owner_path, member_name, declaration, summary=None):
+    """A shared class or function card in an API listing."""
+    if owner_path:
+        heading = _reference_markdown(
+            owner_path + "." + member_name,
             text=member_name,
             code=False
-        ))
-        lines.append("")
-        lines += _fenced([_class_header(cls)])
-        lines.append("")
+        )
+    else:
+        heading = member_name
 
-        summary = _class_summary(cls)
-        if summary:
-            lines += [summary, ""]
+    lines = ["### " + heading, ""] + _fenced(declaration) + [""]
+    if summary:
+        lines += [summary, ""]
+    return lines
 
+
+def _class_entries(module_name, classes):
+    """One shared-format documentation card per class."""
+    lines = []
+    for member_name, cls in classes:
+        lines += _listing_entry(
+            module_name,
+            member_name,
+            [_class_header(cls)],
+            _class_summary(cls)
+        )
     return lines
 
 
 def _function_entries(owner_path, functions, of_class=False):
-    """One entry per function: its name, linked to its own help, over the
-    signature and what it does.
-
-    The signature sits in a code block rather than in the link, because a link
-    long enough to wrap loses its frame and spills over the line.
-
-    owner_path: The dotted path the functions are reached by, or ``None`` where
-        there is none to link to.
-    of_class: Whether these are members, whose signature says whether they are
-        static.
-    """
+    """One shared-format card per function or concrete overload."""
     lines = []
     for member_name, function in functions:
-        definitions = _callable_definitions(function, member_name)
-        summary, _, _ = _doc_sections(_callable_doc(function), [])
+        overloads = getattr(function, '_overloads', None)
+        entries = overloads if overloads else [function]
 
-        if owner_path:
-            heading = _reference_markdown(
-                owner_path + "." + member_name,
-                text=member_name,
-                code=False
-            )
-        else:
-            heading = member_name
-
-        lines.append("### " + heading)
-        lines.append("")
-        lines += _fenced(_overload_signature_lines(definitions))
-        lines.append("")
-
-        if summary:
-            lines += [summary, ""]
+        for entry in entries:
+            definition = _callable_definition(entry, member_name)
+            summary, _, _ = _doc_sections(getattr(entry, '__doc__', None), [])
+            signature = _without_trailing_colon(definition)
+            declaration = ["@overload", signature] if overloads else [signature]
+            lines += _listing_entry(owner_path, member_name, declaration, summary)
 
     return lines
 

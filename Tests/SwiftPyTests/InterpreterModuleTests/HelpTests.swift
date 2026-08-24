@@ -259,7 +259,7 @@ struct HelpTests {
             let output = try markdown(of: "p2p")
 
             #expect(output.contains("""
-            #### [Peer](pyprompt://reference?v=1&code=p2p.Peer)
+            ### [Peer](pyprompt://reference?v=1&code=p2p.Peer)
 
             ```python
             class Peer
@@ -274,7 +274,7 @@ struct HelpTests {
             let output = try markdown(of: "asyncio")
 
             #expect(output.contains("""
-            #### [AsyncTask](pyprompt://reference?v=1&code=asyncio.AsyncTask)
+            ### [AsyncTask](pyprompt://reference?v=1&code=asyncio.AsyncTask)
 
             ```python
             class AsyncTask
@@ -398,11 +398,39 @@ struct HelpTests {
             ```python
             @overload
             async def respond(self, prompt: str) -> str
+            ```
+
+            ```python
             @overload
             async def respond(self, prompt: str, schema: Any) -> Any
             ```
             """))
             #expect(!output.contains("def _respond(*args, **kwargs)"))
+
+            Interpreter.run("""
+            _saved_prefix = _help_module._reference_url_prefix
+            _help_module._reference_url_prefix = None
+            _overload_entries = "\\n".join(
+                _help_module._function_entries('agents.Agent', [('respond', _respond)])
+            )
+            _help_module._reference_url_prefix = _saved_prefix
+            """)
+            let entries: String = try #require(Interpreter.evaluate("_overload_entries"))
+            #expect(entries.contains("""
+            ### respond
+
+            ```python
+            @overload
+            async def respond(self, prompt: str) -> str
+            ```
+
+            ### respond
+
+            ```python
+            @overload
+            async def respond(self, prompt: str, schema: Any) -> Any
+            ```
+            """))
         }
 
         @Test("lists the documented parameters and leaves the rest out")

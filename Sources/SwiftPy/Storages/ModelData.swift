@@ -64,7 +64,7 @@ extension [LookupKeyValue] {
     }
 }
 
-/// A persistent collection of instances created with the `model` decorator.
+/// A persistent collection of instances created with the `modeling.model` decorator.
 ///
 /// Stores are saved between launches by default. Pass `in_memory=True` to create
 /// a temporary store whose contents are discarded when the process exits.
