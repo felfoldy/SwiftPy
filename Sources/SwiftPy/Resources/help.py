@@ -216,7 +216,9 @@ def _help_lines(obj):
         if isinstance(resolved, type):
             return _class_lines(resolved)
         if callable(resolved):
-            return _callable_lines(resolved)
+            # A native function carries no `__name__`, so without the name it
+            # was looked up by it prints as its repr.
+            return _callable_lines(resolved, fallback_name=obj.split('.')[-1])
         return _class_lines(type(resolved))
 
     if isinstance(obj, module_type):
@@ -485,13 +487,73 @@ def _module_markdown(module):
     classes, functions = _module_members(module)
 
     if classes:
-        stubs = []
-        for _, cls in classes:
-            stubs.append(_class_lines(cls))
-        lines += ["## Classes", ""] + _fenced_stubs(stubs) + [""]
+        lines += ["## Classes", ""] + _class_entries(name, classes)
 
     if functions:
         lines += ["## Functions", ""] + _function_entries(name, functions)
+
+    return lines
+
+
+def _class_header(cls):
+    """The `class Type(Base)` line.
+
+    Taken from the bound interface where there is one, so that a base shows the
+    name it was bound under rather than the name of the Swift type."""
+    interface = getattr(cls, '_interface', None)
+    if interface:
+        return _without_trailing_colon(interface.split("\n")[0])
+    return _without_trailing_colon(_class_signature(cls))
+
+
+def _interface_summary(interface):
+    """The first line of the docstring an interface stub opens with."""
+    for line in interface.split("\n")[1:]:
+        line = line.strip()
+        if not line:
+            continue
+        if not line.startswith('"""'):
+            return None
+
+        line = line[3:]
+        if line.endswith('"""'):
+            line = line[:-3]
+        return line.strip() or None
+    return None
+
+
+def _class_summary(cls):
+    """What a class is for, in one line.
+
+    ``@Scriptable`` writes the class comment to ``__doc__``; a class declared by
+    an interface string keeps its documentation inside the stub instead."""
+    doc = getattr(cls, '__doc__', None)
+    if doc:
+        summary, _, _ = _doc_sections(doc, [])
+        return summary
+
+    interface = getattr(cls, '_interface', None)
+    return _interface_summary(interface) if interface else None
+
+
+def _class_entries(module_name, classes):
+    """One entry per class: its name, linked to its own help, over what it
+    declares and what it is for. The listing reads as ``_function_entries``
+    does."""
+    lines = []
+    for member_name, cls in classes:
+        lines.append("#### " + _reference_markdown(
+            module_name + "." + member_name,
+            text=member_name,
+            code=False
+        ))
+        lines.append("")
+        lines += _fenced([_class_header(cls)])
+        lines.append("")
+
+        summary = _class_summary(cls)
+        if summary:
+            lines += [summary, ""]
 
     return lines
 

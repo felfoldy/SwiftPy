@@ -59,6 +59,26 @@ struct ScriptableTests {
     let main = py.main
     let type = TestClassWithProperties.pyType
     
+    /// The documentation comment reaches `__doc__`, which is what `help()`
+    /// reads for a summary; the interface alone left it unset.
+    ///
+    /// The type is reached through an instance because binding it doesn't make
+    /// its name a global.
+    @Test func bindsClassDocumentation() {
+        main.tc_doc = TestClassWithProperties()
+
+        #expect(Interpreter.evaluate("type(tc_doc).__doc__") == "The TestClass.")
+    }
+
+    /// The comment sits above `@Scriptable`, which is not the only attribute,
+    /// so it is read from the declaration rather than from the attribute.
+    @Test func documentationIsReadPastOtherAttributes() {
+        main.tc_iface = TestClassWithProperties()
+
+        let interface: String? = Interpreter.evaluate("type(tc_iface)._interface")
+        #expect(interface?.contains("The TestClass.") == true)
+    }
+
     @Test func dtor() {
         Interpreter.run("import gc")
         

@@ -110,6 +110,88 @@ struct HelpTests {
         }
     }
 
+    /// A module lists its classes the way it lists its functions: the name
+    /// linked to its own help, over what it declares and what it is for.
+    @Suite("module class listing") @MainActor
+    struct ModuleClassListing {
+        init() {
+            Interpreter.run("import interpreter")
+            Interpreter.run("""
+            import help as _help_module
+            _help_module._reference_url_prefix = 'pyprompt://reference?v=1&code='
+            """)
+        }
+
+        private func markdown(of module: String) throws -> String {
+            Interpreter.run("""
+            import \(module)
+            _cl_out = "\\n".join(_help_module._markdown_lines('\(module)'))
+            """)
+            return try #require(Interpreter.evaluate("_cl_out"))
+        }
+
+        @Test("links a documented class over its declaration and summary")
+        func documentedClass() throws {
+            let output = try markdown(of: "p2p")
+
+            #expect(output.contains("""
+            #### [Peer](pyprompt://reference?v=1&code=p2p.Peer)
+
+            ```python
+            class Peer
+            ```
+
+            An object represents a peer in a multipeer session.
+            """))
+        }
+
+        @Test("shows a class with no documentation as its declaration alone")
+        func undocumentedClass() throws {
+            let output = try markdown(of: "asyncio")
+
+            #expect(output.contains("""
+            #### [AsyncTask](pyprompt://reference?v=1&code=asyncio.AsyncTask)
+
+            ```python
+            class AsyncTask
+            ```
+            """))
+        }
+
+        /// A class declared by an interface string has no `__doc__`, so the
+        /// summary comes from the docstring inside the stub.
+        @Test("summarises a class declared by an interface string")
+        func interfaceDeclaredClass() throws {
+            Interpreter.run("""
+            class _Stubbed:
+                _interface = 'class Response(Base):\\n    \\"\\"\\"Holds a reply.\\n\\n    More prose.\\n    \\"\\"\\"'
+            _if_out = "\\n".join(_help_module._class_entries('probe', [('Response', _Stubbed)]))
+            """)
+            let output: String = try #require(Interpreter.evaluate("_if_out"))
+
+            #expect(output.contains("""
+            ```python
+            class Response(Base)
+            ```
+
+            Holds a reply.
+            """))
+            // Only the summary, not the rest of the stub's docstring.
+            #expect(!output.contains("More prose."))
+        }
+
+        @Test("no longer stacks the classes into one code block")
+        func notOneCodeBlock() throws {
+            let output = try markdown(of: "p2p")
+
+            #expect(!output.contains("""
+            ## Classes
+
+            ```python
+            """))
+        }
+    }
+
     /// The markdown a function's help renders as. The reference for the layout
     /// is `help('requests.get')`, checked against the real module in
     /// swiftpy-requests; these cover the parsing on its own.

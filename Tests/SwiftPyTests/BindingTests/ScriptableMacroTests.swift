@@ -337,6 +337,9 @@ class ScriptableMacroTests: XCTestCase {
                         def do_something(self) -> int:
                             \"""Do something.\"""
                     \(interfaceEnd)
+                    PyObject(type).__doc__ = #\"""
+                    Test description.
+                    \"""#
                 }
             }
             """,
