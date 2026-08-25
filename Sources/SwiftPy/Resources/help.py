@@ -769,17 +769,14 @@ def _property_summary(cls, name):
 
 
 def _property_entries(cls, names):
-    """One shared-format card per property. A property carries no signature, so
-    its declaration stands in for one. Properties aren't reference destinations,
-    so their headings remain plain names even when their class has a path."""
+    """Properties as compact rows, matching a function's parameter list."""
     lines = []
     for name in names:
-        lines += _listing_entry(
-            None,
-            name,
-            [_property_declaration(cls, name)],
-            _property_summary(cls, name)
-        )
+        line = "- `" + _property_declaration(cls, name) + "`"
+        summary = _property_summary(cls, name)
+        if summary:
+            line += ": " + summary
+        lines.append(line)
     return lines
 
 
@@ -820,13 +817,13 @@ def _class_markdown(cls, path=None):
     if summary:
         lines += [summary, ""]
 
-    initializers = _class_initializers(cls)
-    if initializers:
-        lines += ["## Initializers", ""] + _function_entries(path, initializers)
-
     properties = _class_property_names(cls)
     if properties:
         lines += ["## Properties", ""] + _property_entries(cls, properties)
+
+    initializers = _class_initializers(cls)
+    if initializers:
+        lines += ["## Initializers", ""] + _function_entries(path, initializers)
 
     methods = _class_methods(cls)
     if methods:

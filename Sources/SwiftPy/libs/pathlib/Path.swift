@@ -7,6 +7,7 @@
 
 import Foundation
 
+/// A filesystem path that provides Python-style path inspection and file operations.
 @Scriptable
 public final class Path {
     public var url: URL

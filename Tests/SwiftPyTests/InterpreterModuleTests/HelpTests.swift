@@ -249,34 +249,25 @@ struct HelpTests {
             #expect(output.contains("""
             ## Properties
 
-            ### summary
-
-            ```python
-            summary
-            ```
-
-            One line about the card.
-            """))
-            // An annotated attribute is declared by the class rather than bound.
-            #expect(output.contains("""
-            ### title
-
-            ```python
-            title: str
-            ```
+            - `summary`: One line about the card.
+            - `title: str`
             """))
         }
 
-        @Test("uses plain headings for properties")
-        func plainPropertyHeadings() throws {
+        @Test("lists properties like function parameters")
+        func propertyRows() throws {
             let output = try markdown(of: "pathlib.Path")
 
             #expect(output.contains("""
             ## Properties
 
-            ### name
+            - `name`: The final component of the path.
             """))
             #expect(!output.contains("### ``pathlib.Path/name``"))
+
+            let properties = try #require(output.range(of: "## Properties"))
+            let initializers = try #require(output.range(of: "## Initializers"))
+            #expect(properties.lowerBound < initializers.lowerBound)
         }
 
         /// Reached by its path, a property documents itself rather than the
