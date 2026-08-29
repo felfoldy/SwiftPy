@@ -155,9 +155,12 @@ def _modules_lines():
 
 
 def _resolve_name(name):
-    """Resolve a module name or a dotted member path from its root module."""
+    """Resolve a dotted path from its root module or a built-in name."""
     parts = name.split('.')
-    obj = __import__(parts[0])
+    try:
+        obj = __import__(parts[0])
+    except ImportError:
+        obj = getattr(__import__('builtins'), parts[0])
     for part in parts[1:]:
         obj = getattr(obj, part)
     return obj
@@ -815,6 +818,19 @@ def _property_markdown(path):
     return lines + _fenced([declaration])
 
 
+def _builtin_class_path(cls):
+    """The class's built-in name, where that name resolves to this class."""
+    name = getattr(cls, '__name__', None)
+    if not name:
+        return None
+
+    try:
+        builtin = getattr(__import__('builtins'), name)
+    except (ImportError, AttributeError):
+        return None
+    return name if builtin is cls else None
+
+
 def _class_markdown(cls, path=None):
     """A class's help, laid out as a module's is: what it is, then what it
     offers.
@@ -884,7 +900,7 @@ def _markdown_lines(obj):
     if isinstance(obj, module_type):
         return _module_markdown(obj)
     if isinstance(obj, type):
-        return _class_markdown(obj)
+        return _class_markdown(obj, path=_builtin_class_path(obj))
     if callable(obj):
         return _function_markdown(obj)
     return _class_markdown(type(obj))

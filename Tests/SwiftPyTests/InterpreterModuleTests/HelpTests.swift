@@ -303,6 +303,22 @@ struct HelpTests {
             #expect(output.contains("### advertise"))
             #expect(!output.contains("### ``"))
         }
+
+        @Test("links methods of a built-in class handed to help")
+        func builtInClassReferences() throws {
+            Interpreter.run("""
+            _builtin_out = "\\n".join(_help_module._markdown_lines(str))
+            _builtin_member_out = "\\n".join(_help_module._markdown_lines('str.upper'))
+            """)
+            let output: String = try #require(Interpreter.evaluate("_builtin_out"))
+            let memberOutput: String = try #require(Interpreter.evaluate("_builtin_member_out"))
+
+            #expect(output.contains("### ``str/count``"))
+            #expect(output.contains("### ``str/encode``"))
+            #expect(memberOutput.hasPrefix("# upper"))
+            #expect(memberOutput.contains("def upper(...)"))
+            #expect(!memberOutput.contains("<nativefunc object>"))
+        }
     }
 
     /// A module lists its classes the way it lists its functions: the name
