@@ -30,6 +30,15 @@ struct InterpreterTests {
         )
     }
 
+    @Test func stringRSplit() {
+        #expect(Interpreter.evaluate("'a,b,c'.rsplit(',', 1)") == ["a,b", "c"])
+        #expect(Interpreter.evaluate("'a--b--c'.rsplit('--', 1)") == ["a--b", "c"])
+        #expect(Interpreter.evaluate("'a,,b,'.rsplit(',')") == ["a", "", "b", ""])
+        #expect(Interpreter.evaluate("'  a  b  c  '.rsplit(None, 1)") == ["  a  b", "c"])
+        #expect(Interpreter.evaluate("'  a  b  '.rsplit()") == ["a", "b"])
+        #expect(Interpreter.evaluate("'a,b'.rsplit(',', 0)") == ["a,b"])
+    }
+
     @Test func dirIsNotNone() {
         Interpreter.run("import interpreter")
 

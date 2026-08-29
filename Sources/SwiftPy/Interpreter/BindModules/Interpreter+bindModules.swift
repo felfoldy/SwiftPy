@@ -17,14 +17,7 @@ extension Interpreter {
     func bindBuiltins() {
         let builtins = py.module("builtins")
 
-        PyType.str.function(
-            "title(self) -> str",
-            "Return a titlecased version of the string, with each word starting with an uppercase character."
-        ) { argc, argv in
-            PyBind.function(argc, argv) { (value: String) in
-                value.pythonTitlecased
-            }
-        }
+        bindString()
 
         // Add async decorator.
         let asyncSource = """
@@ -204,22 +197,5 @@ extension Interpreter {
 
         bindModule("modeling", in: .module)
         bindModule("storage", in: .module)
-    }
-}
-
-private extension String {
-    var pythonTitlecased: String {
-        var previousCharacterIsCased = false
-
-        return map { character in
-            let value = String(character)
-            let isCased = value.lowercased() != value.uppercased()
-            defer { previousCharacterIsCased = isCased }
-
-            guard isCased else { return value }
-            return previousCharacterIsCased
-                ? value.lowercased()
-                : value.capitalized(with: Locale(identifier: "en_US_POSIX"))
-        }.joined()
     }
 }
