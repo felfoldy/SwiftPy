@@ -513,7 +513,8 @@ def _overload_sections(overloads, definitions):
     """Each overload with the documentation belonging to its own signature.
 
     The sections repeat rather than merge: what is documented for one signature
-    says nothing about the others.
+    says nothing about the others, so each overload after the first repeats the
+    page's title to break away from the sections above it.
     """
     lines = []
     for index in range(len(definitions)):
@@ -521,9 +522,9 @@ def _overload_sections(overloads, definitions):
         definition = definitions[index]
         summary, body = _doc_markdown(getattr(entry, '__doc__', None), definition)
 
-        # A blank line separates an overload from the one above it.
+        # The page title already heads the first one.
         if index:
-            lines.append("")
+            lines += ["", "# " + _definition_name(definition), ""]
 
         lines += _signature_card(entry, definition, overload=True)
         if summary:

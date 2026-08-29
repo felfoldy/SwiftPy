@@ -469,6 +469,8 @@ struct HelpTests {
 
             - `prompt`: What to respond to.
 
+            # respond
+
             ```python
             @overload
             def respond(self, prompt: str, schema: Any) -> Any

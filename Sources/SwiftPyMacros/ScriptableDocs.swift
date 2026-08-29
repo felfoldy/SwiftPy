@@ -21,7 +21,7 @@ extension SyntaxProtocol {
         for piece in leadingTrivia {
             switch piece {
             case let .docLineComment(text):
-                lines.append(String(text.dropFirst(3)).trim)
+                lines.append(String(text.dropFirst(3)).docLineBody)
             case let .docBlockComment(text):
                 lines += text.docBlockLines
             default:
@@ -76,7 +76,7 @@ extension String {
                 return doclines.joined(separator: "\n")
             }
 
-            doclines.append(String(line.dropFirst(3)).trim)
+            doclines.append(String(line.dropFirst(3)).docLineBody)
         }
 
         if doclines.isEmpty {
@@ -84,6 +84,22 @@ extension String {
         }
 
         return doclines.joined(separator: "\n")
+    }
+
+    /// A `///` line's text. Only the conventional single space after the marker
+    /// comes off, so indentation inside a code example survives.
+    var docLineBody: String {
+        var body = self
+
+        if body.hasPrefix(" ") {
+            body.removeFirst()
+        }
+
+        while let last = body.last, last.isWhitespace {
+            body.removeLast()
+        }
+
+        return body
     }
 }
 
