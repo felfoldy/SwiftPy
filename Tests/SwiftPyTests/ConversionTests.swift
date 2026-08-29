@@ -16,6 +16,16 @@ struct ConversionTests {
         #expect(Interpreter.evaluate("test_bytes.decode()") == "Hello")
     }
     
+    @Test func optionalPyObjectConvertsNoneToNil() {
+        let reference = py.pushtmp()
+        defer { py.pop() }
+        py.newnone(reference)
+
+        let value = Optional<PyObject>.fromPython(reference)
+
+        #expect(value == nil)
+    }
+
     @Test func floatCastFromInt() throws {
         Interpreter.run("floatCastFromInt = 3")
         let value = py.main.floatCastFromInt

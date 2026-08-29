@@ -176,7 +176,8 @@ extension Optional: PythonConvertible where Wrapped: PythonConvertible {
     }
 
     public static func fromPython(_ reference: PyRef) -> Optional<Wrapped> {
-        Wrapped(reference)
+        guard !reference.isNone else { return nil }
+        return Wrapped(reference)
     }
 }
 
