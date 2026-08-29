@@ -102,7 +102,9 @@ struct VariableExtractor: MemberExtractor {
 
         let pythonIdentifier = metadata.identifier(identifier)
 
-        if let docstring = variable.description.docstring {
+        let docstring = variable.description.docstring
+
+        if let docstring {
             metadata.variableDocs.append("\(pythonIdentifier): \(docstring)")
         }
 
@@ -132,10 +134,14 @@ struct VariableExtractor: MemberExtractor {
             return "{ _bind_setter(\\.\(identifier), $1) }"
         }()
 
+        // Bound to the getter as well as written into the stub, so that `help()`
+        // can read it from the property the way it reads a method's.
+        let boundDocstring = docstring.map { ", " + $0.asSwiftLiteral } ?? ""
+
         metadata.bindings.append(
         """
         type.property(
-            "\(pythonIdentifier)",
+            "\(pythonIdentifier)"\(boundDocstring),
             getter: { _bind_getter(\\.\(identifier), $1) },
             setter: \(setter)
         )

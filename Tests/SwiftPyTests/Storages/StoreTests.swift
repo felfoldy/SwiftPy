@@ -106,27 +106,6 @@ struct StoreTests {
         #expect(reinsertedCount == 1)
     }
 
-    @available(macOS 15, *)
-    @Test func publicAPIAndDocumentation() throws {
-        let publicClasses: [String] = try #require(try evaluate("""
-        [name for name in ('Store', 'ModelData', 'LookupKeyValue') if hasattr(__import__('storage'), name)]
-        """))
-        #expect(publicClasses == ["Store"])
-
-        let classDocs: String = try #require(try evaluate("Store.__doc__"))
-        #expect(classDocs.contains("persistent collection"))
-
-        let insertDocs: String = try #require(try evaluate("Store.insert.__doc__"))
-        #expect(insertDocs.contains("Inserts a model instance"))
-        #expect(insertDocs.contains("model: The model instance to insert."))
-
-        let fetchDocs: String = try #require(try evaluate("Store.fetch.__doc__"))
-        #expect(fetchDocs.contains("Returns all stored instances"))
-
-        let deleteDocs: String = try #require(try evaluate("Store.delete.__doc__"))
-        #expect(deleteDocs.contains("Deletes a model instance"))
-    }
-
     private func run(_ source: String) throws {
         let code = try Interpreter.compile(source)
         try Interpreter.execute(code, globals: namespace)

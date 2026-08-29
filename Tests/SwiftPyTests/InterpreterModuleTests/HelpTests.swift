@@ -249,7 +249,7 @@ struct HelpTests {
             #expect(output.contains("""
             ## Properties
 
-            - `summary`: One line about the card.
+            - `summary` (read only): One line about the card.
             - `title: str`
             """))
         }
@@ -261,7 +261,7 @@ struct HelpTests {
             #expect(output.contains("""
             ## Properties
 
-            - `name`: The final component of the path.
+            - `name` (read only): The final component of the path.
             """))
             #expect(!output.contains("### ``pathlib.Path/name``"))
 
@@ -281,8 +281,10 @@ struct HelpTests {
 
             ``pathlib``
 
+            The final component of the path.
+
             ```python
-            name
+            name  # read only
             ```
             """)
         }

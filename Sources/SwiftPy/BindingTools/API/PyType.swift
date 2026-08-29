@@ -65,12 +65,31 @@ public extension PyType {
     }
 
     @inlinable
-    func property(_ name: String, getter: PyAPI.CFunction, setter: PyAPI.CFunction? = nil) {
+    func property(
+        _ name: String,
+        _ docstring: String? = nil,
+        getter: PyAPI.CFunction,
+        setter: PyAPI.CFunction? = nil
+    ) {
         py.bindproperty(
             type: self,
             name: name,
             getter: getter,
             setter: setter
+        )
+
+        // `py_bindproperty` makes the getter a `nativefunc`, which carries no
+        // `__doc__`. A `function` does, so a documented one takes its slot.
+        guard let docstring,
+              let property = py.getdict(py.tpobject(self)!, name: name) else {
+            return
+        }
+
+        py.newfunction(
+            py_getslot(property, 0),
+            signature: "\(name)(self)",
+            docstring: docstring,
+            function: getter
         )
     }
 

@@ -768,11 +768,22 @@ def _property_summary(cls, name):
     return summary
 
 
+def _property_is_readonly(cls, name):
+    """A property with no setter, which assigning to raises on."""
+    prop = getattr(cls, name, None)
+    # An annotation-only name has no property object to ask.
+    if type(prop).__name__ != 'property':
+        return False
+    return getattr(prop, 'fset', None) is None
+
+
 def _property_entries(cls, names):
     """Properties as compact rows, matching a function's parameter list."""
     lines = []
     for name in names:
         line = "- `" + _property_declaration(cls, name) + "`"
+        if _property_is_readonly(cls, name):
+            line += " (read only)"
         summary = _property_summary(cls, name)
         if summary:
             line += ": " + summary
@@ -796,7 +807,11 @@ def _property_markdown(path):
     if summary:
         lines += [summary, ""]
 
-    return lines + _fenced([_property_declaration(cls, name)])
+    declaration = _property_declaration(cls, name)
+    if _property_is_readonly(cls, name):
+        declaration += "  # read only"
+
+    return lines + _fenced([declaration])
 
 
 def _class_markdown(cls, path=None):

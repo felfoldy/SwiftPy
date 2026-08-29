@@ -319,7 +319,7 @@ class ScriptableMacroTests: XCTestCase {
             
             extension TestClass: PythonBindable {
                 @MainActor static let pyType: PyType = .make("TestClass", base: .object) { type in
-                    \(property("number", python: "number"))
+                    \(property("number", python: "number", docstring: "A number."))
                     type.function("do_something(self) -> int", #"Do something."#) {
                         _bind_function($1, doSomething)
                     }
@@ -494,11 +494,18 @@ private var newAndRepr: String {
     """
 }
 
-private func property(_ name: String, python: String, setter: Bool = true) -> String {
+private func property(
+    _ name: String,
+    python: String,
+    setter: Bool = true,
+    docstring: String? = nil
+) -> String {
+    let documented = docstring.map { ", #\"\($0)\"#" } ?? ""
+
     if setter {
-    """
+    return """
     type.property(
-                "\(python)",
+                "\(python)"\(documented),
                 getter: {
                     _bind_getter(\\.\(name), $1)
                 },
@@ -508,9 +515,9 @@ private func property(_ name: String, python: String, setter: Bool = true) -> St
             )
     """
     } else {
-    """
+    return """
     type.property(
-                "\(python)",
+                "\(python)"\(documented),
                 getter: {
                     _bind_getter(\\.\(name), $1)
                 },
