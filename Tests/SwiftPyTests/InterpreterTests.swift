@@ -19,6 +19,17 @@ struct InterpreterTests {
         #expect(Interpreter.evaluate("3 + 4") == 7)
     }
 
+    @Test func stringTitle() {
+        #expect(Interpreter.evaluate("\"hello WORLD\".title()") == "Hello World")
+        #expect(Interpreter.evaluate("\"they're bill's\".title()") == "They'Re Bill'S")
+        #expect(Interpreter.evaluate("\"123abc foo-bar\".title()") == "123Abc Foo-Bar")
+        #expect(Interpreter.evaluate("\"ßeta\".title()") == "Sseta")
+        #expect(
+            Interpreter.evaluate("str.title.__doc__")
+                == "Return a titlecased version of the string, with each word starting with an uppercase character."
+        )
+    }
+
     @Test func dirIsNotNone() {
         Interpreter.run("import interpreter")
 
