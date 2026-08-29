@@ -159,7 +159,6 @@ struct LocalInterpreterConnectionTests {
 
     @Test func stopCancelsAllConcurrentlyAwaitedTasks() async {
         let connection = LocalInterpreterConnection()
-        let stream = await connection.events
 
         // Two tasks awaited concurrently: a single-slot handler would only
         // cancel one of them, so the continuation would still run.
@@ -174,8 +173,6 @@ struct LocalInterpreterConnectionTests {
         await asyncio.gather(_test_gather_wait(), _test_gather_wait())
         _test_gather_flag = True
         """)
-
-        var iterator = stream.makeAsyncIterator()
 
         let runTask = Task { await connection.run(id: 1) }
         try? await Task.sleep(for: .milliseconds(50))
