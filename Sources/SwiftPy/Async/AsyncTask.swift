@@ -10,32 +10,84 @@ import SwiftUI
 
 typealias TaskResult = PythonConvertible & Sendable
 
+/// An awaitable unit of asynchronous work.
+///
+/// Calling an `async def` function creates a task without immediately running
+/// its body. The task starts when it is awaited, passed to ``asyncio.gather``,
+/// or started with ``resume``. Awaiting it returns the coroutine's value or
+/// raises its error.
+///
+/// Use ``is_done`` to check whether work has finished and ``result`` to
+/// inspect a successful result without awaiting again. A running task can be
+/// stopped with ``cancel``, and the current task can publish console progress
+/// with ``set_progress``.
+///
+/// ```python
+/// import asyncio
+///
+/// async def answer():
+///     await asyncio.sleep(1)
+///     return 42
+///
+/// task = answer()
+/// print(task.is_done)  # False
+///
+/// value = await task
+/// print(value)         # 42
+/// print(task.is_done)  # True
+/// print(task.result)   # 42
+/// ```
 @Scriptable
 @MainActor
 public class AsyncTask: PythonBindable {
-    /// Whether the task has finished, successfully or with an error.
+    /// Whether the task has finished.
+    ///
+    /// Returns `False` before the task starts and while it is running. Returns
+    /// `True` after it produces a value or finishes with an error.
+    ///
+    /// ```python
+    /// task = asyncio.sleep(1)
+    /// print(task.is_done)  # False
+    ///
+    /// await task
+    /// print(task.is_done)  # True
+    /// ```
     public var isDone: Bool { outcome != nil }
 
-    internal var task: Task<Void, Never>?
-    private var traceEntry: LineTracer.Entry?
-
-    /// The task's outcome once finished: the produced value or a raised error.
-    var outcome: Result<PyObject?, PythonError>?
-
-    /// The produced value once the task has finished successfully; `nil` otherwise.
+    /// The value produced by a successfully completed task.
+    ///
+    /// Returns the coroutine's value after successful completion. Returns `None`
+    /// before completion, after failure, or when the coroutine itself returned
+    /// `None`. Await the task when these cases must be distinguished, because
+    /// awaiting propagates errors.
+    ///
+    /// ```python
+    /// async def make_value():
+    ///     return "ready"
+    ///
+    /// task = make_value()
+    /// print(task.result)  # None
+    ///
+    /// await task
+    /// print(task.result)  # ready
+    /// ```
     public var result: PyObject? {
         guard case let .success(value) = outcome else { return nil }
         return value
     }
 
+    internal var task: Task<Void, Never>?
+    internal var outcome: Result<PyObject?, PythonError>?
+
+    private var traceEntry: LineTracer.Entry?
+
     /// The work to run, held until the task is first started.
     /// Returns the task's result, or `nil` if it produces none.
     private var pendingWork: (() async throws -> PyObject?)?
 
-    private init(work: @escaping () async throws -> PyObject?) {
-        pendingWork = work
-    }
-
+    /// Creates a task that drives a Python generator-based coroutine.
+    ///
+    /// generator: The Python generator to advance until it returns.
     init(generator: PyObject) throws(PythonError) {
         let iterator = try py.retain(py.iter(generator.reference))
 
@@ -61,7 +113,15 @@ public class AsyncTask: PythonBindable {
         }
     }
 
-    /// Starts the underlying work if it hasn't been started yet.
+    private init(work: @escaping () async throws -> PyObject?) {
+        pendingWork = work
+    }
+
+    /// Start the task without waiting for it to finish.
+    ///
+    /// Returns `None`. Calling this more than once has no effect. Most code
+    /// should await the task or pass it to ``asyncio.gather`` instead; use
+    /// `resume()` only when work should begin before it is awaited.
     public func resume() {
         guard let work = pendingWork else { return }
         pendingWork = nil
@@ -87,18 +147,6 @@ public class AsyncTask: PythonBindable {
         cancellation?.onCancel { task.cancel() }
     }
 
-    private func notifyTaskActivity(isActive: Bool, progress: Double? = nil) {
-        guard let traceEntry, let contextId = traceEntry.contextId else { return }
-
-        Interpreter.shared.connection.send(
-            id: contextId,
-            .feedback(item: ExecutionFeedback(
-                lineNumber: traceEntry.lineNumber,
-                type: isActive ? .task(progress: progress) : nil
-            ))
-        )
-    }
-
     func __iter__() -> AsyncTask {
         resume()
         return self
@@ -111,15 +159,51 @@ public class AsyncTask: PythonBindable {
         throw .StopIteration(value?.reference)
     }
 
+    private func notifyTaskActivity(isActive: Bool, progress: Double? = nil) {
+        guard let traceEntry, let contextId = traceEntry.contextId else { return }
+
+        Interpreter.shared.connection.send(
+            id: contextId,
+            .feedback(item: ExecutionFeedback(
+                lineNumber: traceEntry.lineNumber,
+                type: isActive ? .task(progress: progress) : nil
+            ))
+        )
+    }
+
     deinit {
         task?.cancel()
     }
 
+    /// Request cancellation of a running task.
+    ///
+    /// Returns `None`. Cancellation is cooperative: the task stops when its
+    /// coroutine next reaches an asynchronous suspension point. Calling this on
+    /// a task that has not started or has already finished has no effect. Awaiting
+    /// a task after cancellation raises its cancellation error.
     public func cancel() {
         task?.cancel()
     }
 
-    /// Reports how far the work has got, from 0 to 1, or `None` if indeterminate.
+    /// Update the task's console progress indicator.
+    ///
+    /// progress: Completion from `0.0` to `1.0`. Pass `None` to show
+    /// indeterminate progress.
+    ///
+    /// Returns `None`. Call this from asynchronous work on the value returned
+    /// by ``asyncio.current_task``.
+    ///
+    /// ```python
+    /// import asyncio
+    ///
+    /// async def work():
+    ///     task = asyncio.current_task()
+    ///     for step in range(4):
+    ///         task.set_progress(step / 3)
+    ///         await asyncio.sleep(1)
+    ///
+    /// await work()
+    /// ```
     public func setProgress(_ progress: Double?) {
         notifyTaskActivity(isActive: true, progress: progress)
     }

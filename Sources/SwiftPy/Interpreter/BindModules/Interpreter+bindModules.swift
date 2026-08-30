@@ -69,41 +69,6 @@ extension Interpreter {
         }
     }
 
-    func bindAsyncio() {
-        bindModule("asyncio", docs: "Async task utilities.") { asyncio in
-            asyncio.class(AsyncTask.self)
-
-            asyncio.asyncDef(
-                "sleep(seconds: float) -> None",
-                docstring: "Coroutine that completes after a given time (in seconds)."
-            ) { argc, argv in
-                PyBind.function(argc, argv) { (seconds: Double) in
-                    AsyncSleep(seconds: seconds).task
-                }
-            }
-
-            asyncio.asyncDef(
-                "gather(*tasks)",
-                docstring: "Run awaitables concurrently and return their results as a list, in order."
-            ) { argc, argv in
-                PyBind.function(argc, argv) { (tuple: PyTuple) in
-                    let tasks = try tuple.values.map(AsyncTask.init)
-                    for task in tasks { task.resume() }
-                    var result = [PyObject?]()
-                    for task in tasks {
-                        let value = try await task.untilCompletes()
-                        result.append(value)
-                    }
-                    return result
-                }
-            }
-
-            asyncio.def("current_task() -> asyncio.AsyncTask | None") { argc, argv in
-                PyBind.function(argc, argv) { () -> (any PythonConvertible) in AsyncTask.current }
-            }
-        }
-    }
-    
     func bindSys() {
         #if os(visionOS)
         let osName = "visionos"
