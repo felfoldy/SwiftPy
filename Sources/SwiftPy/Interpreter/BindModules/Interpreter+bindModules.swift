@@ -103,7 +103,7 @@ extension Interpreter {
             module.def("source(name: str) -> str | None",
                        docstring: "Return the Python source of a module, or None when it has none.") { argc, argv in
                 PyBind.function(argc, argv) { (name: String) -> String? in
-                    Interpreter.source(ofModule: name)
+                    Interpreter.source(name: name)
                 }
             }
 
