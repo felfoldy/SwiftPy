@@ -470,6 +470,23 @@ struct HelpTests {
             """))
         }
 
+        @Test("documents the model decorator")
+        func modelDecorator() throws {
+            let output = try markdown(of: "'modeling.model'")
+
+            #expect(output.contains("Convert an annotated class into a data model."))
+            #expect(output.contains("Annotated attributes become mutable model fields."))
+            #expect(output.contains("""
+            ```python
+            from modeling import model
+
+            @model
+            class Item:
+            """))
+            #expect(output.contains("item = Item(\"Hammer\", quantity=2)"))
+            #expect(output.contains("- `cls`: The annotated class to convert."))
+        }
+
         @Test("shows a bound signature without its trailing colon")
         func boundSignature() throws {
             Interpreter.run("import asyncio")

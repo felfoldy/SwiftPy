@@ -1,4 +1,4 @@
-__doc__ = "Provides a model decorator for LLM structured output and ORM-style storage."
+__doc__ = "Create typed data models for structured output and persistent storage."
 
 @classmethod
 def _model_from_json(cls, json_str: str):
@@ -78,6 +78,28 @@ def _make_schema(cls: type):
     }
 
 def model(cls: type):
+    """Convert an annotated class into a data model.
+
+    Annotated attributes become mutable model fields. A class attribute supplies
+    a field's default value; an optional field without a default starts as
+    `None`. Model instances support positional and keyword initialization, a
+    readable representation, structured-output schemas, and storage change
+    tracking.
+
+    ```python
+    from modeling import model
+
+    @model
+    class Item:
+        name: str
+        quantity: int = 1
+        note: str | None
+
+    item = Item("Hammer", quantity=2)
+    ```
+
+    cls: The annotated class to convert.
+    """
     assert type(cls) is type
     cls.__init__ = _model__init__
     cls.__repr__ = _model__repr__
