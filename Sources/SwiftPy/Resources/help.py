@@ -25,7 +25,6 @@ def _callable_definition(obj, fallback_name=None):
 
 
 def _callable_definitions(obj, fallback_name=None):
-    """Concrete definitions for a callable, expanding an overload dispatcher."""
     overloads = getattr(obj, '_overloads', None)
     if not overloads:
         return [_callable_definition(obj, fallback_name)]
@@ -33,7 +32,6 @@ def _callable_definitions(obj, fallback_name=None):
 
 
 def _callable_doc(obj):
-    """A dispatcher's documentation, falling back to its concrete overloads."""
     doc = getattr(obj, '__doc__', None)
     if doc:
         return doc
@@ -45,7 +43,6 @@ def _callable_doc(obj):
 
 
 def _signature_card(entry, definition, overload=False):
-    """A fenced card for one concrete definition, under its decorators."""
     declaration = []
     if overload:
         declaration.append("@overload")
@@ -56,7 +53,6 @@ def _signature_card(entry, definition, overload=False):
 
 
 def _signature_cards(obj, definitions):
-    """One fenced code card per concrete callable definition."""
     overloads = getattr(obj, '_overloads', None)
     entries = overloads if overloads else [obj]
     lines = []
@@ -155,7 +151,6 @@ def _modules_lines():
 
 
 def _resolve_name(name):
-    """Resolve a dotted path from its root module or a built-in name."""
     parts = name.split('.')
     try:
         obj = __import__(parts[0])
@@ -173,15 +168,21 @@ _topics = ('modules',)
 _documents = {}
 
 
-def _is_reference(name):
-    """Whether a topic of its own, or a dotted path that resolves from its root
-    module.
+def _bundled_document(name):
+    from pathlib import Path
+    try:
+        path = Path.resources() / (name + '.md')
+        return path.read_text() if path.is_file() else None
+    except Exception:
+        return None
 
-    A host holding a reference asks this to choose between handing ``help`` the
-    path, which is what names the module a function came from, and handing it
-    an object bound in the session, which no module owns.
-    """
-    if name in _topics or name in _documents:
+
+def _document(name):
+    return _documents.get(name) or _bundled_document(name)
+
+
+def _is_reference(name):
+    if name in _topics or _document(name) is not None:
         return True
 
     try:
@@ -192,7 +193,6 @@ def _is_reference(name):
 
 
 def _module_members(module):
-    """The module's public classes and functions, each as (name, object)."""
     classes = []
     functions = []
     exported_names = getattr(module, '__all__', None)
@@ -259,13 +259,14 @@ See also ``modules``.
 
 def _help_lines(obj):
     if obj is None:
-        return [_documents.get('README') or _help_text or _default_help_text()]
+        return [_document('README') or _help_text or _default_help_text()]
 
     module_type = type(__import__('math'))
 
     if isinstance(obj, str):
-        if obj in _documents:
-            return [_documents[obj]]
+        document = _document(obj)
+        if document is not None:
+            return [document]
         if obj == "modules":
             return _modules_lines()
 
@@ -293,13 +294,10 @@ def _help_lines(obj):
 
 
 def _fenced(lines):
-    """Python source as a markdown code block."""
     return ["```python"] + lines + ["```"]
 
 
 def _fenced_stubs(stubs):
-    """Several stubs in one code block, a blank line apart, so a section reads
-    as one listing instead of a stack of separate blocks."""
     body = []
     for stub in stubs:
         if body:
@@ -309,7 +307,6 @@ def _fenced_stubs(stubs):
 
 
 def _definition_name(definition):
-    """The name in a ``def name(...):`` line."""
     start = definition.find("def ")
     start = 0 if start == -1 else start + len("def ")
     end = definition.find("(", start)
@@ -319,7 +316,6 @@ def _definition_name(definition):
 
 
 def _split_top_level(text):
-    """``text`` split on the commas that aren't inside brackets."""
     parts = []
     current = ""
     depth = 0
@@ -338,8 +334,6 @@ def _split_top_level(text):
 
 
 def _parameter_text(definition):
-    """What a ``def name(...):`` line declares between its brackets, or
-    ``None``."""
     start = definition.find("(")
     if start == -1:
         return None
@@ -361,11 +355,8 @@ def _parameter_text(definition):
 
 
 def _takes_self(definition):
-    """Whether a definition takes ``self``.
-
-    Nothing at runtime tells a bound static method from an instance one; the
-    signature is what says so, as it does in Python.
-    """
+    # Nothing at runtime tells a bound static method from an instance one;
+    # the signature is what says so, as it does in Python.
     text = _parameter_text(definition)
     if not text:
         return False
@@ -374,7 +365,6 @@ def _takes_self(definition):
 
 
 def _parameter_names(definition):
-    """The parameters a ``def name(...):`` line declares."""
     text = _parameter_text(definition)
     if text is None:
         return []
@@ -393,8 +383,7 @@ def _parameter_names(definition):
 
 
 def _dedented(doc):
-    """A docstring's lines, with the indentation its body was written at
-    removed. The first line follows the quotes, so it carries none."""
+    # The first line follows the quotes, so it carries no indentation.
     lines = doc.split("\n")
     body = lines[1:]
 
@@ -408,8 +397,7 @@ def _dedented(doc):
 
 
 def _parameter_description(line, parameter_names):
-    """A ``name: description`` line for one of the declared parameters, or
-    ``None``. Matching the name is what keeps prose holding a colon out."""
+    # Matching the name is what keeps prose holding a colon out.
     cut = line.find(":")
     if cut <= 0:
         return None
@@ -422,7 +410,6 @@ def _parameter_description(line, parameter_names):
 
 
 def _doc_sections(doc, parameter_names):
-    """A docstring as its summary, its documented parameters, and the rest."""
     if not doc:
         return None, [], []
 
@@ -464,13 +451,12 @@ def _doc_sections(doc, parameter_names):
 
 
 def _without_trailing_colon(text):
-    """pocketpy has no ``str.rstrip``, so the stub's colon comes off by hand."""
+    # pocketpy has no `str.rstrip`, so the stub's colon comes off by hand.
     text = text.strip()
     return text[:-1].strip() if text.endswith(":") else text
 
 
 def _return_annotation(definition):
-    """The type a ``def name(...) -> type:`` line returns, or ``None``."""
     parts = definition.split("->")
     if len(parts) == 1:
         return None
@@ -478,11 +464,9 @@ def _return_annotation(definition):
 
 
 def _owning_module_name(path):
-    """The module a dotted path lives in, or ``None``.
-
-    A function carries no module of its own, so the path it was looked up by is
-    what says where it came from. The longest prefix that is still a module owns
-    it, which keeps a method under its module rather than its class."""
+    # A function carries no module of its own, so the path it was looked up by
+    # says where it came from. The longest prefix that is still a module owns it,
+    # which keeps a method under its module rather than its class.
     parts = path.split('.')
     module_type = type(__import__('math'))
 
@@ -500,7 +484,6 @@ def _owning_module_name(path):
 
 
 def _doc_markdown(doc, definition):
-    """A docstring as its summary and the sections that sit below it."""
     summary, parameters, discussion = _doc_sections(
         doc, _parameter_names(definition)
     )
@@ -518,12 +501,6 @@ def _doc_markdown(doc, definition):
 
 
 def _overload_sections(overloads, definitions):
-    """Each overload with the documentation belonging to its own signature.
-
-    The sections repeat rather than merge: what is documented for one signature
-    says nothing about the others, so each overload after the first repeats the
-    page's title to break away from the sections above it.
-    """
     lines = []
     for index in range(len(definitions)):
         entry = overloads[index]
@@ -543,7 +520,6 @@ def _overload_sections(overloads, definitions):
 
 
 def _function_markdown(obj, fallback_name=None, module_name=None):
-    """A function's help laid out as reference documentation."""
     definitions = _callable_definitions(obj, fallback_name)
 
     lines = ["# " + _definition_name(definitions[0]), ""]
@@ -568,13 +544,9 @@ def _function_markdown(obj, fallback_name=None, module_name=None):
 
 
 def _reference_markdown(path):
-    """A name as a reference span, in the double backticks DocC uses.
-
-    Whatever link a host makes of it is the host's own, so no scheme belongs
-    here; a host that renders markdown plainly shows a code span instead.
-
-    path: The name, with a ``/`` before the part to show on its own.
-    """
+    # The double backticks DocC uses. Whatever link a host makes of it is the
+    # host's own, so no scheme belongs here. A `/` in the path marks the part to
+    # show on its own.
     return "``" + path + "``"
 
 
@@ -607,10 +579,8 @@ def _module_markdown(module):
 
 
 def _class_header(cls):
-    """The `class Type(Base)` line.
-
-    Taken from the bound interface where there is one, so that a base shows the
-    name it was bound under rather than the name of the Swift type."""
+    # From the bound interface where there is one, so a base shows the name it
+    # was bound under rather than the name of the Swift type.
     interface = getattr(cls, '_interface', None)
     if interface:
         return _without_trailing_colon(interface.split("\n")[0])
@@ -618,7 +588,6 @@ def _class_header(cls):
 
 
 def _interface_summary(interface):
-    """The first line of the docstring an interface stub opens with."""
     for line in interface.split("\n")[1:]:
         line = line.strip()
         if not line:
@@ -634,7 +603,6 @@ def _interface_summary(interface):
 
 
 def _linked_doc_references(text):
-    """Turns resolvable dotted names in code spans into reference spans."""
     parts = text.split("`")
     for index in range(1, len(parts), 2):
         name = parts[index]
@@ -646,10 +614,8 @@ def _linked_doc_references(text):
 
 
 def _class_summary(cls):
-    """What a class is for, in one line.
-
-    ``@Scriptable`` writes the class comment to ``__doc__``; a class declared by
-    an interface string keeps its documentation inside the stub instead."""
+    # `@Scriptable` writes the class comment to `__doc__`; a class declared by an
+    # interface string keeps its documentation inside the stub instead.
     doc = getattr(cls, '__doc__', None)
     if doc:
         summary, _, _ = _doc_sections(doc, [])
@@ -660,7 +626,6 @@ def _class_summary(cls):
 
 
 def _listing_entry(owner_path, member_name, declaration, summary=None):
-    """A shared class or function card in an API listing."""
     if owner_path:
         # The slash keeps the heading down to the member's own name.
         heading = _reference_markdown(owner_path + "/" + member_name)
@@ -674,7 +639,6 @@ def _listing_entry(owner_path, member_name, declaration, summary=None):
 
 
 def _class_entries(module_name, classes):
-    """One shared-format documentation card per class."""
     lines = []
     for member_name, cls in classes:
         lines += _listing_entry(
@@ -687,7 +651,6 @@ def _class_entries(module_name, classes):
 
 
 def _function_entries(owner_path, functions, of_class=False):
-    """One shared-format card per function or concrete overload."""
     lines = []
     for member_name, function in functions:
         overloads = getattr(function, '_overloads', None)
@@ -709,10 +672,6 @@ def _function_entries(owner_path, functions, of_class=False):
 
 
 def _class_initializers(cls):
-    """The class's initializer, as (name, object), where it binds one.
-
-    A class that declares none has no `__init__` to find, so the section stays
-    out rather than showing an empty one."""
     initializer = getattr(cls, '__init__', None)
 
     if initializer is None or not callable(initializer):
@@ -722,7 +681,6 @@ def _class_initializers(cls):
 
 
 def _class_methods(cls):
-    """The class's public methods, each as (name, object)."""
     methods = []
     for attr_name in dir(cls):
         if attr_name.startswith('_'):
@@ -738,8 +696,6 @@ def _class_methods(cls):
 
 
 def _class_property_names(cls):
-    """The class's public properties, bound as one or declared as an annotation.
-    """
     names = []
     for attr_name in dir(cls):
         if attr_name.startswith('_'):
@@ -761,13 +717,11 @@ def _class_property_names(cls):
 
 
 def _property_declaration(cls, name):
-    """The property as its class declares it, annotated where it says so."""
     annotation = (getattr(cls, '__annotations__', None) or {}).get(name)
     return name + ": " + annotation if annotation else name
 
 
 def _property_summary(cls, name):
-    """What a property is for, which its getter is what documents."""
     getter = getattr(getattr(cls, name, None), 'fget', None)
     doc = getattr(getter, '__doc__', None)
     if not doc:
@@ -778,7 +732,6 @@ def _property_summary(cls, name):
 
 
 def _property_is_readonly(cls, name):
-    """A property with no setter, which assigning to raises on."""
     prop = getattr(cls, name, None)
     # An annotation-only name has no property object to ask.
     if type(prop).__name__ != 'property':
@@ -787,7 +740,6 @@ def _property_is_readonly(cls, name):
 
 
 def _property_entries(cls, names):
-    """Properties as compact rows, matching a function's parameter list."""
     lines = []
     for name in names:
         line = "- `" + _property_declaration(cls, name) + "`"
@@ -801,7 +753,6 @@ def _property_entries(cls, names):
 
 
 def _property_markdown(path):
-    """A property's help: what it declares, and what it is for."""
     parts = path.split('.')
     name = parts[-1]
     cls = _resolve_name('.'.join(parts[:-1]))
@@ -824,7 +775,6 @@ def _property_markdown(path):
 
 
 def _builtin_class_path(cls):
-    """The class's built-in name, where that name resolves to this class."""
     name = getattr(cls, '__name__', None)
     if not name:
         return None
@@ -837,9 +787,6 @@ def _builtin_class_path(cls):
 
 
 def _class_markdown(cls, path=None):
-    """A class's help, laid out as a module's is: what it is, then what it
-    offers.
-    """
     header = _class_header(cls)
     lines = ["# " + (getattr(cls, '__name__', None) or header), ""]
 
@@ -872,13 +819,14 @@ def _class_markdown(cls, path=None):
 def _markdown_lines(obj):
     if obj is None:
         # A host's README is already markdown, so it is passed through as it is.
-        return [_documents.get('README') or _help_text or _default_help_text()]
+        return [_document('README') or _help_text or _default_help_text()]
 
     module_type = type(__import__('math'))
 
     if isinstance(obj, str):
-        if obj in _documents:
-            return [_documents[obj]]
+        document = _document(obj)
+        if document is not None:
+            return [document]
         if obj == "modules":
             return _modules_markdown()
 

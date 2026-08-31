@@ -197,6 +197,11 @@ public final class Path {
         Path(url: .currentDirectory())
     }
 
+    /// The host bundle's resource directory.
+    public static func resources() throws -> Path {
+        try Path(url: Bundle.main.resourceURL)
+    }
+
     /// Documents/site-packages directory.
     public static func sitePackages() throws -> Path {
         let sitePackagesUrl = home().url.appending(path: "site-packages", directoryHint: .isDirectory)
