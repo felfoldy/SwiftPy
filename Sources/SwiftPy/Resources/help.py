@@ -166,8 +166,11 @@ def _resolve_name(name):
     return obj
 
 
-# Topics help documents without resolving a name for them.
+# Topics help documents without resolving a name for them. Hosts can add
+# complete markdown documents to `_documents` without binding fake Python
+# objects for them.
 _topics = ('modules',)
+_documents = {}
 
 
 def _is_reference(name):
@@ -178,7 +181,7 @@ def _is_reference(name):
     path, which is what names the module a function came from, and handing it
     an object bound in the session, which no module owns.
     """
-    if name in _topics:
+    if name in _topics or name in _documents:
         return True
 
     try:
@@ -256,11 +259,13 @@ See also ``modules``.
 
 def _help_lines(obj):
     if obj is None:
-        return [_help_text or _default_help_text()]
+        return [_documents.get('README') or _help_text or _default_help_text()]
 
     module_type = type(__import__('math'))
 
     if isinstance(obj, str):
+        if obj in _documents:
+            return [_documents[obj]]
         if obj == "modules":
             return _modules_lines()
 
@@ -866,13 +871,14 @@ def _class_markdown(cls, path=None):
 
 def _markdown_lines(obj):
     if obj is None:
-        # The help text is the host's to write, markdown included, so it is
-        # passed through as it is.
-        return [_help_text or _default_help_text()]
+        # A host's README is already markdown, so it is passed through as it is.
+        return [_documents.get('README') or _help_text or _default_help_text()]
 
     module_type = type(__import__('math'))
 
     if isinstance(obj, str):
+        if obj in _documents:
+            return [_documents[obj]]
         if obj == "modules":
             return _modules_markdown()
 

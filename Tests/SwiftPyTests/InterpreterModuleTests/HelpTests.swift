@@ -51,6 +51,28 @@ struct HelpTests {
         #expect(Interpreter.evaluate("_help_module_is_registered") == true)
     }
 
+    @Test("renders host-provided markdown documents as reference topics")
+    func hostMarkdownDocuments() throws {
+        Interpreter.run("""
+        import help as _help_module
+        _help_module._documents = {
+            'README': '# Welcome',
+            'CHANGELOG': '## 1.2.0\\n\\n- Added a feature.',
+        }
+        _document_out = "\\n".join(_help_module._markdown_lines('CHANGELOG'))
+        _readme_out = "\\n".join(_help_module._markdown_lines(None))
+        _document_is_reference = _help_module._is_reference('CHANGELOG')
+        _readme_is_reference = _help_module._is_reference('README')
+        _help_module._documents = {}
+        """)
+
+        let output: String = try #require(Interpreter.evaluate("_document_out"))
+        #expect(output == "## 1.2.0\n\n- Added a feature.")
+        #expect(Interpreter.evaluate("_readme_out") == "# Welcome")
+        #expect(Interpreter.evaluate("_document_is_reference") == true)
+        #expect(Interpreter.evaluate("_readme_is_reference") == true)
+    }
+
     @Suite("no args") @MainActor
     struct NoArgs {
         init() {
