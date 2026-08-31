@@ -77,3 +77,20 @@ extension Interpreter {
         return nil
     }
 }
+
+public extension Interpreter {
+    /// Returns the source of an importable module, or `nil` when none resolves:
+    /// a native module bound in Swift, or an unknown name.
+    ///
+    /// - Parameter name: A module name (`"mylib"`), a dotted submodule name
+    ///   (`"console.session"`), or a file name (`"mylib.py"`).
+    static func source(name: String) -> String? {
+        guard !name.hasSuffix(".py") else {
+            return importFromSource(name: name)
+        }
+
+        // Dotted submodules are registered as slashed paths.
+        let path = name.replacingOccurrences(of: ".", with: "/")
+        return importFromSource(name: path + ".py")
+    }
+}
