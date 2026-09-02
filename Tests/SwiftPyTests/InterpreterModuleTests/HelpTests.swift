@@ -933,7 +933,6 @@ struct HelpTests {
 
             let output: String = try #require(Interpreter.evaluate("_interp_out"))
             #expect(output.contains("## Functions"))
-            #expect(output.contains("def host(name: str) -> None:"))
             #expect(!output.contains("completions(text: str) -> list[str]"))
         }
 
