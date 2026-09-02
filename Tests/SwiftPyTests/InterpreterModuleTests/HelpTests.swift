@@ -1011,6 +1011,7 @@ struct HelpTests {
             let output: String = try #require(Interpreter.evaluate("_mods_out"))
             #expect(output.contains("Registered modules"))
             #expect(output.contains("  asyncio"))
+            #expect(output.contains("  embeddings"))
             #expect(output.contains("  interpreter"))
             #expect(output.contains("  keyring"))
             #expect(output.contains("  modeling"))
