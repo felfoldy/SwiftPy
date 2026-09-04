@@ -15,6 +15,8 @@ struct PyModuleTests {
             module.first = "1"
             module.second = "2"
             module.third = "3"
+            let none: PyObject? = nil
+            module.none = none
         }
     }
 
@@ -26,6 +28,11 @@ struct PyModuleTests {
         #expect(module?.first == "1")
         #expect(module?.second == "2")
         #expect(module?.third == "3")
+    }
+
+    @Test func pythonNoneAttributeReturnsNil() {
+        let none: PyObject? = py.module("module_handle_test")?.none
+        #expect(none == nil)
     }
 
     @Test func missingModuleReturnsNil() {

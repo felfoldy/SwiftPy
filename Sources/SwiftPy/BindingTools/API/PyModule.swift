@@ -19,6 +19,9 @@ public struct PyModule {
     public subscript(dynamicMember dynamicMember: String) -> PyObject? {
         get {
             let attribute = try? py.getattr(reference, name: dynamicMember)
+            if attribute?.isNone == true {
+                return nil
+            }
             return PyObject(attribute)
         }
         nonmutating set {
