@@ -520,9 +520,9 @@ struct HelpTests {
 
             let output = try markdown(of: "Responder.respond")
 
+            // Help is handed the method itself, so nothing names the class it
+            // is reached through and the page opens on the first signature.
             #expect(output == """
-            ``Responder``
-
             ```python
             @overload
             def respond(self, prompt: str) -> str
@@ -712,8 +712,12 @@ struct HelpTests {
 
             let output = try markdown(of: "_bare")
 
-            #expect(output.contains("# _bare"))
-            #expect(output.contains("def _bare(x)"))
+            // The signature is all there is to show; a title would only repeat it.
+            #expect(output == """
+            ```python
+            def _bare(x)
+            ```
+            """)
             #expect(!output.contains("## Parameters"))
             #expect(!output.contains("## Discussion"))
         }

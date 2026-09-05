@@ -38,7 +38,7 @@ struct StoreTests {
         
         // Backing data.
         let data: ModelData = try #require(try evaluate("sword._data"))
-        #expect(data.json == #"{"name": "Sword", "quantity": 0, "description": null}"#)
+        #expect(data.json == #"{"name": "Sword", "quantity": 0, "description": null, "_icloud_id": null}"#)
         #expect(data.keys?["__name__"] == "Item")
         
         // Is inserted?
@@ -61,7 +61,7 @@ struct StoreTests {
         let itemCount: Int = try #require(try evaluate("len(items)"))
         #expect(itemCount == 1)
         let data: ModelData = try #require(try evaluate("items[0]._data"))
-        #expect(data.json == #"{"name": "Sword", "quantity": 0, "description": null}"#)
+        #expect(data.json == #"{"name": "Sword", "quantity": 0, "description": null, "_icloud_id": null}"#)
     }
     
     @available(macOS 15, *)
@@ -74,14 +74,14 @@ struct StoreTests {
         
         // Backing data.
         let data: ModelData = try #require(try evaluate("sword._data"))
-        #expect(data.json == #"{"name": "Sword", "quantity": 0, "description": null}"#)
+        #expect(data.json == #"{"name": "Sword", "quantity": 0, "description": null, "_icloud_id": null}"#)
         
         try run("""
         sword.description = "A great sword"
         sword.quantity += 1
         """)
 
-        #expect(data.json == #"{"name": "Sword", "quantity": 1, "description": "A great sword"}"#)
+        #expect(data.json == #"{"name": "Sword", "quantity": 1, "description": "A great sword", "_icloud_id": null}"#)
     }
     
     @available(macOS 15, *)

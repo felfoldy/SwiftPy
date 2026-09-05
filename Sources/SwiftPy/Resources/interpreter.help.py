@@ -48,7 +48,7 @@ def _signature_card(entry, definition, overload=False):
         declaration.append("@overload")
     if getattr(entry, '_is_static', False):
         declaration.append("@staticmethod")
-    declaration.append(_without_trailing_colon(definition))
+    declaration += _interface_lines(definition)
     return _fenced(declaration)
 
 
@@ -454,6 +454,26 @@ def _without_trailing_colon(text):
     # pocketpy has no `str.rstrip`, so the stub's colon comes off by hand.
     text = text.strip()
     return text[:-1].strip() if text.endswith(":") else text
+
+
+def _interface_lines(definition, max_length=60):
+    definition = _without_trailing_colon(definition)
+    if len(definition) <= max_length:
+        return [definition]
+
+    parameters = _parameter_text(definition)
+    start = definition.find("(")
+    if parameters is None or start == -1:
+        return [definition]
+
+    suffix = definition[start + len(parameters) + 2:]
+    lines = [definition[:start + 1]]
+    for parameter in _split_top_level(parameters):
+        parameter = parameter.strip()
+        if parameter:
+            lines.append("    " + parameter + ",")
+    lines.append(")" + suffix)
+    return lines
 
 
 def _return_annotation(definition):
