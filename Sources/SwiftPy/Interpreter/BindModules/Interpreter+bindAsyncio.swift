@@ -1,3 +1,12 @@
+/// Starts the task and keeps it alive until its work finishes. ``AsyncTask``
+/// cancels itself when it is released, so a task nothing holds a reference to
+/// would stop the moment Python collects it.
+@MainActor
+private func detach(_ task: AsyncTask) {
+    task.resume()
+    Task { [task] in _ = await task.task?.value }
+}
+
 extension Interpreter {
     func bindAsyncio() {
         bindModule("asyncio", docs: """
@@ -76,6 +85,35 @@ extension Interpreter {
                         result.append(value)
                     }
                     return result
+                }
+            }
+
+            asyncio.def(
+                "create_task(awaitable) -> asyncio.AsyncTask",
+                docstring: """
+                Start an awaitable in the background and return its task.
+
+                awaitable: A coroutine or ``asyncio.AsyncTask``.
+
+                Use this for work nothing waits for. Nothing propagates the
+                task's error either, so the coroutine has to handle its own
+                failures. Await the returned task to join the work instead.
+
+                ```python
+                import asyncio
+
+                async def work():
+                    await asyncio.sleep(1)
+                    print("finished")
+
+                asyncio.create_task(work())
+                print("started")
+                ```
+                """
+            ) { argc, argv in
+                PyBind.function(argc, argv) { (task: AsyncTask) -> AsyncTask in
+                    detach(task)
+                    return task
                 }
             }
 
