@@ -108,9 +108,9 @@ extension Interpreter {
             }
 
             module.def("display(view) -> None",
-                       docstring: "Presents a view in the console.") { argc, argv in
+                       docstring: "Presents a view in the console. A dict or list is presented as pretty printed JSON.") { argc, argv in
                 PyBind.function(argc, argv) { (view: PyObject) -> Void in
-                    guard let view = view.reference.view else { return }
+                    guard let view = view.reference.displayView else { return }
                     Interpreter.onDisplay(view)
                 }
             }

@@ -638,6 +638,31 @@ public extension PyRef {
         return nil
     }
 
+    /// The view a host presents for this object: its own, or a markdown block
+    /// holding the pretty printed JSON of a dict or list.
+    var displayView: AnyView? {
+        if let view { return view }
+
+        guard let source = jsonMarkdown else { return nil }
+        let markdown: PyObject? = try? py.module("views")?.Markdown?(source)
+        return markdown?.reference.view
+    }
+
+    /// A dict or list as a markdown json block, or nil for anything else and
+    /// for a value `json.dumps` refuses.
+    internal var jsonMarkdown: String? {
+        guard py.istype(self, type: .dict) || py.istype(self, type: .list) else {
+            return nil
+        }
+
+        // Dumped through Python so the keys keep the order they were inserted in.
+        guard let pretty: String = try? py.module("json")?.dumps?(PyObject(self), 2) else {
+            return nil
+        }
+
+        return "```json\n\(pretty)\n```"
+    }
+
     @inlinable func setAttribute(_ name: String, _ value: PyRef?) {
         try? py.setattr(self, name: name, value: value)
     }

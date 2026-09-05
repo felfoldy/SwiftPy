@@ -44,7 +44,7 @@ struct HelpTests {
     func moduleIsImportable() {
         Interpreter.run("""
         import builtins as _b
-        import help as _help_module
+        import interpreter.help as _help_module
         _help_module_is_registered = callable(_b.help) and callable(_help_module.help)
         """)
 
@@ -54,7 +54,7 @@ struct HelpTests {
     @Test("renders host-provided markdown documents as reference topics")
     func hostMarkdownDocuments() throws {
         Interpreter.run("""
-        import help as _help_module
+        import interpreter.help as _help_module
         _help_module._documents = {
             'README': '# Welcome',
             'CHANGELOG': '## 1.2.0\\n\\n- Added a feature.',
@@ -77,7 +77,7 @@ struct HelpTests {
     struct NoArgs {
         init() {
             Interpreter.run("import interpreter")
-            Interpreter.run("import help as _help; _help._help_text = None")
+            Interpreter.run("import interpreter.help as _help; _help._help_text = None")
         }
 
         @Test("returns None")
@@ -90,7 +90,7 @@ struct HelpTests {
         func printsWelcomeText() throws {
             Interpreter.run("""
             import builtins as _b
-            import help as _help
+            import interpreter.help as _help
             _help._help_text = None
             _na_cap = []
             _na_orig = _b.print
@@ -114,7 +114,7 @@ struct HelpTests {
         func printsConfiguredWelcomeText() throws {
             Interpreter.run("""
             import builtins as _b
-            import help as _help
+            import interpreter.help as _help
             _help._help_text = 'Custom app help'
             _ca_cap = []
             _ca_orig = _b.print
@@ -138,7 +138,7 @@ struct HelpTests {
     struct ClassMarkdown {
         init() {
             Interpreter.run("import interpreter")
-            Interpreter.run("import help as _help_module")
+            Interpreter.run("import interpreter.help as _help_module")
         }
 
         private func markdown(of path: String) throws -> String {
@@ -149,13 +149,11 @@ struct HelpTests {
             return try #require(Interpreter.evaluate("_cm_out"))
         }
 
-        @Test("opens with the name, its module, the declaration, and the summary")
+        @Test("opens with its parent, declaration, and summary")
         func opening() throws {
             let output = try markdown(of: "p2p.Peer")
 
             #expect(output.hasPrefix("""
-            # Peer
-
             ``p2p``
 
             ```python
@@ -175,7 +173,7 @@ struct HelpTests {
             #expect(output.contains("""
             ## Functions
 
-            ### ``p2p.Peer/advertise``
+            ### ``p2p.Peer/advertise()``
 
             ```python
             def advertise(self) -> None
@@ -190,7 +188,7 @@ struct HelpTests {
             let output = try markdown(of: "pathlib.Path")
 
             #expect(output.contains("""
-            ### ``pathlib.Path/cwd``
+            ### ``pathlib.Path/cwd()``
 
             ```python
             @staticmethod
@@ -208,7 +206,7 @@ struct HelpTests {
             #expect(output.contains("""
             ## Initializers
 
-            ### ``p2p.Peer/__init__``
+            ### ``p2p.Peer/__init__(name)``
 
             ```python
             def __init__(self, name: str) -> None
@@ -321,7 +319,11 @@ struct HelpTests {
             """)
             let output: String = try #require(Interpreter.evaluate("_np_out"))
 
-            #expect(output.hasPrefix("# Peer"))
+            #expect(output.hasPrefix("""
+            ```python
+            class Peer
+            ```
+            """))
             #expect(output.contains("### advertise"))
             #expect(!output.contains("### ``"))
         }
@@ -335,9 +337,15 @@ struct HelpTests {
             let output: String = try #require(Interpreter.evaluate("_builtin_out"))
             let memberOutput: String = try #require(Interpreter.evaluate("_builtin_member_out"))
 
-            #expect(output.contains("### ``str/count``"))
-            #expect(output.contains("### ``str/encode``"))
-            #expect(memberOutput.hasPrefix("# upper"))
+            #expect(output.contains("### ``str/count(...)``"))
+            #expect(output.contains("### ``str/encode(...)``"))
+            #expect(memberOutput.hasPrefix("""
+            ``str``
+
+            ```python
+            def upper(...)
+            ```
+            """))
             #expect(memberOutput.contains("def upper(...)"))
             #expect(!memberOutput.contains("<nativefunc object>"))
         }
@@ -349,7 +357,7 @@ struct HelpTests {
     struct ModuleClassListing {
         init() {
             Interpreter.run("import interpreter")
-            Interpreter.run("import help as _help_module")
+            Interpreter.run("import interpreter.help as _help_module")
         }
 
         private func markdown(of module: String) throws -> String {
@@ -447,14 +455,14 @@ struct HelpTests {
 
         private func markdown(of expression: String) throws -> String {
             Interpreter.run("""
-            import help as _help_module
+            import interpreter.help as _help_module
             _fm_out = "\\n".join(_help_module._markdown_lines(\(expression)))
             """)
             return try #require(Interpreter.evaluate("_fm_out"))
         }
 
-        @Test("titles the function and shows its summary")
-        func titleAndSummary() throws {
+        @Test("shows syntax before the summary without a redundant title")
+        func syntaxAndSummary() throws {
             Interpreter.run("""
             def _summarized(value):
                 '''Does a thing.'''
@@ -464,7 +472,9 @@ struct HelpTests {
             let output = try markdown(of: "_summarized")
 
             #expect(output.hasPrefix("""
-            # _summarized
+            ```python
+            def _summarized(value)
+            ```
 
             Does a thing.
             """))
@@ -511,7 +521,7 @@ struct HelpTests {
             let output = try markdown(of: "Responder.respond")
 
             #expect(output == """
-            # respond
+            ``Responder``
 
             ```python
             @overload
@@ -523,8 +533,6 @@ struct HelpTests {
             ## Parameters
 
             - `prompt`: What to respond to.
-
-            # respond
 
             ```python
             @overload
@@ -557,7 +565,7 @@ struct HelpTests {
             let entries: String = try #require(Interpreter.evaluate("_overload_entries"))
 
             #expect(entries.contains("""
-            ### ``agents.Agent/respond``
+            ### ``agents.Agent/respond(prompt)``
 
             ```python
             @overload
@@ -566,7 +574,7 @@ struct HelpTests {
 
             Produces a response to a prompt.
 
-            ### ``agents.Agent/respond``
+            ### ``agents.Agent/respond(prompt, schema)``
 
             ```python
             @overload
@@ -582,7 +590,7 @@ struct HelpTests {
                 module.class(Responder.self)
             }
             Interpreter.run("""
-            import help as _help_module
+            import interpreter.help as _help_module
             from HelpOverloadTests import Responder
             """)
         }
@@ -678,7 +686,7 @@ struct HelpTests {
         @Test("tells a module-rooted path from a name only the session owns")
         func isReference() throws {
             Interpreter.run("""
-            import help as _help_module
+            import interpreter.help as _help_module
             def _session_only(x):
                 pass
             _ref_math = _help_module._is_reference('math.sqrt')
@@ -901,7 +909,7 @@ struct HelpTests {
         func showsPythonModuleFunctionsWithSignatures() throws {
             Interpreter.run("""
             import builtins as _b
-            import help as _help_module
+            import interpreter.help as _help_module
             _pymod_cap = []
             _pymod_orig = _b.print
             def _pymod_cp(msg=''):
@@ -971,7 +979,7 @@ struct HelpTests {
         func resolvesModuleMember() throws {
             Interpreter.run("""
             import builtins as _b
-            import help as _help_module
+            import interpreter.help as _help_module
             _member_cap = []
             _member_orig = _b.print
             def _member_cp(msg=''):

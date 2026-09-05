@@ -46,7 +46,7 @@ def _dir(obj) -> list[str]:
 import builtins as _builtins
 _builtins.dir = _dir
 
-from help import help as _help
+from interpreter.help import help as _help
 
 
 def _builtin_help(*args):

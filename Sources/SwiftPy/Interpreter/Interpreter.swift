@@ -73,7 +73,7 @@ public final class Interpreter {
 
     var registeredModuleNames: [String] {
         let hiddenModules: Set<String> = [
-            "help",
+            "interpreter.help",
             "keyword",
             "rlcompleter",
         ]
@@ -121,7 +121,7 @@ public final class Interpreter {
         bindStorage()
 
         // Register bundled source-only modules.
-        bindModule("help", in: .module)
+        bindModule("interpreter.help", in: .module)
         bindModule("keyword", in: .module)
         bindModule("rlcompleter", in: .module)
     }

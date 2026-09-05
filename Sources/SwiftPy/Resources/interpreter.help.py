@@ -507,9 +507,8 @@ def _overload_sections(overloads, definitions):
         definition = definitions[index]
         summary, body = _doc_markdown(getattr(entry, '__doc__', None), definition)
 
-        # The page title already heads the first one.
         if index:
-            lines += ["", "# " + _definition_name(definition), ""]
+            lines.append("")
 
         lines += _signature_card(entry, definition, overload=True)
         if summary:
@@ -519,28 +518,25 @@ def _overload_sections(overloads, definitions):
     return lines
 
 
-def _function_markdown(obj, fallback_name=None, module_name=None):
+def _function_markdown(obj, fallback_name=None, parent_path=None):
     definitions = _callable_definitions(obj, fallback_name)
 
-    lines = ["# " + _definition_name(definitions[0]), ""]
-
-    if module_name:
-        lines += [_reference_markdown(module_name), ""]
+    lines = []
+    if parent_path:
+        lines += [_reference_markdown(parent_path), ""]
 
     overloads = getattr(obj, '_overloads', None)
     if overloads:
-        # Of the dispatcher's own documentation, only a summary can speak for
-        # every signature.
-        summary, _ = _doc_markdown(getattr(obj, '__doc__', None), definitions[0])
-        if summary:
-            lines += [summary, ""]
+        # Each overload starts with its own syntax, so no separate function
+        # heading is needed above them.
         return lines + _overload_sections(overloads, definitions)
 
     summary, body = _doc_markdown(_callable_doc(obj), definitions[0])
+    lines += _signature_cards(obj, definitions)
     if summary:
-        lines += [summary, ""]
+        lines += ["", summary]
 
-    return lines + _signature_cards(obj, definitions) + body
+    return lines + body
 
 
 def _reference_markdown(path):
@@ -550,8 +546,18 @@ def _reference_markdown(path):
     return "``" + path + "``"
 
 
+def _parent_reference_path(path):
+    parts = path.split('.')
+    if len(parts) < 2:
+        return None
+
+    parent = '.'.join(parts[:-1])
+    # Keep the module qualification for a class, but display the class itself.
+    return parent.rsplit('.', 1)[0] + "/" + parent.rsplit('.', 1)[1] if "." in parent else parent
+
+
 def _modules_markdown():
-    lines = ["# Registered modules", "", "| Module | Description |", "| --- | --- |"]
+    lines = ["| Module | Description |", "| --- | --- |"]
     for name in _registered_modules():
         doc = _module_doc(name) or ""
         # A pipe in a summary would end the cell early.
@@ -561,7 +567,7 @@ def _modules_markdown():
 
 def _module_markdown(module):
     name = getattr(module, '__name__', None) or str(module)
-    lines = ["# " + name, ""]
+    lines = [_reference_markdown("modules"), ""]
 
     doc = getattr(module, '__doc__', None)
     if doc:
@@ -650,7 +656,7 @@ def _class_entries(module_name, classes):
     return lines
 
 
-def _function_entries(owner_path, functions, of_class=False):
+def _function_entries(owner_path, functions):
     lines = []
     for member_name, function in functions:
         overloads = getattr(function, '_overloads', None)
@@ -666,7 +672,11 @@ def _function_entries(owner_path, functions, of_class=False):
             if getattr(entry, '_is_static', False):
                 declaration.append("@staticmethod")
             declaration.append(signature)
-            lines += _listing_entry(owner_path, member_name, declaration, summary)
+
+            parameters = ", ".join(_parameter_names(definition))
+            reference_name = member_name + "(" + parameters + ")"
+
+            lines += _listing_entry(owner_path, reference_name, declaration, summary)
 
     return lines
 
@@ -788,11 +798,11 @@ def _builtin_class_path(cls):
 
 def _class_markdown(cls, path=None):
     header = _class_header(cls)
-    lines = ["# " + (getattr(cls, '__name__', None) or header), ""]
+    lines = []
 
-    module_name = _owning_module_name(path) if path else None
-    if module_name:
-        lines += [_reference_markdown(module_name), ""]
+    parent_path = _parent_reference_path(path) if path else None
+    if parent_path:
+        lines += [_reference_markdown(parent_path), ""]
 
     lines += _fenced([header])
     lines.append("")
@@ -842,7 +852,7 @@ def _markdown_lines(obj):
             return _function_markdown(
                 resolved,
                 fallback_name=obj.split('.')[-1],
-                module_name=_owning_module_name(obj)
+                parent_path=_parent_reference_path(obj)
             )
         # A property documents itself; the class it is reached through is what
         # declares it.
