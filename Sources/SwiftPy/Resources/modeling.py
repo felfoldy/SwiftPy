@@ -19,7 +19,8 @@ def _model__init__(self, *args, **kwargs):
             self._fields[field] = kwargs.pop(field)
             continue
 
-        if i < len(args):
+        # An underscored field arrives by name from storage, never positionally.
+        if i < len(args) and not field.startswith('_'):
             self._fields[field] = args[i]
             i += 1
             continue
@@ -41,7 +42,7 @@ def _model__repr__(self) -> str:
     cls = type(self)
     fields = cls.__annotations__.keys()
     obj_d = self._fields
-    args: list = [f"{field}={obj_d[field]!r}" for field in fields]
+    args: list = [f"{field}={obj_d[field]!r}" for field in fields if not field.startswith('_')]
     return f"{type(self).__name__}({', '.join(args)})"
 
 def _model_did_change(self):
@@ -62,6 +63,9 @@ def _make_schema(cls: type):
     properties = []
 
     for field, annotation in cls.__annotations__.items():
+        if field.startswith('_'):
+            continue
+
         property_schema = {
             "name": field,
             "type": annotation,
@@ -105,6 +109,8 @@ def model(cls: type):
     cls.__repr__ = _model__repr__
     cls._did_change = _model_did_change
     cls._from_json = _model_from_json
+
+    cls.__annotations__['_icloud_id'] = 'str | None'
 
     fields = cls.__annotations__.keys()
     cls_d = cls.__dict__

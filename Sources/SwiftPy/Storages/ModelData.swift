@@ -113,7 +113,7 @@ class Store: PythonBindable {
         let type = py.typeof(model.reference)
         let typeName = type.name
         let typeObject = PyObject(type)
-        
+
         try py.module("storage")?._extend?(typeObject)
 
         guard let json: String = try py.module("json")?.dumps?(model._fields) else {
