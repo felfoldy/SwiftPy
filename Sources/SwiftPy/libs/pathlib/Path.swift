@@ -202,9 +202,17 @@ public final class Path {
         try Path(url: Bundle.main.resourceURL)
     }
 
-    /// Documents/site-packages directory.
+    /// The app's temporary directory. Safe to write scratch files to, but the
+    /// system may purge its contents at any time.
+    public static func tmp() -> Path {
+        Path(url: FileManager.default.temporaryDirectory)
+    }
+
+    /// Application Support/site-packages directory. Kept out of Documents so
+    /// installed packages stay hidden from the Files app.
     public static func sitePackages() throws -> Path {
-        let sitePackagesUrl = home().url.appending(path: "site-packages", directoryHint: .isDirectory)
+        let sitePackagesUrl = URL.applicationSupportDirectory
+            .appending(path: "site-packages", directoryHint: .isDirectory)
         let path = Path(url: sitePackagesUrl)
 
         if !FileManager.default.fileExists(atPath: sitePackagesUrl.path) {

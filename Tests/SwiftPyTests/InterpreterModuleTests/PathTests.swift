@@ -107,6 +107,17 @@ struct PathTests {
         #expect(contents[0].name == "test.txt")
     }
 
+    @Test func tmp() throws {
+        let tmp = Path.tmp()
+        #expect(tmp.isDir())
+
+        let file = Path(url: tmp.url.appending(path: "swiftpy_tmp_test.txt"))
+        defer { try? file.unlink() }
+
+        try file.writeText("scratch")
+        #expect(try file.readText() == "scratch")
+    }
+
     @Test func glob() throws {
         let dirUrl = FileManager.default.temporaryDirectory
             .appending(path: "swiftpy_glob_test", directoryHint: .isDirectory)
