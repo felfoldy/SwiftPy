@@ -17,6 +17,15 @@ extension Interpreter {
         }
 
         PyType.str.function(
+            "isalnum(self) -> bool",
+            "Return True if the string is an alpha-numeric string, False otherwise."
+        ) { argc, argv in
+            PyBind.function(argc, argv) { (value: String) in
+                value.pythonIsAlphanumeric
+            }
+        }
+
+        PyType.str.function(
             "rsplit(self, sep=None, maxsplit=-1) -> list[str]",
             "Return a list of the words in the string, using sep as the delimiter string, starting at the end of the string."
         ) { argc, argv in
@@ -28,6 +37,12 @@ extension Interpreter {
 }
 
 private extension String {
+    var pythonIsAlphanumeric: Bool {
+        !isEmpty && unicodeScalars.allSatisfy {
+            $0.properties.isAlphabetic || $0.properties.numericType != nil
+        }
+    }
+
     var pythonTitlecased: String {
         var previousCharacterIsCased = false
 

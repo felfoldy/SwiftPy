@@ -30,6 +30,19 @@ struct InterpreterTests {
         )
     }
 
+    @Test func stringIsAlphanumeric() {
+        #expect(Interpreter.evaluate("'abc123'.isalnum()") == true)
+        #expect(Interpreter.evaluate("''.isalnum()") == false)
+        #expect(Interpreter.evaluate("'abc 123'.isalnum()") == false)
+        #expect(Interpreter.evaluate("'abc-123'.isalnum()") == false)
+        #expect(Interpreter.evaluate("'é中١²'.isalnum()") == true)
+        #expect(Interpreter.evaluate("'á'.isalnum()") == false)
+        #expect(
+            Interpreter.evaluate("str.isalnum.__doc__")
+                == "Return True if the string is an alpha-numeric string, False otherwise."
+        )
+    }
+
     @Test func stringRSplit() {
         #expect(Interpreter.evaluate("'a,b,c'.rsplit(',', 1)") == ["a,b", "c"])
         #expect(Interpreter.evaluate("'a--b--c'.rsplit('--', 1)") == ["a--b", "c"])
