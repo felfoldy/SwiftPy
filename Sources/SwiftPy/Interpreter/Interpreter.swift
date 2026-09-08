@@ -107,14 +107,11 @@ public final class Interpreter {
         log.info("pocketpy [\(py.version)] initialized")
 
         #if cpython
-        // Also starts CPython, which keeps the linker from dropping it: a
-        // static libpython contributes nothing unless something references it.
-        do {
-            try Python.initialize()
-            log.info("CPython [\(Python.version)] initialized")
-        } catch {
-            log.error("CPython failed to initialize: \(error)")
-        }
+        // Touching `cpy` starts CPython, which also keeps the linker from
+        // dropping it: a static libpython contributes nothing unless something
+        // references it.
+        log.info("CPython [\(cpy.version)] initialized")
+        redirectCPythonOutput()
         #endif
 
         // Change default working directory to the applications Documents directory.
@@ -146,8 +143,37 @@ public final class Interpreter {
         filename: String = "<string>",
         mode: CompileMode = .execution
     ) throws(PythonError) -> CompiledCode {
-        let compiledCode = PyObject(try py.compile(source: source, filename: filename, mode: mode))
-        return CompiledCode(compiledCode, mode: mode)
+        #if cpython
+        return try compileWithCPython(source, filename: filename, mode: mode)
+        #else
+        return CompiledCode(
+            try compileWithPocketPy(source, filename: filename, mode: mode),
+            mode: mode
+        )
+        #endif
+    }
+
+    /// pocketpy's compiler, which ``evaluate(_:)`` still needs even in a CPython
+    /// build: the value it casts from is a pocketpy one.
+    func compileWithPocketPy(
+        _ source: String,
+        filename: String = "<string>",
+        mode: CompileMode = .execution
+    ) throws(PythonError) -> PyObject {
+        PyObject(try py.compile(source: source, filename: filename, mode: mode))
+    }
+
+    @discardableResult
+    func execute(
+        _ code: CompiledCode,
+        globals: InterpreterObject? = nil,
+        locals: InterpreterObject? = nil
+    ) throws(PythonError) -> InterpreterObject? {
+        #if cpython
+        try executeWithCPython(code.code, globals: globals, locals: locals)
+        #else
+        try execute(code.code, globals: globals, locals: locals, mode: code.mode)
+        #endif
     }
 
     @discardableResult
@@ -263,10 +289,10 @@ public extension Interpreter {
     @discardableResult
     static func execute(
         _ code: CompiledCode,
-        globals: PyObject? = nil,
-        locals: PyObject? = nil
-    ) throws(PythonError) -> PyObject? {
-        try shared.execute(code.code, globals: globals, locals: locals, mode: code.mode)
+        globals: InterpreterObject? = nil,
+        locals: InterpreterObject? = nil
+    ) throws(PythonError) -> InterpreterObject? {
+        try shared.execute(code, globals: globals, locals: locals)
     }
 
     /// Executes compiled code, awaiting any generator the code returns.
@@ -283,14 +309,20 @@ public extension Interpreter {
     @discardableResult
     static func execute(
         _ code: CompiledCode,
-        globals: PyObject? = nil,
-        locals: PyObject? = nil
-    ) async throws(PythonError) -> PyObject? {
-        let result = try shared.execute(code.code, globals: globals, locals: locals, mode: code.mode)
+        globals: InterpreterObject? = nil,
+        locals: InterpreterObject? = nil
+    ) async throws(PythonError) -> InterpreterObject? {
+        guard let result = try shared.execute(code, globals: globals, locals: locals) else {
+            return nil
+        }
+        #if !cpython
+        // Top-level await compiles to a generator in pocketpy; CPython gets its
+        // own coroutine driver instead.
         if py.istype(result.reference, type: .generator) {
             let task = try AsyncTask(generator: result)
             return try await task.untilCompletes()
         }
+        #endif
         return result
     }
 
@@ -300,8 +332,8 @@ public extension Interpreter {
     /// - Returns: The result of the expression.
     static func evaluate<Result: PythonConvertible>(_ expression: String) -> Result? {
         do {
-            let code = try shared.compile(expression, mode: .evaluation)
-            try shared.execute(code.code, mode: .evaluation)
+            let code = try shared.compileWithPocketPy(expression, mode: .evaluation)
+            try shared.execute(code, mode: .evaluation)
             let result = py.retain(py.retval)
             return try Result.cast(result.reference)
         } catch {

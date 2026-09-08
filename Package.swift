@@ -6,7 +6,8 @@ import Foundation
 
 let package = Package(
     name: "SwiftPy",
-    platforms: [.macOS(.v13), .iOS(.v16), .visionOS(.v1)],
+    // 15.4 / 18.4 / 2.4 are what isolated `deinit` needs.
+    platforms: [.macOS("15.4"), .iOS("18.4"), .visionOS("2.4")],
     products: [
         .library(
             name: "SwiftPy",
@@ -20,10 +21,6 @@ let package = Package(
             name: "cpython",
             description: "Embed CPython from libswiftpy/cpython alongside pocketpy."
         ),
-        // On by default: Xcode offers no way to enable a trait on a package it
-        // consumes by path, and PyPrompt uses this one as a local package.
-        // Consumers that do not want CPython disable the default traits.
-        .default(enabledTraits: ["cpython"]),
     ],
     dependencies: [
         .package(url: "https://github.com/swiftlang/swift-syntax.git", from: "601.0.0"),

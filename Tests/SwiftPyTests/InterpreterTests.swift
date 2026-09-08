@@ -65,6 +65,7 @@ struct InterpreterTests {
     }
     #endif
 
+    #if !cpython
     @Test func isolatedExecuteDoesNotLeakToMain() async throws {
         let namespace = PyObject { py.newdict($0) }
         let code = try Interpreter.compile("isolated_marker = 7")
@@ -73,6 +74,7 @@ struct InterpreterTests {
 
         #expect(py.main.isolated_marker == nil)
     }
+    #endif
 
     @Test func clearMain_removesUserDefinedVariables() {
         Interpreter.run("_test_clear_x = 42")
@@ -83,6 +85,7 @@ struct InterpreterTests {
         #expect(py.main._test_clear_x == nil)
     }
 
+    #if !cpython
     @Test func isolatedExecuteCapturesResultsInProvidedNamespace() async throws {
         let namespace = PyObject { py.newdict($0) }
         let code = try Interpreter.compile("answer = len([1, 2, 3]) + 39")
@@ -93,7 +96,9 @@ struct InterpreterTests {
         let values = [String: Int](namespace)
         #expect(values?["answer"] == 42)
     }
+    #endif
 
+    #if !cpython
     @Test func isolatedExecuteSharesGlobalsAndLocals() async throws {
         let namespace = PyObject { py.newdict($0) }
         let code = try Interpreter.compile(
@@ -114,6 +119,7 @@ struct InterpreterTests {
         let values = [String: PyObject](namespace)
         #expect(Int(values?["result"]) == 42)
     }
+    #endif
 
     @Test func withOutputCaptureReturnsPrintedText() async throws {
         let code = try Interpreter.compile(

@@ -1,3 +1,5 @@
+// Storage is bound through pocketpy; a CPython build has no equivalent yet.
+#if !cpython
 //
 //  StoreTests.swift
 //  SwiftPy
@@ -119,3 +121,4 @@ struct StoreTests {
         return try Result.cast(result.reference)
     }
 }
+#endif
