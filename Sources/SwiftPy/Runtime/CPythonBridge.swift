@@ -10,29 +10,37 @@ import Foundation
 import Python
 
 extension Interpreter {
+    func startCPython() {
+        // Touching `cpy` starts CPython, which also keeps the linker from
+        // dropping it: a static libpython contributes nothing unless something
+        // references it.
+        log.info("CPython [\(cpy.version)] initialized")
+        redirectCPythonOutput()
+    }
+
     func compileWithCPython(
         _ source: String,
         filename: String,
         mode: CompileMode
-    ) throws(PythonError) -> CompiledCode {
+    ) throws(PocketPython.PythonError) -> CompiledCode {
         do {
             let code = try PythonCompiler.compile(source, filename: filename, mode: mode.cpython)
             return CompiledCode(code, mode: mode)
         } catch {
-            throw PythonError.SyntaxError("\(error)").withTraceback("\(error)")
+            throw PocketPython.PythonError.SyntaxError("\(error)").withTraceback("\(error)")
         }
     }
 
     @discardableResult
     func executeWithCPython(
-        _ code: PythonObject,
-        globals: PythonObject? = nil,
-        locals: PythonObject? = nil
-    ) throws(PythonError) -> PythonObject {
+        _ code: Python.PyObject,
+        globals: Python.PyObject? = nil,
+        locals: Python.PyObject? = nil
+    ) throws(PocketPython.PythonError) -> Python.PyObject {
         do {
             return try Python.execute(code, globals: globals, locals: locals)
         } catch {
-            throw PythonError.RuntimeError("\(error)").withTraceback("\(error)")
+            throw PocketPython.PythonError.RuntimeError("\(error)").withTraceback("\(error)")
         }
     }
 

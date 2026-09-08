@@ -12,9 +12,9 @@ import Python
 
 /// An object of whichever interpreter this build embeds.
 #if cpython
-public typealias InterpreterObject = PythonObject
+public typealias InterpreterObject = Python.PyObject
 #else
-public typealias InterpreterObject = PyObject
+public typealias InterpreterObject = PocketPython.PyObject
 #endif
 
 /// Compiled Python code ready to execute.
