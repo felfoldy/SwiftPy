@@ -8,6 +8,9 @@
 import Foundation
 import SwiftUI
 import OSLog
+#if cpython
+import Python
+#endif
 
 /// A Swift interface for interacting with the embedded Python interpreter.
 ///
@@ -102,6 +105,17 @@ public final class Interpreter {
         setCallbacks()
         
         log.info("pocketpy [\(py.version)] initialized")
+
+        #if cpython
+        // Also starts CPython, which keeps the linker from dropping it: a
+        // static libpython contributes nothing unless something references it.
+        do {
+            try Python.initialize()
+            log.info("CPython [\(Python.version)] initialized")
+        } catch {
+            log.error("CPython failed to initialize: \(error)")
+        }
+        #endif
 
         // Change default working directory to the applications Documents directory.
         let documentsPath = URL.documentsDirectory.path

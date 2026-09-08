@@ -20,6 +20,10 @@ let package = Package(
             name: "cpython",
             description: "Embed CPython from libswiftpy/cpython alongside pocketpy."
         ),
+        // On by default: Xcode offers no way to enable a trait on a package it
+        // consumes by path, and PyPrompt uses this one as a local package.
+        // Consumers that do not want CPython disable the default traits.
+        .default(enabledTraits: ["cpython"]),
     ],
     dependencies: [
         .package(url: "https://github.com/swiftlang/swift-syntax.git", from: "601.0.0"),
