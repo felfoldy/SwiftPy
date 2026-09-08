@@ -29,7 +29,7 @@ let package = Package(
         .target(
             name: "SwiftPy",
             dependencies: [
-                "pocketpy",
+                "PocketPython",
                 "SwiftPyMacros",
                 .product(name: "Python", package: "cpython", condition: .when(traits: ["cpython"])),
             ],
@@ -52,6 +52,10 @@ let package = Package(
                 .product(name: "SwiftSyntaxMacros", package: "swift-syntax"),
                 .product(name: "SwiftCompilerPlugin", package: "swift-syntax")
             ]
+        ),
+        .target(
+            name: "PocketPython",
+            dependencies: ["pocketpy"]
         ),
         .target(
             name: "pocketpy",

@@ -7,7 +7,6 @@
 
 import pocketpy
 import Foundation
-import SwiftUI
 
 @MainActor
 public let py = PyAPI()
@@ -567,7 +566,7 @@ public extension PyAPI {
                 value.toPython(py.retval)
 
             default:
-                SwiftObject(result).toPython(py.retval)
+                PyBridge.box?(result, py.retval)
             }
             return true
         } catch let error as PythonError {
@@ -619,50 +618,6 @@ public extension PyRef {
         pointee = newValue.pointee
     }
     
-    /// Returns an `AnyView` if the object is a view.
-    @inlinable
-    var view: AnyView? {
-        // Try AnyView. AnyView cannot be subclassed.
-        if py.typeof(self) == AnyView.pyType,
-           let view = AnyView(self) {
-            return view
-        }
-
-        // Try View.
-        if py.isinstance(self, type: .View),
-           let body = try? py.getattr(self, name: "body") {
-            let view = try? py.call(body)
-            return view?.view
-        }
-
-        return nil
-    }
-
-    /// The view a host presents for this object: its own, or a markdown block
-    /// holding the pretty printed JSON of a dict or list.
-    var displayView: AnyView? {
-        if let view { return view }
-
-        guard let source = jsonMarkdown else { return nil }
-        let markdown: PyObject? = try? py.module("views")?.Markdown?(source)
-        return markdown?.reference.view
-    }
-
-    /// A dict or list as a markdown json block, or nil for anything else and
-    /// for a value `json.dumps` refuses.
-    internal var jsonMarkdown: String? {
-        guard py.istype(self, type: .dict) || py.istype(self, type: .list) else {
-            return nil
-        }
-
-        // Dumped through Python so the keys keep the order they were inserted in.
-        guard let pretty: String = try? py.module("json")?.dumps?(PyObject(self), 2) else {
-            return nil
-        }
-
-        return "```json\n\(pretty)\n```"
-    }
-
     @inlinable func setAttribute(_ name: String, _ value: PyRef?) {
         try? py.setattr(self, name: name, value: value)
     }
@@ -704,22 +659,11 @@ public extension PyRef {
         if py.isinstance(self, type: type) {
             return true
         }
-        switch type {
-        case .float:
-            if canCast(to: .int) {
-                return true
-            }
-        case .str:
-            if canCast(to: Path.pyType) {
-                return true
-            }
-        case AnyView.pyType:
-            if canCast(to: .View) {
-                return true
-            }
-        default: break
+        // An int satisfies a float; everything else is up to the host.
+        if type == .float, canCast(to: .int) {
+            return true
         }
-        return false
+        return PyBridge.implicitCasts[type]?.contains { canCast(to: $0) } ?? false
     }
 }
 
@@ -729,83 +673,18 @@ public extension PyRef {
     }
 }
 
-public struct PythonError: LocalizedError {
-    /// The kind of exception that was raised.
-    public let type: PyType
 
-    /// The exception's value, usually the message string.
-    public nonisolated(unsafe) let value: PythonConvertible
+/// What the layer above plugs in, so this module needs to know nothing about
+/// `Path`, `View` or `SwiftObject`. Registered once at interpreter startup.
+@MainActor
+public enum PyBridge {
+    /// Extra conversions `canCast` accepts, keyed by the type being cast *to*:
+    /// a `Path` is accepted for a `str`, a `View` for an `AnyView`.
+    public static var implicitCasts: [PyType: [PyType]] = [:]
 
-    /// The full formatted traceback captured from the interpreter, when available.
-    public let traceback: String?
+    /// How to read a `String` out of one of those stand-in types.
+    public static var stringConversions: [PyType: (PyRef) -> String] = [:]
 
-    public init(type: PyType, value: PythonConvertible, traceback: String? = nil) {
-        self.type = type
-        self.value = value
-        self.traceback = traceback
-    }
-
-    public var errorDescription: String? {
-        traceback ?? String(describing: value)
-    }
-
-    /// Returns a copy of this error carrying the given traceback.
-    public func withTraceback(_ traceback: String?) -> PythonError {
-        PythonError(type: type, value: value, traceback: traceback)
-    }
-
-    @MainActor
-    static func argCountError(_ got: Int32, expected: Int) -> PythonError {
-        .TypeError("expected \(expected) arguments, got \(got)")
-    }
-
-    @MainActor
-    public static var pyType: PyType { .BaseException }
-}
-
-// MARK: - Exception constructors
-
-public extension PythonError {
-    static func SyntaxError(_ value: PythonConvertible) -> PythonError { .init(type: .SyntaxError, value: value) }
-    static func RecursionError(_ value: PythonConvertible) -> PythonError { .init(type: .RecursionError, value: value) }
-    static func OSError(_ value: PythonConvertible) -> PythonError { .init(type: .OSError, value: value) }
-    static func NotImplementedError(_ value: PythonConvertible) -> PythonError { .init(type: .NotImplementedError, value: value) }
-    static func TypeError(_ value: PythonConvertible) -> PythonError { .init(type: .TypeError, value: value) }
-    static func IndexError(_ value: PythonConvertible) -> PythonError { .init(type: .IndexError, value: value) }
-    static func ValueError(_ value: PythonConvertible) -> PythonError { .init(type: .ValueError, value: value) }
-    static func RuntimeError(_ value: PythonConvertible) -> PythonError { .init(type: .RuntimeError, value: value) }
-    static func ZeroDivisionError(_ value: PythonConvertible) -> PythonError { .init(type: .ZeroDivisionError, value: value) }
-    static func NameError(_ value: PythonConvertible) -> PythonError { .init(type: .NameError, value: value) }
-    static func UnboundLocalError(_ value: PythonConvertible) -> PythonError { .init(type: .UnboundLocalError, value: value) }
-    static func AttributeError(_ value: PythonConvertible) -> PythonError { .init(type: .AttributeError, value: value) }
-    static func ImportError(_ value: PythonConvertible) -> PythonError { .init(type: .ImportError, value: value) }
-    static func AssertionError(_ value: PythonConvertible) -> PythonError { .init(type: .AssertionError, value: value) }
-    static func KeyError(_ value: PythonConvertible) -> PythonError { .init(type: .KeyError, value: value) }
-    static func StopIteration(_ value: PythonConvertible) -> PythonError { .init(type: .StopIteration, value: value) }
-    static func BaseException(_ value: PythonConvertible) -> PythonError { .init(type: .BaseException, value: value) }
-}
-
-extension PythonError: PythonConvertible {
-    public func toPython(_ reference: PyRef) {
-        let error = try! py.call(py.tpobject(type)!, args: value)
-        reference.assign(error)
-    }
-    
-    public static func fromPython(_ reference: PyRef) -> PythonError {
-        let type = py.typeof(reference)
-        let args = try? py.getattr(reference, name: "args")
-
-        var ref: PyRef? = py_None()
-        if let args, py.tuple.len(args) > 0 {
-            ref = py.tuple.getitem(args, i: 0)
-        }
-
-        let value: PythonConvertible = if let str = String(ref) {
-            str
-        } else {
-            ref
-        }
-
-        return PythonError(type: type, value: value)
-    }
+    /// How to box a returned value that is not ``PythonConvertible``.
+    public static var box: ((Any, PyRef) -> Void)?
 }

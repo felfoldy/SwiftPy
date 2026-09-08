@@ -54,16 +54,6 @@ public struct PyModule {
         reference.bind(signature, docstring: docstring, isAsync: true, function: function)
     }
 
-    public func classes(_ types: PythonBindable.Type...) {
-        for type in types { `class`(type) }
-    }
-
-    @discardableResult
-    public func `class`(_ type: PythonValueBindable.Type) -> PyModule {
-        let type = type.pyType
-        py.setdict(reference, name: type.name, value: py.tpobject(type))
-        return self
-    }
 }
 
 extension PyModule: PythonConvertible {

@@ -113,8 +113,8 @@ extension String: PythonConvertible {
             return py.tostr(reference)
         }
 
-        if let path = Path(reference) {
-            return path.url.path
+        if let convert = PyBridge.stringConversions[py.typeof(reference)] {
+            return convert(reference)
         }
 
         return ""

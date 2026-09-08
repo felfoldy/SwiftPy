@@ -31,7 +31,3 @@ public struct PyTuple: PythonConvertible {
         }
     }
 }
-
-public extension PythonValueBindable {
-    typealias Unpack = PyTuple
-}

@@ -136,6 +136,8 @@ public final class Interpreter {
         bindModule("interpreter.help", in: .module)
         bindModule("keyword", in: .module)
         bindModule("rlcompleter", in: .module)
+
+        registerBridge()
     }
 
     func compile(

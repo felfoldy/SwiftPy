@@ -3,9 +3,10 @@
 //
 
 import Foundation
-import OSLog
 
-let log = Logger(subsystem: "com.felfoldy.SwiftPy", category: "Interpreter")
+// Re-exported so consumers keep seeing the low-level API through SwiftPy while
+// it is being moved out; the goal is for them to stop needing it.
+@_exported import PocketPython
 
 /// Exposes a Swift class to Python.
 ///

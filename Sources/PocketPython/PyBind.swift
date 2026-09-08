@@ -8,74 +8,8 @@
 import pocketpy
 import Foundation
 
-extension Interpreter {
-    /// Internal module binding.
-    func bindModule(_ name: String, docs: String? = nil, block: @escaping (PyModule) -> Void) {
-        moduleFactory[name] = { module in
-            guard let module = PyModule(module) else { return }
-
-            block(module)
-            if let docs {
-                module.__doc__ = docs
-            }
-        }
-    }
-
-    func bindModule(_ name: String, in bundle: Bundle) {
-        guard let path = bundle.path(forResource: name, ofType: "py"),
-              let content = try? String(contentsOfFile: path, encoding: .utf8) else {
-            log.error("Could not find \(name).py in bundle \(bundle.bundlePath)")
-            return
-        }
-
-        // Dotted submodules (e.g. "console.session") are requested by the
-        // import machinery as a slashed path ("console/session.py").
-        let key = name.replacingOccurrences(of: ".", with: "/") + ".py"
-        registeredSources[key] = content
-    }
-}
-
 @MainActor
 public enum PyBind {
-    /// Registers a native module that is configured in Swift when the module
-    /// is first imported.
-    ///
-    /// Use the `block` to populate the module with functions, types, and
-    /// other bindings.
-    ///
-    /// ```swift
-    /// PyBind.module("module") { module in
-    ///     // Bind classes.
-    ///     module.class(MyClass.self)
-    ///
-    ///     // Bind functions.
-    ///     module.def("add(a: float, b: float) -> float") { argc, argv in
-    ///         PyBind.function(argc, argv, add)
-    ///     }
-    ///
-    ///     // Bind attributes.
-    ///     module.VERSION = "1.0.1"
-    /// }
-    /// ```
-    ///
-    /// - Parameters:
-    ///   - name: The name the module is imported under in Python.
-    ///   - docs: Optional module documentation exposed as `module.__doc__`.
-    ///   - block: A closure that configures the ``PyModule`` with its bindings.
-    public static func module(_ name: String, docs: String? = nil, block: @escaping (PyModule) -> Void) {
-        Interpreter.shared.bindModule(name, docs: docs, block: block)
-    }
-
-    /// Registers a source-only module whose body is loaded from `<name>.py`
-    /// in the given bundle when the module is first imported.
-    ///
-    /// ```swift
-    /// PyBind.module("module", in: .module)
-    /// ```
-    public static func module(_ name: String, in bundle: Bundle) {
-        Interpreter.shared.bindModule(name, in: bundle)
-    }
-
     /// `() -> Void`
     @inlinable
     public static func function(
@@ -90,19 +24,6 @@ public enum PyBind {
         }
     }
     
-    /// `() async -> Void`
-    @inlinable
-    public static func function(
-        _ argc: Int32,
-        _ argv: @autoclosure () -> PyRef?,
-        _ fn: @MainActor @escaping () async throws -> Void
-    ) -> Bool {
-        PyAPI.return {
-            try checkArgCount(argc, expected: 0)
-            return AsyncTask { try await fn() }
-        }
-    }
-
     /// `() -> Any`
     @inlinable
     public static func function(
@@ -113,19 +34,6 @@ public enum PyBind {
         PyAPI.return {
             try checkArgCount(argc, expected: 0)
             return try fn()
-        }
-    }
-
-    /// `() async -> Any`
-    @inlinable
-    public static func function<Result: PythonConvertible>(
-        _ argc: Int32,
-        _ argv: @autoclosure () -> PyRef?,
-        _ fn: @MainActor @escaping () async throws -> Result
-    ) -> Bool where Result: Sendable {
-        PyAPI.return {
-            try checkArgCount(argc, expected: 0)
-            return AsyncTask { try await fn() }
         }
     }
 
@@ -143,21 +51,6 @@ public enum PyBind {
         }
     }
 
-    /// `(...) async -> Void`
-    @inlinable
-    public static func function<each Arg: PythonConvertible>(
-        _ argc: Int32,
-        _ argv: PyRef?,
-        _ fn: @MainActor @escaping (repeat each Arg) async throws -> Void
-    ) -> Bool {
-        PyAPI.return {
-            let arguments = try castArgs(argc: argc, argv: argv) as (repeat (each Arg))
-            return AsyncTask {
-                try await fn(repeat (each arguments))
-            }
-        }
-    }
-
     /// `(...) -> Any`
     @inlinable
     public static func function<each Arg: PythonConvertible>(
@@ -171,30 +64,12 @@ public enum PyBind {
         }
     }
     
-    /// `(...) async -> Any`
-    @inlinable
-    public static func function<
-        each Arg: PythonConvertible,
-        Result: PythonConvertible
-    >(
-        _ argc: Int32,
-        _ argv: PyRef?,
-        _ fn: @MainActor @escaping (repeat each Arg) async throws -> Result
-    ) -> Bool where Result: Sendable {
-        PyAPI.return {
-            let arguments = try castArgs(argc: argc, argv: argv) as (repeat (each Arg))
-            return AsyncTask {
-                try await fn(repeat (each arguments))
-            }
-        }
-    }
 }
 
 // MARK: - Argument checkers.
 
 extension PyBind {
-    @usableFromInline
-    static var overloadArgumentsMatched = true
+    public static var overloadArgumentsMatched = true
 
     @inline(__always)
     public static func checkArgCount(_ got: Int32, expected: Int) throws(PythonError) {
@@ -408,8 +283,7 @@ extension PyBind {
         }
     }
     
-    @usableFromInline
-    static func forwardArgs(_ args: PyRef?) -> Int32 {
+    public static func forwardArgs(_ args: PyRef?) -> Int32 {
         let length = py.tuple.len(args)
         for i in 0..<length {
             py.push(py.tuple.getitem(args, i: i))
@@ -417,8 +291,7 @@ extension PyBind {
         return length
     }
     
-    @usableFromInline
-    static func forwardKwargs(_ kwargs: PyRef?) -> Int32 {
+    public static func forwardKwargs(_ kwargs: PyRef?) -> Int32 {
         guard let kwargs else { return 0 }
         py_dict_apply(kwargs, { key, value, _ in
             let keyName = py_name(py_tostr(key))

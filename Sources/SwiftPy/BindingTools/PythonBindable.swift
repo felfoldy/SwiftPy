@@ -5,19 +5,7 @@
 //  Created by Tibor Felföldy on 2025-02-11.
 //
 
-import SwiftUI
-
-public protocol PythonValueBindable: PythonConvertible {}
-
-@MainActor
-public protocol PythonBindable: AnyObject, PythonValueBindable {
-    var _pythonCache: PythonBindingCache { get set }
-}
-
-public struct PythonBindingCache {
-    public var reference: PyRef?
-    public init() {}
-}
+import PocketPython
 
 public extension PythonValueBindable {
     func toPython(_ reference: PyRef) {
