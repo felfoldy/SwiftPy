@@ -112,22 +112,11 @@ public final class PyObject: @MainActor PyReferencing, Sendable {
 
     // MARK: Functions
     
-    /// Calls the underlying Python object, discarding any result.
-    ///
-    /// Use this when the object is callable and you don't need its return value.
-    ///
-    /// ```swift
-    /// try printFunc("hello")
-    /// ```
-    ///
-    /// - Parameter args: The arguments to pass to the call.
-    /// - Throws: A ``PythonError`` if the call raises a Python exception.
-    @inlinable
-    public func callAsFunction(_ args: PythonConvertible?...) throws(PythonError) {
-        try py.call(reference, args: args)
-    }
-    
     /// Calls the underlying Python object and returns the result as a ``PyObject``.
+    ///
+    /// Discardable, so a call whose result is not wanted needs no `_ =`. There
+    /// is deliberately no `-> Void` overload: `let x = call()` would bind `()`
+    /// just as happily, which makes every unannotated call ambiguous.
     ///
     /// - Parameter args: The arguments to pass to the call.
     /// - Returns: The call's result, or `nil` if it returned Python's `None`.
@@ -151,7 +140,11 @@ public final class PyObject: @MainActor PyReferencing, Sendable {
     /// - Returns: The call's result converted to `Result`.
     /// - Throws: A ``PythonError`` if the call raises a Python exception or the result
     ///   cannot be converted to `Result`.
+    ///
+    /// Disfavoured so that an unannotated call resolves to the overload above:
+    /// `PyObject` is itself convertible, so both would otherwise match.
     @discardableResult
+    @_disfavoredOverload
     public func callAsFunction<Result: PythonConvertible>(_ args: PythonConvertible?...) throws(PythonError) -> Result {
         let result = try py.retain(py.call(reference, args: args))
         #if DEBUG
