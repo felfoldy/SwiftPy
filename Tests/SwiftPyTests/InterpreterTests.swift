@@ -76,7 +76,11 @@ struct InterpreterTests {
     }
     #endif
 
-    @Test func clearMain_removesUserDefinedVariables() {
+    // Wipes the shared `__main__`, which every other suite reads from, so it
+    // fails them all when run in parallel. Re-enable once `clearMain` can take
+    // a namespace to clear.
+    @Test(.disabled("clears __main__ under concurrently running suites"))
+    func clearMain_removesUserDefinedVariables() {
         Interpreter.run("_test_clear_x = 42")
         #expect(Interpreter.evaluate("_test_clear_x") == 42 as Int?)
 
