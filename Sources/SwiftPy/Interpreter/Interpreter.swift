@@ -27,8 +27,8 @@ import OSLog
 ///
 @MainActor
 public final class Interpreter {
-    /// Presents a SwiftUI view in the local console, one view at a time.
-    public static var onDisplay: (AnyView) -> Void = { _ in }
+    /// The callbacks the interpreter makes into its host.
+    public static var interface = InterpreterInterface()
 
     /// The context id of the execution running on the current task, or `0`
     /// outside an execution.
@@ -117,6 +117,7 @@ public final class Interpreter {
         bindPathlib()
         bindP2P()
         bindKeyring()
+        bindKeychain()
         bindEmbeddings()
         bindStorage()
 

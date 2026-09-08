@@ -1,0 +1,49 @@
+//
+//  Secret.swift
+//  SwiftPy
+//
+//  Created by Tibor Felföldy on 2026-09-08.
+//
+
+import Foundation
+
+/// A secret stored in the system keychain, referred to by name.
+///
+/// Python holds the name only; the value never leaves Swift. Get one with
+/// ``keychain.secret``, which asks for the value when the keychain has none.
+///
+/// ```python
+/// import keychain
+///
+/// key = await keychain.secret("OPENAI_API_KEY")
+/// print(key)  # <Secret name="OPENAI_API_KEY">
+/// ```
+@Scriptable
+@MainActor
+public final class Secret {
+    /// The name the secret is stored under.
+    public let name: String
+
+    /// Refers to the secret stored under a name, whether or not one is stored
+    /// yet. Prefer ``keychain.secret``, which stores a value when there is none.
+    ///
+    /// name: The name the secret is stored under.
+    public init(name: String) {
+        self.name = name
+    }
+}
+
+extension Secret {
+    // Declared in an extension, which `@Scriptable` does not read, so the value
+    // reaches Swift callers without becoming a Python attribute.
+    /// The stored value, read from the keychain on each access.
+    public var value: String? {
+        Keychain.storage.value(for: name)
+    }
+}
+
+extension Secret: CustomStringConvertible {
+    public nonisolated var description: String {
+        "<Secret name=\"\(name)\">"
+    }
+}

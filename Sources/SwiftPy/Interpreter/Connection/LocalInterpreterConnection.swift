@@ -68,7 +68,7 @@ public actor LocalInterpreterConnection: InterpreterConnection {
     @MainActor
     func display(viewObject: PyRef?) {
         if let view = viewObject?.displayView {
-            Interpreter.onDisplay(view)
+            Interpreter.interface.display(view)
         } else if let repr = try? py.repr(viewObject) {
             if let output = InterpreterExecutionContext.current.output {
                 output(repr + "\n")
