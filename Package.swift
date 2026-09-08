@@ -15,6 +15,12 @@ let package = Package(
             ]
         ),
     ],
+    traits: [
+        .trait(
+            name: "cpython",
+            description: "Embed CPython from libswiftpy/cpython alongside pocketpy."
+        ),
+    ],
     dependencies: [
         .package(url: "https://github.com/swiftlang/swift-syntax.git", from: "601.0.0"),
     ],
@@ -24,6 +30,7 @@ let package = Package(
             dependencies: [
                 "pocketpy",
                 "SwiftPyMacros",
+                .product(name: "Python", package: "cpython", condition: .when(traits: ["cpython"])),
             ],
             resources: [
                 .process("Resources")
@@ -69,6 +76,19 @@ let package = Package(
         ),
     ]
 )
+
+// Only pulled in by the "cpython" trait; SwiftPM prunes it from the graph
+// entirely when the trait is off. The package links a libpython that its own
+// Swift/build.sh stages and does not commit, so a fresh checkout has nothing to
+// link against until that script has been run inside it — point
+// SWIFTPY_CPYTHON_PATH at a local checkout that is already built.
+if let cpython = ProcessInfo.processInfo.environment["SWIFTPY_CPYTHON_PATH"] {
+    package.dependencies.append(.package(path: cpython))
+} else {
+    package.dependencies.append(
+        .package(url: "https://github.com/libswiftpy/cpython.git", branch: "main")
+    )
+}
 
 // Only pull in swift-docc-plugin when explicitly building documentation.
 if ProcessInfo.processInfo.environment["SWIFTPY_BUILD_DOCS"] != nil {
