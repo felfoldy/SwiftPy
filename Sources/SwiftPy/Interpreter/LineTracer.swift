@@ -32,6 +32,8 @@ public final class LineTracer {
         entries.last { $0.contextId == id }?.lineNumber
     }
 
+#if !cpython
+    // The trace hook itself is pocketpy's; CPython needs PyEval_SetTrace.
     func record(_ frame: PyAPI.Frame, _ event: PyAPI.TraceEvent) {
         guard event == .line,
               let source = frame.sourceLocation,
@@ -44,8 +46,10 @@ public final class LineTracer {
             time: startInstant.duration(to: clock.now)
         ))
     }
+#endif
 }
 
+#if !cpython
 public extension Interpreter {
     static func enableTrace() {
         py.setTrace { frame, event in
@@ -57,3 +61,4 @@ public extension Interpreter {
         py.setTrace(nil)
     }
 }
+#endif

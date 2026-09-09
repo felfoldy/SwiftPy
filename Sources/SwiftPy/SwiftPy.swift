@@ -6,9 +6,13 @@ import Foundation
 
 // Re-exported so consumers keep seeing the low-level API through SwiftPy while
 // it is being moved out; the goal is for them to stop needing it.
-// The backend comes from here alone, so switching it is one edit rather
-// than one per file.
+// One backend, chosen by the trait. Everything written against the shared
+// Py* vocabulary compiles against either.
+#if cpython
+@_exported import Python
+#else
 @_exported import PocketPython
+#endif
 
 /// Exposes a Swift class to Python.
 ///

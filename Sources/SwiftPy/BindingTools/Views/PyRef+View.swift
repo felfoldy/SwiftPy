@@ -1,3 +1,5 @@
+// Not ported to CPython yet; see the migration notes.
+#if !cpython
 //
 //  PyRef+View.swift
 //  SwiftPy
@@ -53,3 +55,5 @@ public extension PyRef {
         return "```json\n\(pretty)\n```"
     }
 }
+
+#endif

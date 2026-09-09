@@ -1,3 +1,5 @@
+// The module bindings are pocketpy's; a CPython run boots without them.
+#if !cpython
 //
 //  Interpreter+bindString.swift
 //  SwiftPy
@@ -108,3 +110,4 @@ private extension String {
         return parts.reversed()
     }
 }
+#endif

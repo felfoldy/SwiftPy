@@ -1,3 +1,5 @@
+// The module bindings are pocketpy's; a CPython run boots without them.
+#if !cpython
 /// Starts the task and keeps it alive until its work finishes. ``AsyncTask``
 /// cancels itself when it is released, so a task nothing holds a reference to
 /// would stop the moment Python collects it.
@@ -143,3 +145,4 @@ extension Interpreter {
         }
     }
 }
+#endif

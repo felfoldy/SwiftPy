@@ -89,6 +89,10 @@ public class AsyncTask: PythonBindable {
     ///
     /// generator: The Python generator to advance until it returns.
     init(generator: PyObject) throws(PythonError) {
+#if cpython
+        // CPython sends into a real coroutine instead; nothing drives one here.
+        throw .RuntimeError("generator coroutines are pocketpy's")
+#else
         let iterator = try py.retain(py.iter(generator.reference))
 
         pendingWork = {
@@ -111,6 +115,7 @@ public class AsyncTask: PythonBindable {
                 }
             }
         }
+#endif
     }
 
     private init(work: @escaping () async throws -> PyObject?) {
@@ -156,7 +161,11 @@ public class AsyncTask: PythonBindable {
         resume()
         guard let outcome else { return self }
         let value = try outcome.get()
+#if cpython
+        throw .StopIteration("\(String(describing: value))")
+#else
         throw .StopIteration(value?.reference)
+#endif
     }
 
     private func notifyTaskActivity(isActive: Bool, progress: Double? = nil) {
@@ -225,7 +234,11 @@ extension AsyncTask {
 
     public convenience init<T: PythonConvertible>(_ task: @escaping () async throws -> T) where T: Sendable {
         self.init {
+            #if cpython
+            try await task().toPython()
+            #else
             py.retain(try await task())
+            #endif
         }
     }
 

@@ -9,6 +9,9 @@ import SwiftUI
 
 // `PyType.View` itself is backend vocabulary and lives in the backend module.
 
+// AnyView stores a struct in the userdata, which CPython has no equivalent
+// for yet.
+#if !cpython
 @MainActor
 extension AnyView: PythonConvertible {
     public func toPython(_ reference: PyRef) {
@@ -31,3 +34,4 @@ extension AnyView: PythonConvertible {
         deinitialize(userdata: pointer)
     }
 }
+#endif

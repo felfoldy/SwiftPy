@@ -57,8 +57,10 @@ public final class Interpreter {
     ))
 
     private var relays: OutputRelays?
+#if !cpython
     let builtinExec: PyAPI.CFunction
     let builtinEval: PyAPI.CFunction
+#endif
 
     @usableFromInline
     let connection = LocalInterpreterConnection()
@@ -92,24 +94,24 @@ public final class Interpreter {
             .sorted()
     }
 
-    /// Whether startup registers the Swift bindings. They are pocketpy's, so a
-    /// CPython run has nothing to reach them with yet -- turning them off boots
-    /// a bare interpreter. Set it before anything touches ``shared``.
+    /// Whether startup registers the Swift bindings. They are pocketpy's and
+    /// are not compiled into a CPython build at all, which boots bare. Set it
+    /// before anything touches ``shared``.
     public nonisolated(unsafe) static var bindsModules = true
 
     init() {
+        #if cpython
+        startCPython()
+        #else
         // Store builtin exec and eval.
         builtinExec = py.getbuiltin("exec")!.pointee._cfunc
         builtinEval = py.getbuiltin("eval")!.pointee._cfunc
 
         bindFunctools()
-        
-        setCallbacks()
-        
-        log.info("pocketpy [\(py.version)] initialized")
 
-        #if cpython
-        startCPython()
+        setCallbacks()
+
+        log.info("pocketpy [\(py.version)] initialized")
         #endif
 
         // Change default working directory to the applications Documents directory.
@@ -120,6 +122,7 @@ public final class Interpreter {
 
         guard Self.bindsModules else { return }
 
+        #if !cpython
         bindBuiltins()
         bindOS()
         bindAsyncio()
@@ -138,6 +141,7 @@ public final class Interpreter {
         bindModule("rlcompleter", in: .module)
 
         registerBridge()
+        #endif
     }
 
     func compile(
@@ -155,6 +159,7 @@ public final class Interpreter {
         #endif
     }
 
+#if !cpython
     /// pocketpy's compiler, which ``evaluate(_:)`` still needs even in a CPython
     /// build: the value it casts from is a pocketpy one.
     func compileWithPocketPy(
@@ -164,6 +169,7 @@ public final class Interpreter {
     ) throws(PythonError) -> PyObject {
         PyObject(try py.compile(source: source, filename: filename, mode: mode))
     }
+#endif
 
     @discardableResult
     func execute(
@@ -178,6 +184,7 @@ public final class Interpreter {
         #endif
     }
 
+#if !cpython
     @discardableResult
     func execute(
         _ code: PyObject,
@@ -204,6 +211,7 @@ public final class Interpreter {
 
         return py.retain(retval)
     }
+#endif
 
     /// Reports a Python error to the local interpreter output as `stderr`.
     func report(_ error: PythonError) {
@@ -334,10 +342,16 @@ public extension Interpreter {
     /// - Returns: The result of the expression.
     static func evaluate<Result: PythonConvertible>(_ expression: String) -> Result? {
         do {
+            #if cpython
+            let code = try shared.compile(expression, mode: .evaluation)
+            guard let result = try shared.execute(code) else { return nil }
+            return try Result.cast(result.reference)
+            #else
             let code = try shared.compileWithPocketPy(expression, mode: .evaluation)
             try shared.execute(code, mode: .evaluation)
             let result = py.retain(py.retval)
             return try Result.cast(result.reference)
+            #endif
         } catch {
             return nil
         }
@@ -348,8 +362,12 @@ public extension Interpreter {
     /// - Parameter text: Text to complete.
     /// - Returns: An array of string completions.
     static func complete(_ text: String) -> [String] {
+        #if cpython
+        return []
+        #else
         let result: [String]? = try? py.module("interpreter")?._completions?(text)
         return result ?? []
+        #endif
     }
 
     static var connection: any InterpreterConnection {

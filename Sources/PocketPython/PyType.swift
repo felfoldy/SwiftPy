@@ -46,6 +46,9 @@ public extension PyType {
 
 @MainActor
 public extension PyType {
+    /// The type as an object, which is what putting it in a module takes.
+    var object: PyObject? { py.tpobject(self).map(PyObject.init) }
+
     // MARK: - Convenient extensions.
 
     @inlinable

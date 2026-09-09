@@ -1,3 +1,5 @@
+// Presents itself as a view, which needs AnyView -- not bound on CPython yet.
+#if !cpython
 //
 //  AsyncSleep.swift
 //  SwiftPy
@@ -57,3 +59,4 @@ public final class AsyncSleep {
         AsyncSleep(seconds: 3).body()
     }
 }
+#endif

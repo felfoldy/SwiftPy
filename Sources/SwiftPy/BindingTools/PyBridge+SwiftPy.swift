@@ -1,3 +1,5 @@
+// Not ported to CPython yet; see the migration notes.
+#if !cpython
 //
 //  PyBridge+SwiftPy.swift
 //  SwiftPy
@@ -25,3 +27,5 @@ extension Interpreter {
         }
     }
 }
+
+#endif

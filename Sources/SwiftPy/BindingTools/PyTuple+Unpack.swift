@@ -1,3 +1,5 @@
+// Not ported to CPython yet; see the migration notes.
+#if !cpython
 //
 //  PyTuple+Unpack.swift
 //  SwiftPy
@@ -9,3 +11,5 @@
 public extension PythonValueBindable {
     typealias Unpack = PyTuple
 }
+
+#endif

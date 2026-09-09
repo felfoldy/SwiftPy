@@ -1,3 +1,5 @@
+// The module bindings are pocketpy's; a CPython run boots without them.
+#if !cpython
 //
 //  Interpreter+bindModules.swift
 //  SwiftPy
@@ -171,3 +173,4 @@ extension Interpreter {
         bindModule("storage", in: .module)
     }
 }
+#endif

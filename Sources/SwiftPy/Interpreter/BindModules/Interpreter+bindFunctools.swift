@@ -1,3 +1,5 @@
+// Not ported to CPython yet; see the migration notes.
+#if !cpython
 //
 //  Interpreter+bindFunctools.swift
 //  SwiftPy
@@ -122,3 +124,5 @@ let wrapsForwarder: PyAPI.CFunction = { _, argv in
 
     return py_vectorcall(UInt16(argc), UInt16(kwargc))
 }
+
+#endif

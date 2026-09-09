@@ -1,3 +1,5 @@
+// Not ported to CPython yet; see the migration notes.
+#if !cpython
 //
 //  Interpreter+setCallbacks.swift
 //  SwiftPy
@@ -54,3 +56,5 @@ extension Interpreter {
         }
     }
 }
+
+#endif

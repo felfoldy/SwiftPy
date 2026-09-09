@@ -103,6 +103,7 @@ final class KeychainStorage: SecretStorage {
     }
 }
 
+#if !cpython
 extension Interpreter {
     func bindKeychain() {
         bindModule("keychain", docs: """
@@ -190,3 +191,4 @@ private extension Keychain {
         return Secret(name: key)
     }
 }
+#endif
