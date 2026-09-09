@@ -6,6 +6,8 @@ import Foundation
 
 // Re-exported so consumers keep seeing the low-level API through SwiftPy while
 // it is being moved out; the goal is for them to stop needing it.
+// The backend comes from here alone, so switching it is one edit rather
+// than one per file.
 @_exported import PocketPython
 
 /// Exposes a Swift class to Python.

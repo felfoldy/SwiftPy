@@ -5,7 +5,6 @@
 //  Created by Tibor Felföldy on 2025-02-11.
 //
 
-import PocketPython
 
 public extension PythonValueBindable {
     /// Binds an `init()`.

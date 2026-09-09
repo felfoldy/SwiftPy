@@ -5,7 +5,6 @@
 //  Created by Tibor Felföldy on 2026-09-09.
 //
 
-import PocketPython
 
 public extension PyModule {
     func classes(_ types: PythonBindable.Type...) {

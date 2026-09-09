@@ -5,7 +5,6 @@
 //  Created by Tibor Felföldy on 2026-09-09.
 //
 
-import PocketPython
 import Foundation
 
 // Module registration needs `Interpreter`, and every async overload needs

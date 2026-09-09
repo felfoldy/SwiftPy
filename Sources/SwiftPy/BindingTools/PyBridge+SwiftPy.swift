@@ -6,7 +6,6 @@
 //
 
 import SwiftUI
-import PocketPython
 
 extension Interpreter {
     /// Teaches the low-level layer the conversions only SwiftPy knows about.

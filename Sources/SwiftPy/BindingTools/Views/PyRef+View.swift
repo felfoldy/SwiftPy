@@ -6,7 +6,6 @@
 //
 
 import SwiftUI
-import PocketPython
 
 @MainActor
 public extension PyRef {
