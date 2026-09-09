@@ -45,19 +45,31 @@ public extension PythonConvertible {
     
     @inlinable
     static func cast(_ arg: PyRef?, _ offset: Int = 0) throws(PythonError) -> Self {
-        guard let arg = arg?[offset] else {
+        try cast(resolved: arg?[offset], at: offset)
+    }
+
+    /// The same, reading the argument out of a call's arguments.
+    @inlinable
+    static func cast(_ arguments: PyArguments, _ offset: Int = 0) throws(PythonError) -> Self {
+        try cast(resolved: arguments[offset], at: offset)
+    }
+
+    /// Converts a reference that has already been found.
+    @inlinable
+    static func cast(resolved reference: PyRef?, at offset: Int) throws(PythonError) -> Self {
+        guard let reference else {
             throw .TypeError("Expected \(pyType.name) at position \(offset)")
         }
-        
-        if arg.canCast(to: pyType) {
-            return Self.fromPython(arg)
-        }
-        
-        if arg.isNone && Self.self is ExpressibleByNilLiteral.Type {
-            return Self.fromPython(arg)
+
+        if reference.canCast(to: pyType) {
+            return Self.fromPython(reference)
         }
 
-        throw .TypeError("Expected \(pyType.name) got \(py.typeof(arg).name) at position \(offset)")
+        if reference.isNone && Self.self is ExpressibleByNilLiteral.Type {
+            return Self.fromPython(reference)
+        }
+
+        throw .TypeError("Expected \(pyType.name) got \(py.typeof(reference).name) at position \(offset)")
     }
 }
 

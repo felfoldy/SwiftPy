@@ -13,26 +13,26 @@ public enum PyBind {
     /// `() -> Void`
     @inlinable
     public static func function(
-        _ argc: Int32,
-        _ argv: @autoclosure () -> PyRef?,
+        _ first: PyArguments.RawFirst,
+        _ second: @autoclosure () -> PyArguments.RawSecond,
         _ fn: @MainActor () throws -> Void
-    ) -> Bool {
+    ) -> PyReturn {
         PyAPI.return {
-            try checkArgCount(argc, expected: 0)
+            try checkArgCount(PyArguments(first, second()).count, expected: 0)
             try fn()
             return .none
         }
     }
-    
+
     /// `() -> Any`
     @inlinable
     public static func function(
-        _ argc: Int32,
-        _ argv: @autoclosure () -> PyRef?,
+        _ first: PyArguments.RawFirst,
+        _ second: @autoclosure () -> PyArguments.RawSecond,
         _ fn: @MainActor () throws -> (any PythonConvertible)
-    ) -> Bool {
+    ) -> PyReturn {
         PyAPI.return {
-            try checkArgCount(argc, expected: 0)
+            try checkArgCount(PyArguments(first, second()).count, expected: 0)
             return try fn()
         }
     }
@@ -40,12 +40,12 @@ public enum PyBind {
     /// `(...) -> Void`
     @inlinable
     public static func function<each Arg: PythonConvertible>(
-        _ argc: Int32,
-        _ argv: PyRef?,
+        _ first: PyArguments.RawFirst,
+        _ second: PyArguments.RawSecond,
         _ fn: @MainActor (repeat each Arg) throws -> Void
-    ) -> Bool {
+    ) -> PyReturn {
         PyAPI.return {
-            let arguments = try castArgs(argc: argc, argv: argv) as (repeat (each Arg))
+            let arguments = try castArgs(PyArguments(first, second)) as (repeat (each Arg))
             try fn(repeat (each arguments))
             return .none
         }
@@ -54,16 +54,16 @@ public enum PyBind {
     /// `(...) -> Any`
     @inlinable
     public static func function<each Arg: PythonConvertible>(
-        _ argc: Int32,
-        _ argv: PyRef?,
+        _ first: PyArguments.RawFirst,
+        _ second: PyArguments.RawSecond,
         _ fn: @MainActor (repeat each Arg) throws -> any PythonConvertible
-    ) -> Bool {
+    ) -> PyReturn {
         PyAPI.return {
-            let arguments = try castArgs(argc: argc, argv: argv) as (repeat (each Arg))
+            let arguments = try castArgs(PyArguments(first, second)) as (repeat (each Arg))
             return try fn(repeat (each arguments))
         }
     }
-    
+
 }
 
 // MARK: - Argument checkers.
@@ -72,7 +72,7 @@ extension PyBind {
     public static var overloadArgumentsMatched = true
 
     @inline(__always)
-    public static func checkArgCount(_ got: Int32, expected: Int) throws(PythonError) {
+    public static func checkArgCount(_ got: Int, expected: Int) throws(PythonError) {
         if expected != got {
             throw .argCountError(got, expected: expected)
         }
@@ -107,7 +107,29 @@ extension PyBind {
     ///   - argv: Pointer to the first argument.
     ///   - offset: Initial index offset.
     /// - Returns: An array of casted arguments.
+    /// Reads a call's arguments into a typed tuple. Backend-agnostic: it only
+    /// goes through ``PyArguments``.
     @inlinable
+    public static func castArgs<each Arg: PythonConvertible>(
+        _ arguments: PyArguments,
+        from offset: Int = 0
+    ) throws(PythonError) -> (repeat each Arg) {
+        var i: Int = offset
+
+        @inline(__always)
+        func index() throws(PythonError) -> Int {
+            defer { i += 1 }
+            if i >= arguments.count {
+                throw .TypeError("Expected more arguments, got \(arguments.count)")
+            }
+            return i
+        }
+
+        let result = try (repeat (each Arg).cast(arguments, index()))
+        try checkArgCount(arguments.count, expected: i)
+        return result
+    }
+
     public static func castArgs<each Arg: PythonConvertible>(
         argc: Int32,
         argv: PyRef?,
@@ -125,7 +147,7 @@ extension PyBind {
         }
 
         let result = try (repeat (each Arg).cast(argv, index()))
-        try checkArgCount(argc, expected: i)
+        try checkArgCount(Int(argc), expected: i)
         return result
     }
 }

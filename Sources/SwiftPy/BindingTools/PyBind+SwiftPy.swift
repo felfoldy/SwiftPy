@@ -53,12 +53,12 @@ public extension PyBind {
     /// `() async -> Void`
     @inlinable
     static func function(
-        _ argc: Int32,
-        _ argv: @autoclosure () -> PyRef?,
+        _ first: PyArguments.RawFirst,
+        _ second: @autoclosure () -> PyArguments.RawSecond,
         _ fn: @MainActor @escaping () async throws -> Void
-    ) -> Bool {
+    ) -> PyReturn {
         PyAPI.return {
-            try checkArgCount(argc, expected: 0)
+            try checkArgCount(PyArguments(first, second()).count, expected: 0)
             return AsyncTask { try await fn() }
         }
     }
@@ -66,12 +66,12 @@ public extension PyBind {
     /// `() async -> Any`
     @inlinable
     static func function<Result: PythonConvertible>(
-        _ argc: Int32,
-        _ argv: @autoclosure () -> PyRef?,
+        _ first: PyArguments.RawFirst,
+        _ second: @autoclosure () -> PyArguments.RawSecond,
         _ fn: @MainActor @escaping () async throws -> Result
     ) -> Bool where Result: Sendable {
         PyAPI.return {
-            try checkArgCount(argc, expected: 0)
+            try checkArgCount(PyArguments(first, second()).count, expected: 0)
             return AsyncTask { try await fn() }
         }
     }
@@ -79,12 +79,12 @@ public extension PyBind {
     /// `(...) async -> Void`
     @inlinable
     static func function<each Arg: PythonConvertible>(
-        _ argc: Int32,
-        _ argv: PyRef?,
+        _ first: PyArguments.RawFirst,
+        _ second: PyArguments.RawSecond,
         _ fn: @MainActor @escaping (repeat each Arg) async throws -> Void
-    ) -> Bool {
+    ) -> PyReturn {
         PyAPI.return {
-            let arguments = try castArgs(argc: argc, argv: argv) as (repeat (each Arg))
+            let arguments = try castArgs(PyArguments(first, second)) as (repeat (each Arg))
             return AsyncTask {
                 try await fn(repeat (each arguments))
             }
@@ -97,12 +97,12 @@ public extension PyBind {
         each Arg: PythonConvertible,
         Result: PythonConvertible
     >(
-        _ argc: Int32,
-        _ argv: PyRef?,
+        _ first: PyArguments.RawFirst,
+        _ second: PyArguments.RawSecond,
         _ fn: @MainActor @escaping (repeat each Arg) async throws -> Result
     ) -> Bool where Result: Sendable {
         PyAPI.return {
-            let arguments = try castArgs(argc: argc, argv: argv) as (repeat (each Arg))
+            let arguments = try castArgs(PyArguments(first, second)) as (repeat (each Arg))
             return AsyncTask {
                 try await fn(repeat (each arguments))
             }
