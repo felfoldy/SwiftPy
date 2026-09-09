@@ -92,6 +92,11 @@ public final class Interpreter {
             .sorted()
     }
 
+    /// Whether startup registers the Swift bindings. They are pocketpy's, so a
+    /// CPython run has nothing to reach them with yet -- turning them off boots
+    /// a bare interpreter. Set it before anything touches ``shared``.
+    public nonisolated(unsafe) static var bindsModules = true
+
     init() {
         // Store builtin exec and eval.
         builtinExec = py.getbuiltin("exec")!.pointee._cfunc
@@ -112,7 +117,9 @@ public final class Interpreter {
         FileManager.default.changeCurrentDirectoryPath(documentsPath)
 
         relays = OutputRelays(interpreter: self)
-        
+
+        guard Self.bindsModules else { return }
+
         bindBuiltins()
         bindOS()
         bindAsyncio()
