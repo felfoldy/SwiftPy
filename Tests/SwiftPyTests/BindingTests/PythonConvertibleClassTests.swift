@@ -132,6 +132,22 @@ struct PythonConvertibleClassTests {
         #expect(obj._pythonCache.reference == nil)
     }
     
+    /// The cache is what makes one Swift object one Python object. Without it
+    /// each conversion makes a new wrapper, so `is` fails and anything Python
+    /// put on the object is lost.
+    @Test func oneSwiftObjectIsOnePythonObject() {
+        let obj = TestClass()
+        obj.number = 5
+
+        main.first = obj
+        main.second = obj
+
+        #expect(Interpreter.evaluate("first is second") == true)
+
+        Interpreter.run("first.extra = 99")
+        #expect(Interpreter.evaluate("second.extra") == 99)
+    }
+
     @Test func classAttribute() {
         #expect(main.TestClass?.text == "Hello")
     }
