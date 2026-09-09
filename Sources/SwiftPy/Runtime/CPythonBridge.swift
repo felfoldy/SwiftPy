@@ -14,7 +14,7 @@ extension Interpreter {
         // Touching `cpy` starts CPython, which also keeps the linker from
         // dropping it: a static libpython contributes nothing unless something
         // references it.
-        log.info("CPython [\(cpy.version)] initialized")
+        PocketPython.log.info("CPython [\(cpy.version)] initialized")
         redirectCPythonOutput()
     }
 
