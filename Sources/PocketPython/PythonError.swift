@@ -34,7 +34,7 @@ public struct PythonError: LocalizedError {
     }
 
     @MainActor
-    static func argCountError(_ got: Int, expected: Int) -> PythonError {
+    public static func argCountError(_ got: Int, expected: Int) -> PythonError {
         .TypeError("expected \(expected) arguments, got \(got)")
     }
 
