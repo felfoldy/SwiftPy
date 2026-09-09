@@ -42,12 +42,12 @@ extension StructView: PythonValueBindable {
             module: nil,
             dtor: { Self?.deinitialize(userdata: $0) }
         )
-        type.magic("__new__") { __new__($1) }
+        type.magic("__new__") { __new__(PyArguments(method: $0, $1)) }
         type.function("__init__(self, value: str) -> None") { argc, argv in
-            __init__(argc, argv, StructView.init(value:))
+            __init__(PyArguments(method: argc, argv), StructView.init(value:))
         }
         type.function("__init__(self) -> None") {
-            __init__($1, StructView.init)
+            __init__(PyArguments(method: $0, $1), StructView.init)
         }
         type.staticmethod("make(value: str) -> StructView") {
             PyBind.function($0, $1, StructView.make(value:))
@@ -57,8 +57,8 @@ extension StructView: PythonValueBindable {
         }
         type.property(
             "value",
-            getter: { _bind_getter(\.value, $1) },
-            setter: { _bind_setter(\.value, $1) }
+            getter: { _bind_getter(\.value, PyArguments(method: $0, $1)) },
+            setter: { _bind_setter(\.value, PyArguments(method: $0, $1)) }
         )
 
         return type

@@ -49,7 +49,7 @@ struct InitializerExtractor: MemberExtractor {
             metadata.bindings.append(
             """
             type.function("\(pySignature)"\(boundDocstring)) {
-                __init__($1, \(swiftInitializer))
+                __init__(PyArguments(method: $0, $1), \(swiftInitializer))
             }
             """
             )
@@ -131,7 +131,7 @@ struct VariableExtractor: MemberExtractor {
                 return "nil"
             }
 
-            return "{ _bind_setter(\\.\(identifier), $1) }"
+            return "{ _bind_setter(\\.\(identifier), PyArguments(method: $0, $1)) }"
         }()
 
         // Bound to the getter as well as written into the stub, so that `help()`
@@ -142,7 +142,7 @@ struct VariableExtractor: MemberExtractor {
         """
         type.property(
             "\(pythonIdentifier)"\(boundDocstring),
-            getter: { _bind_getter(\\.\(identifier), $1) },
+            getter: { _bind_getter(\\.\(identifier), PyArguments(method: $0, $1)) },
             setter: \(setter)
         )
         """
@@ -221,7 +221,7 @@ struct FunctionExtractor: MemberExtractor {
             metadata.bindings.append(
             """
             type.function("\(pySignature)"\(boundDocstring)) {
-                _bind_function($1, \(swiftReference))
+                _bind_function(PyArguments(method: $0, $1), \(swiftReference))
             }
             """
             )

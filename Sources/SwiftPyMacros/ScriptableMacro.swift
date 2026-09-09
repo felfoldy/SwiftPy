@@ -70,10 +70,10 @@ extension ScriptableMacro: ExtensionMacro {
             @MainActor \(raw: classMeta.visibility)static let pyType: PyType = .make(\(raw: classMeta.typeMakeArgs)) { type in
             \(raw: classMeta.bindings.joined(separator: "\n"))
             type.function("__new__(cls, *args, **kwargs)") {
-                __new__($1)
+                __new__(PyArguments(method: $0, $1))
             }
             type.magic("__repr__") {
-                __repr__($1)
+                __repr__(PyArguments(method: $0, $1))
             }
             PyObject(type)._interface = \(raw: pythonInterface)\(raw: classMeta.docAssignment)
             }

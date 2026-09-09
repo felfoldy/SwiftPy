@@ -54,25 +54,25 @@ extension TestClass: @preconcurrency CustomStringConvertible {
 
 extension TestClass: PythonBindable {
     static let pyType: PyType = .make("TestClass", module: py.getmodule("__main__")) { type in
-        type.magic("__new__") { __new__($1) }
-        type.function("__init__(self) -> None") { __init__($1, TestClass.init) }
+        type.magic("__new__") { __new__(PyArguments(method: $0, $1)) }
+        type.function("__init__(self) -> None") { __init__(PyArguments(method: $0, $1), TestClass.init) }
         type.function("__init__(self, number: int) -> None") { argc, argv in
-            __init__(argc, argv, TestClass.init(number:))
+            __init__(PyArguments(method: argc, argv), TestClass.init(number:))
         }
         type.function("__init__(self, a: int, b: int, c: int | None = None) -> None") { argc, argv in
             PyBind.function(argc, argv, TestClass.init(a:b:c:))
         }
-        type.magic("__repr__") { __repr__($1) }
+        type.magic("__repr__") { __repr__(PyArguments(method: $0, $1)) }
         type.property("number") {
-            _bind_getter(\.number, $1)
+            _bind_getter(\.number, PyArguments(method: $0, $1))
         } setter: {
-            _bind_setter(\.number, $1)
+            _bind_setter(\.number, PyArguments(method: $0, $1))
         }
         type.function("set_number(self, value: int | None) -> None") {
-            _bind_function($1, setNumber)
+            _bind_function(PyArguments(method: $0, $1), setNumber)
         }
         type.function("get_number(self) -> int") {
-            _bind_function($1, getNumber)
+            _bind_function(PyArguments(method: $0, $1), getNumber)
         }
         type.staticmethod("static_func(value: int) -> TestClass") { argc, argv in
             PyBind.function(argc, argv, staticFunc)

@@ -321,7 +321,7 @@ class ScriptableMacroTests: XCTestCase {
                 @MainActor static let pyType: PyType = .make("TestClass", base: .object) { type in
                     \(property("number", python: "number", docstring: "A number."))
                     type.function("do_something(self) -> int", #"Do something."#) {
-                        _bind_function($1, doSomething)
+                        _bind_function(PyArguments(method: $0, $1), doSomething)
                     }
                     \(newAndRepr)
                     \(interfaceBegin)
@@ -409,10 +409,10 @@ class ScriptableMacroTests: XCTestCase {
         extension TestClass: PythonBindable {
             @MainActor static let pyType: PyType = .make("TestClass", base: .View) { type in
                 type.function("body(self) -> AnyView") {
-                    _bind_function($1, body)
+                    _bind_function(PyArguments(method: $0, $1), body)
                 }
                 type.function("update(self) -> None") {
-                    _bind_function($1, update)
+                    _bind_function(PyArguments(method: $0, $1), update)
                 }
                 \(newAndRepr)
                 \(interfaceBegin)
@@ -443,10 +443,10 @@ class ScriptableMacroTests: XCTestCase {
         extension TestClass: PythonBindable {
             @MainActor static let pyType: PyType = .make("TestClass", base: .object) { type in
                 type.function("respond(self, prompt: str) -> str") {
-                    _bind_function($1, respond(_:))
+                    _bind_function(PyArguments(method: $0, $1), respond(_:))
                 }
                 type.function("respond(self, prompt: str, schema: Any) -> Any") {
-                    _bind_function($1, respond(_:schema:))
+                    _bind_function(PyArguments(method: $0, $1), respond(_:schema:))
                 }
                 \(newAndRepr)
                 \(interfaceBegin)
@@ -464,7 +464,7 @@ class ScriptableMacroTests: XCTestCase {
 private func function(_ name: String, _ syntax: String) -> String {
     """
     type.function("\(syntax)") {
-                _bind_function($1, \(name))
+                _bind_function(PyArguments(method: $0, $1), \(name))
             }
     """
 }
@@ -478,7 +478,7 @@ private func initializer(
 
     return """
     type.function("\(syntax)"\(documented)) {
-                __init__($1, \(initializer))
+                __init__(PyArguments(method: $0, $1), \(initializer))
             }
     """
 }
@@ -486,10 +486,10 @@ private func initializer(
 private var newAndRepr: String {
     """
     type.function("__new__(cls, *args, **kwargs)") {
-                __new__($1)
+                __new__(PyArguments(method: $0, $1))
             }
             type.magic("__repr__") {
-                __repr__($1)
+                __repr__(PyArguments(method: $0, $1))
             }
     """
 }
@@ -507,10 +507,10 @@ private func property(
     type.property(
                 "\(python)"\(documented),
                 getter: {
-                    _bind_getter(\\.\(name), $1)
+                    _bind_getter(\\.\(name), PyArguments(method: $0, $1))
                 },
                 setter: {
-                    _bind_setter(\\.\(name), $1)
+                    _bind_setter(\\.\(name), PyArguments(method: $0, $1))
                 }
             )
     """
@@ -519,7 +519,7 @@ private func property(
     type.property(
                 "\(python)"\(documented),
                 getter: {
-                    _bind_getter(\\.\(name), $1)
+                    _bind_getter(\\.\(name), PyArguments(method: $0, $1))
                 },
                 setter: nil
             )

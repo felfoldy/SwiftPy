@@ -53,22 +53,22 @@ extension SUT {
         base: .object
     ) { type in
         type.function("__new__(cls, *args, **kwargs)") {
-            __new__($1)
+            __new__(PyArguments(method: $0, $1))
         }
         type.function("__init__(self) -> None") {
-            __init__($1, SUT.init)
+            __init__(PyArguments(method: $0, $1), SUT.init)
         }
         type.function("__init__(self, keyword: str | None = None) -> None") {
-            __init__($1, SUT.init(keyword:))
+            __init__(PyArguments(method: $0, $1), SUT.init(keyword:))
         }
         type.function("update(self, member: str | None = None) -> None") {
-            _bind_function($1, update(member:))
+            _bind_function(PyArguments(method: $0, $1), update(member:))
         }
         type.function("update(self, number: int) -> None") {
-            _bind_function($1, update(number:))
+            _bind_function(PyArguments(method: $0, $1), update(number:))
         }
         type.function("update(self, as_async: bool) -> None") {
-            _bind_function($1, update(asAsync:))
+            _bind_function(PyArguments(method: $0, $1), update(asAsync:))
         }
         type.staticmethod("make(member: str | None = None) -> str") {
             PyBind.function($0, $1, make(member:))
@@ -79,10 +79,10 @@ extension SUT {
         type.property(
             "member",
             getter: {
-                _bind_getter(\.member, $1)
+                _bind_getter(\.member, PyArguments(method: $0, $1))
             },
             setter: {
-                _bind_setter(\.member, $1)
+                _bind_setter(\.member, PyArguments(method: $0, $1))
             }
         )
     }
