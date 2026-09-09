@@ -1,5 +1,3 @@
-// Not ported to CPython yet; see the migration notes.
-#if !cpython
 //
 //  PyRef+View.swift
 //  SwiftPy
@@ -12,8 +10,24 @@ import SwiftUI
 @MainActor
 public extension PyRef {
     /// Returns an `AnyView` if the object is a view.
+    ///
+    /// Written per backend rather than through shared primitives: `getattr`
+    /// hands back a borrowed reference under pocketpy and an owned one under
+    /// CPython, and only the owning side may drop it.
     @inlinable
     var view: AnyView? {
+#if cpython
+        if AnyView.pyType.isExactType(of: self) {
+            return AnyView.fromPython(self)
+        }
+
+        guard PyType.View.isInstance(self),
+              let body: PyObject = PyObject(retaining: self).body,
+              let produced = try? body() else {
+            return nil
+        }
+        return produced.reference.view
+#else
         // Try AnyView. AnyView cannot be subclassed.
         if py.typeof(self) == AnyView.pyType,
            let view = AnyView(self) {
@@ -28,6 +42,7 @@ public extension PyRef {
         }
 
         return nil
+#endif
     }
 
     /// The view a host presents for this object: its own, or a markdown block
@@ -43,17 +58,26 @@ public extension PyRef {
     /// A dict or list as a markdown json block, or nil for anything else and
     /// for a value `json.dumps` refuses.
     internal var jsonMarkdown: String? {
+#if cpython
+        guard PyType.dict.isExactType(of: self) || PyType.list.isExactType(of: self) else {
+            return nil
+        }
+#else
         guard py.istype(self, type: .dict) || py.istype(self, type: .list) else {
             return nil
         }
+#endif
 
         // Dumped through Python so the keys keep the order they were inserted in.
-        guard let pretty: String = try? py.module("json")?.dumps?(PyObject(self), 2) else {
+#if cpython
+        let boxed = PyObject(retaining: self)
+#else
+        let boxed = PyObject(self)
+#endif
+        guard let pretty: String = try? py.module("json")?.dumps?(boxed, 2) else {
             return nil
         }
 
         return "```json\n\(pretty)\n```"
     }
 }
-
-#endif

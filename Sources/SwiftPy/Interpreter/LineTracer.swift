@@ -49,16 +49,20 @@ public final class LineTracer {
 #endif
 }
 
-#if !cpython
 public extension Interpreter {
+    /// No-ops under CPython: the hook is pocketpy's, and the equivalent needs
+    /// `PyEval_SetTrace`. The API stays so callers need not branch.
     static func enableTrace() {
+#if !cpython
         py.setTrace { frame, event in
             InterpreterExecutionContext.current.traceRecorder?.record(frame, event)
         }
+#endif
     }
 
     static func disableTrace() {
+#if !cpython
         py.setTrace(nil)
+#endif
     }
 }
-#endif
