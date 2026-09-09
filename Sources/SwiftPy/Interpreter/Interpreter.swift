@@ -122,13 +122,14 @@ public final class Interpreter {
 
         guard Self.bindsModules else { return }
 
+        bindPathlib()
+
         #if !cpython
         bindBuiltins()
         bindOS()
         bindAsyncio()
         bindSys()
         bindInterpreter()
-        bindPathlib()
         bindP2P()
         bindKeyring()
         bindKeychain()

@@ -146,12 +146,6 @@ extension Interpreter {
         bindModule("interpreter", in: .module)
     }
     
-    func bindPathlib() {
-        bindModule("pathlib", docs: "Object-oriented filesystem paths.") { module in
-            module.class(Path.self)
-        }
-    }
-    
     func bindP2P() {
         bindModule("p2p", docs: "Peer-to-peer discovery and messaging.") { module in
             module.class(Peer.self)
