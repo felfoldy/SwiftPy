@@ -69,7 +69,7 @@ public extension PyBind {
         _ first: PyArguments.RawFirst,
         _ second: @autoclosure () -> PyArguments.RawSecond,
         _ fn: @MainActor @escaping () async throws -> Result
-    ) -> Bool where Result: Sendable {
+    ) -> PyReturn where Result: Sendable {
         PyAPI.return {
             try checkArgCount(PyArguments(function: first, second()).count, expected: 0)
             return AsyncTask { try await fn() }
@@ -100,7 +100,7 @@ public extension PyBind {
         _ first: PyArguments.RawFirst,
         _ second: PyArguments.RawSecond,
         _ fn: @MainActor @escaping (repeat each Arg) async throws -> Result
-    ) -> Bool where Result: Sendable {
+    ) -> PyReturn where Result: Sendable {
         PyAPI.return {
             let arguments = try castArgs(PyArguments(function: first, second)) as (repeat (each Arg))
             return AsyncTask {
