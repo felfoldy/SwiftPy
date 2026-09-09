@@ -8,6 +8,10 @@
 import Testing
 @testable import SwiftPy
 
+// The watchdog is pocketpy's. Under the cpython trait PyEval_EvalCode runs the
+// runaway loop with nothing to stop it, which hangs the whole suite.
+#if !cpython
+
 @MainActor
 struct WatchdogTests {
     /// Executing through the interpreter aborts a runaway loop with a
@@ -43,3 +47,5 @@ struct WatchdogTests {
         #expect(Interpreter.timeout == nil)
     }
 }
+
+#endif

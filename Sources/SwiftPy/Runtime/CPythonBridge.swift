@@ -38,7 +38,7 @@ extension Interpreter {
         locals: Python.PyObject? = nil
     ) throws(PocketPython.PythonError) -> Python.PyObject {
         do {
-            return try Python.execute(code, globals: globals, locals: locals)
+            return try PyRuntime.execute(code, globals: globals, locals: locals)
         } catch {
             throw PocketPython.PythonError.RuntimeError("\(error)").withTraceback("\(error)")
         }
@@ -47,7 +47,7 @@ extension Interpreter {
     /// Points CPython's stdout and stderr at the sink pocketpy's `print` uses,
     /// so both interpreters reach the console the same way.
     func redirectCPythonOutput() {
-        try? Python.redirectOutput { text in
+        try? PyRuntime.redirectOutput { text in
             MainActor.assumeIsolated {
                 if let output = InterpreterExecutionContext.current.output {
                     output(text)

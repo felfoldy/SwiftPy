@@ -36,7 +36,7 @@ public extension PyBind {
     ///   - name: The name the module is imported under in Python.
     ///   - docs: Optional module documentation exposed as `module.__doc__`.
     ///   - block: A closure that configures the ``PyModule`` with its bindings.
-    public static func module(_ name: String, docs: String? = nil, block: @escaping (PyModule) -> Void) {
+    static func module(_ name: String, docs: String? = nil, block: @escaping (PyModule) -> Void) {
         Interpreter.shared.bindModule(name, docs: docs, block: block)
     }
 
@@ -46,13 +46,13 @@ public extension PyBind {
     /// ```swift
     /// PyBind.module("module", in: .module)
     /// ```
-    public static func module(_ name: String, in bundle: Bundle) {
+    static func module(_ name: String, in bundle: Bundle) {
         Interpreter.shared.bindModule(name, in: bundle)
     }
 
     /// `() async -> Void`
     @inlinable
-    public static func function(
+    static func function(
         _ argc: Int32,
         _ argv: @autoclosure () -> PyRef?,
         _ fn: @MainActor @escaping () async throws -> Void
@@ -65,7 +65,7 @@ public extension PyBind {
 
     /// `() async -> Any`
     @inlinable
-    public static func function<Result: PythonConvertible>(
+    static func function<Result: PythonConvertible>(
         _ argc: Int32,
         _ argv: @autoclosure () -> PyRef?,
         _ fn: @MainActor @escaping () async throws -> Result
@@ -78,7 +78,7 @@ public extension PyBind {
 
     /// `(...) async -> Void`
     @inlinable
-    public static func function<each Arg: PythonConvertible>(
+    static func function<each Arg: PythonConvertible>(
         _ argc: Int32,
         _ argv: PyRef?,
         _ fn: @MainActor @escaping (repeat each Arg) async throws -> Void
@@ -93,7 +93,7 @@ public extension PyBind {
 
     /// `(...) async -> Any`
     @inlinable
-    public static func function<
+    static func function<
         each Arg: PythonConvertible,
         Result: PythonConvertible
     >(
