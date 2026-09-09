@@ -13,6 +13,10 @@ import pocketpy
 /// `(self, args)`. Binding code that is meant to be shared names their types
 /// through ``RawFirst`` and ``RawSecond`` and never reads them directly, so the
 /// same source compiles against either.
+///
+/// The two initializers are one and the same here -- pocketpy already puts a
+/// receiver in `argv[0]` -- but CPython hands it separately, so shared code has
+/// to say which it is holding.
 @MainActor
 public struct PyArguments {
     public typealias RawFirst = Int32
@@ -22,7 +26,13 @@ public struct PyArguments {
     @usableFromInline let argv: PyRef?
 
     @inlinable
-    public init(_ first: RawFirst, _ second: RawSecond) {
+    public init(method first: RawFirst, _ second: RawSecond) {
+        argc = first
+        argv = second
+    }
+
+    @inlinable
+    public init(function first: RawFirst, _ second: RawSecond) {
         argc = first
         argv = second
     }

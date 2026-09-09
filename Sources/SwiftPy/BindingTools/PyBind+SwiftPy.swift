@@ -58,7 +58,7 @@ public extension PyBind {
         _ fn: @MainActor @escaping () async throws -> Void
     ) -> PyReturn {
         PyAPI.return {
-            try checkArgCount(PyArguments(first, second()).count, expected: 0)
+            try checkArgCount(PyArguments(function: first, second()).count, expected: 0)
             return AsyncTask { try await fn() }
         }
     }
@@ -71,7 +71,7 @@ public extension PyBind {
         _ fn: @MainActor @escaping () async throws -> Result
     ) -> Bool where Result: Sendable {
         PyAPI.return {
-            try checkArgCount(PyArguments(first, second()).count, expected: 0)
+            try checkArgCount(PyArguments(function: first, second()).count, expected: 0)
             return AsyncTask { try await fn() }
         }
     }
@@ -84,7 +84,7 @@ public extension PyBind {
         _ fn: @MainActor @escaping (repeat each Arg) async throws -> Void
     ) -> PyReturn {
         PyAPI.return {
-            let arguments = try castArgs(PyArguments(first, second)) as (repeat (each Arg))
+            let arguments = try castArgs(PyArguments(function: first, second)) as (repeat (each Arg))
             return AsyncTask {
                 try await fn(repeat (each arguments))
             }
@@ -102,7 +102,7 @@ public extension PyBind {
         _ fn: @MainActor @escaping (repeat each Arg) async throws -> Result
     ) -> Bool where Result: Sendable {
         PyAPI.return {
-            let arguments = try castArgs(PyArguments(first, second)) as (repeat (each Arg))
+            let arguments = try castArgs(PyArguments(function: first, second)) as (repeat (each Arg))
             return AsyncTask {
                 try await fn(repeat (each arguments))
             }

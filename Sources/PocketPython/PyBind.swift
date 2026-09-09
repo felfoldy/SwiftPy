@@ -18,7 +18,7 @@ public enum PyBind {
         _ fn: @MainActor () throws -> Void
     ) -> PyReturn {
         PyAPI.return {
-            try checkArgCount(PyArguments(first, second()).count, expected: 0)
+            try checkArgCount(PyArguments(function: first, second()).count, expected: 0)
             try fn()
             return .none
         }
@@ -32,7 +32,7 @@ public enum PyBind {
         _ fn: @MainActor () throws -> (any PythonConvertible)
     ) -> PyReturn {
         PyAPI.return {
-            try checkArgCount(PyArguments(first, second()).count, expected: 0)
+            try checkArgCount(PyArguments(function: first, second()).count, expected: 0)
             return try fn()
         }
     }
@@ -45,7 +45,7 @@ public enum PyBind {
         _ fn: @MainActor (repeat each Arg) throws -> Void
     ) -> PyReturn {
         PyAPI.return {
-            let arguments = try castArgs(PyArguments(first, second)) as (repeat (each Arg))
+            let arguments = try castArgs(PyArguments(function: first, second)) as (repeat (each Arg))
             try fn(repeat (each arguments))
             return .none
         }
@@ -59,7 +59,7 @@ public enum PyBind {
         _ fn: @MainActor (repeat each Arg) throws -> any PythonConvertible
     ) -> PyReturn {
         PyAPI.return {
-            let arguments = try castArgs(PyArguments(first, second)) as (repeat (each Arg))
+            let arguments = try castArgs(PyArguments(function: first, second)) as (repeat (each Arg))
             return try fn(repeat (each arguments))
         }
     }
