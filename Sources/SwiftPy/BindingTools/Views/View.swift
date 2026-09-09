@@ -7,28 +7,7 @@
 
 import SwiftUI
 
-@MainActor
-public extension PyType {
-    static let View: PyType = {
-        let type = py.newtype(
-            name: "View",
-            base: .object,
-            module: nil,
-            dtor: { _ in }
-        )
-        type.function("__new__(cls, *args, **kwargs)") { _, argv in
-            let type = py.totype(argv)
-            py.newobject(py.retval, type: type, slots: 0)
-            return true
-        }
-        type.function("body(self) -> View") { argc, argv in
-            PyAPI.return {
-                throw PythonError.NotImplementedError("def body(self) is not implemented")
-            }
-        }
-        return type
-    }()
-}
+// `PyType.View` itself is backend vocabulary and lives in the backend module.
 
 @MainActor
 extension AnyView: PythonConvertible {
