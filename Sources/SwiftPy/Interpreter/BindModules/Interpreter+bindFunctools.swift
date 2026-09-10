@@ -1,4 +1,5 @@
-// Not ported to CPython yet; see the migration notes.
+// pocketpy only, on purpose: it reimplements functools.wraps, which
+// pocketpy's functools lacks. CPython ships the real module.
 #if !cpython
 //
 //  Interpreter+bindFunctools.swift
