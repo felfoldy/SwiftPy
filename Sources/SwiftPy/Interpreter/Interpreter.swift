@@ -123,11 +123,11 @@ public final class Interpreter {
         guard Self.bindsModules else { return }
 
         bindPathlib()
+        bindAsyncio()
 
         #if !cpython
         bindBuiltins()
         bindOS()
-        bindAsyncio()
         bindSys()
         bindInterpreter()
         bindP2P()
@@ -326,9 +326,14 @@ public extension Interpreter {
         guard let result = try shared.execute(code, globals: globals, locals: locals) else {
             return nil
         }
-        #if !cpython
-        // Top-level await compiles to a generator in pocketpy; CPython gets its
-        // own coroutine driver instead.
+        // Top-level await compiles to a generator in pocketpy and to a
+        // coroutine in CPython; either way the code has not run yet.
+        #if cpython
+        if PyRuntime.isCoroutine(result) {
+            let task = try AsyncTask(generator: result)
+            return try await task.untilCompletes()
+        }
+        #else
         if py.istype(result.reference, type: .generator) {
             let task = try AsyncTask(generator: result)
             return try await task.untilCompletes()

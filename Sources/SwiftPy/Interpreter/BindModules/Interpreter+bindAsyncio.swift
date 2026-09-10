@@ -1,5 +1,3 @@
-// The module bindings are pocketpy's; a CPython run boots without them.
-#if !cpython
 /// Starts the task and keeps it alive until its work finishes. ``AsyncTask``
 /// cancels itself when it is released, so a task nothing holds a reference to
 /// would stop the moment Python collects it.
@@ -47,11 +45,21 @@ extension Interpreter {
                 ```
                 """
             ) { argc, argv in
-                PyBind.function(argc, argv) { (seconds: Double) in
+                PyBind.function(argc, argv) { (seconds: Double) -> AsyncTask in
+                    #if cpython
+                    // AsyncSleep presents itself as a view, which CPython has
+                    // no bridge for yet: the bare task until it does.
+                    AsyncTask { try await Task.sleep(for: .seconds(seconds)) }
+                    #else
                     AsyncSleep(seconds: seconds).task
+                    #endif
                 }
             }
 
+            // Both need what CPython's bindings still lack: `*args`, which
+            // arrives unpacked rather than as one tuple, and turning a native
+            // coroutine into a task.
+            #if !cpython
             asyncio.asyncDef(
                 "gather(*tasks) -> list",
                 docstring: """
@@ -118,6 +126,7 @@ extension Interpreter {
                     return task
                 }
             }
+            #endif
 
             asyncio.def(
                 "current_task() -> asyncio.AsyncTask | None",
@@ -145,4 +154,3 @@ extension Interpreter {
         }
     }
 }
-#endif

@@ -87,11 +87,22 @@ public class AsyncTask: PythonBindable {
 
     /// Creates a task that drives a Python generator-based coroutine.
     ///
-    /// generator: The Python generator to advance until it returns.
+    /// generator: The Python generator to advance until it returns. CPython
+    /// hands back a real coroutine, which is sent into rather than iterated.
     init(generator: PyObject) throws(PythonError) {
 #if cpython
-        // CPython sends into a real coroutine instead; nothing drives one here.
-        throw .RuntimeError("generator coroutines are pocketpy's")
+        pendingWork = {
+            try await PyRuntime.drive(generator) { request in
+                // A stop request cancels this task; unwind instead of sending
+                // the coroutine forward again.
+                try Task.checkCancellation()
+
+                guard let task = AsyncTask(request) else {
+                    throw PythonError.TypeError("cannot await a \(request.typeName)")
+                }
+                return try await task.untilCompletes() ?? .none
+            }
+        }
 #else
         let iterator = try py.retain(py.iter(generator.reference))
 
@@ -155,6 +166,18 @@ public class AsyncTask: PythonBindable {
     func __iter__() -> AsyncTask {
         resume()
         return self
+    }
+
+    /// CPython reaches an awaitable through `__await__`, which has to be an
+    /// iterator; this one hands the task to the coroutine driver.
+    func __await__() throws(PythonError) -> PyObject {
+#if cpython
+        resume()
+        return try PyRuntime.awaitable(yielding: try toPython())
+#else
+        // pocketpy awaits by iterating, so nothing calls this.
+        throw .RuntimeError("__await__ is CPython's")
+#endif
     }
 
     func __next__() throws(PythonError) -> AsyncTask {
@@ -233,13 +256,15 @@ extension AsyncTask {
     }
 
     public convenience init<T: PythonConvertible>(_ task: @escaping () async throws -> T) where T: Sendable {
-        self.init {
+        // Spelled out: `self.init { ... }` picks this same initializer back up
+        // when the closure returns a PyObject, and recurses forever.
+        self.init(work: {
             #if cpython
             try await task().toPython()
             #else
             py.retain(try await task())
             #endif
-        }
+        })
     }
 
     @discardableResult
