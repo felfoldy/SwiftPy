@@ -250,7 +250,7 @@ public extension AsyncTask {
 extension AsyncTask {
     /// The task for an awaitable Python handed over: one of these as it is,
     /// anything else -- a pocketpy generator, a CPython coroutine -- driven.
-    static func from(_ awaitable: PyObject) throws(PythonError) -> AsyncTask {
+    public static func from(_ awaitable: PyObject) throws(PythonError) -> AsyncTask {
         if let task = AsyncTask(awaitable) { return task }
         return try AsyncTask(generator: awaitable)
     }

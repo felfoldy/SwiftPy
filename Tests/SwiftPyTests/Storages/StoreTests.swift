@@ -1,5 +1,3 @@
-// Storage is bound through pocketpy; a CPython build has no equivalent yet.
-#if !cpython
 //
 //  StoreTests.swift
 //  SwiftPy
@@ -15,10 +13,12 @@ import SwiftData
 @MainActor
 @Suite
 struct StoreTests {
-    private let namespace = PyObject { py.newdict($0) }
+    private let namespace: PyObject
 
-    init() {
-        try! run("""
+    init() throws {
+        let code = try Interpreter.compile("{'__builtins__': __import__('builtins')}", mode: .evaluation)
+        namespace = try #require(try Interpreter.execute(code))
+        try run("""
         from modeling import model
         from storage import Store
 
@@ -121,4 +121,3 @@ struct StoreTests {
         return try Result.cast(result.reference)
     }
 }
-#endif
