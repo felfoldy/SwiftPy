@@ -16,10 +16,23 @@ protocol SecretStorage {
 }
 
 @MainActor
-enum Keychain {
+public enum Keychain {
     /// Swapped for an in-memory store in tests, which have no entitlement for
     /// the synchronizable keychain.
     static var storage: any SecretStorage = KeychainStorage()
+    
+    public static func value(_ object: PyObject) -> String? {
+        if let string = String(object) {
+            return string
+        }
+        if let secret = Secret(object) {
+            return secret.value
+        }
+        if let expression = SecretExpression(object) {
+            return expression.value
+        }
+        return nil
+    }
 }
 
 /// Generic-password items, one per name, synchronized through iCloud Keychain.

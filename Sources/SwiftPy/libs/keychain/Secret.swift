@@ -35,6 +35,10 @@ public final class Secret {
     public func prefixed(_ prefix: String) -> SecretExpression {
         SecretExpression(secret: self, prefix: prefix)
     }
+
+    public func bearer() -> SecretExpression {
+        prefixed("Bearer ")
+    }
 }
 
 extension Secret {

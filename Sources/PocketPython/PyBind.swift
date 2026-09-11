@@ -29,6 +29,7 @@ extension PyRef {
         let functionObj = PyObject {
             name = py.newfunction($0, signature: signature, docstring: docstring, function: function)
         }
+        functionObj._interface = signature
 
         // Mark awaitable bindings so introspection (e.g. `help`) can render
         // them as `async def`. Mirrors Python detecting coroutines via a flag

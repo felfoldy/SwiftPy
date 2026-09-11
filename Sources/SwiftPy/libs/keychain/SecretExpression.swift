@@ -16,3 +16,10 @@ public class SecretExpression {
         self.prefix = prefix
     }
 }
+
+public extension SecretExpression {
+    var value: String? {
+        let values = [prefix, secret.value].compactMap { $0 }
+        return values.isEmpty ? nil : values.joined()
+    }
+}

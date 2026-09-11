@@ -330,12 +330,13 @@ extension PyRef: PythonConvertible {
 @MainActor
 public extension PyRef {
     var asAny: Any? {
+        if isNone { return nil }
         if let string = String(self) { return string }
         if let int = Int(self) { return int }
         if let float = Double(self) { return float }
         if let bool = Bool(self) { return bool }
         if let array = [Any?](self) { return array }
         if let object = [String: Any](self) { return object }
-        return nil
+        return PyObject(self)
     }
 }

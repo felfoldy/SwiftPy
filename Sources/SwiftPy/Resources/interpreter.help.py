@@ -11,12 +11,46 @@ def _callable_signature(obj, fallback_name=None):
     try:
         return name + str(inspect.signature(obj))
     except:
-        return name + "(...)"
+        pass
+
+    # A native bound method can hide the descriptor's text signature. Recover
+    # the declaration generated for its Swift-bound owner in that case.
+    try:
+        owner = getattr(obj, '__self__', None)
+        owner_type = owner if isinstance(owner, type) else type(owner)
+        owner_interface = getattr(owner_type, '_interface', None)
+        if owner_interface:
+            marker = "def " + name + "("
+            for line in owner_interface.split("\n"):
+                declaration = line.strip()
+                start = declaration.find(marker)
+                if start != -1:
+                    signature = declaration[start + len("def "):]
+                    if signature.endswith(" ..."):
+                        signature = signature[:-len(" ...")]
+                    if signature.endswith(":"):
+                        signature = signature[:-1]
+                    parameters = _parameter_text(signature)
+                    if parameters is not None:
+                        parts = _split_top_level(parameters)
+                        if parts and parts[0].strip() in ('self', 'cls'):
+                            parts = parts[1:]
+                        opening = signature.find("(")
+                        closing = opening + len(parameters) + 1
+                        return signature[:opening + 1] + ", ".join(parts) + signature[closing:]
+    except:
+        pass
+
+    return name + "(...)"
 
 
 def _callable_definition(obj, fallback_name=None):
     signature = _callable_signature(obj, fallback_name)
-    prefix = "async " if getattr(obj, '_is_async', False) else ""
+    try:
+        is_coroutine = inspect.iscoroutinefunction(obj)
+    except:
+        is_coroutine = False
+    prefix = "async " if getattr(obj, '_is_async', False) or is_coroutine else ""
     if signature.startswith("def "):
         signature = signature[len("def "):]
     if not signature.endswith(":"):
