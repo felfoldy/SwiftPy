@@ -50,10 +50,6 @@ extension Interpreter {
                 }
             }
 
-            // Both need what CPython's bindings still lack: `*args`, which
-            // arrives unpacked rather than as one tuple, and turning a native
-            // coroutine into a task.
-            #if !cpython
             asyncio.asyncDef(
                 "gather(*tasks) -> list",
                 docstring: """
@@ -81,7 +77,7 @@ extension Interpreter {
                 """
             ) { argc, argv in
                 PyBind.function(argc, argv) { (tuple: PyTuple) in
-                    let tasks = try tuple.values.map(AsyncTask.init)
+                    let tasks = try tuple.values.map(AsyncTask.from)
                     for task in tasks { task.resume() }
                     var result = [PyObject?]()
                     for task in tasks {
@@ -115,12 +111,12 @@ extension Interpreter {
                 ```
                 """
             ) { argc, argv in
-                PyBind.function(argc, argv) { (task: AsyncTask) -> AsyncTask in
+                PyBind.function(argc, argv) { (awaitable: PyObject) -> AsyncTask in
+                    let task = try AsyncTask.from(awaitable)
                     detach(task)
                     return task
                 }
             }
-            #endif
 
             asyncio.def(
                 "current_task() -> asyncio.AsyncTask | None",
