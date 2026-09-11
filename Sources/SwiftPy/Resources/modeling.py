@@ -81,6 +81,15 @@ def _make_schema(cls: type):
         "properties": properties,
     }
 
+def _string_annotations(cls: type):
+    # pocketpy keeps annotations as their source text; CPython evaluates them
+    # to objects, so ask for the text form the module reads everywhere.
+    try:
+        import annotationlib
+    except ImportError:
+        return None
+    return annotationlib.get_annotations(cls, format=annotationlib.Format.STRING)
+
 def model(cls: type):
     """Convert an annotated class into a data model.
 
@@ -110,6 +119,10 @@ def model(cls: type):
     cls._did_change = _model_did_change
     cls._from_json = _model_from_json
 
+    annotations = _string_annotations(cls)
+    if annotations is not None:
+        # Assigning also drops __annotate__, so later reads see these strings.
+        cls.__annotations__ = annotations
     cls.__annotations__['_icloud_id'] = 'str | None'
 
     fields = cls.__annotations__.keys()

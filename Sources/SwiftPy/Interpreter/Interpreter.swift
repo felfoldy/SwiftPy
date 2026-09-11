@@ -149,6 +149,7 @@ public final class Interpreter {
         bindModule("interpreter.help", in: .module)
         bindModule("keyword", in: .module)
         bindModule("rlcompleter", in: .module)
+        bindModule("modeling", in: .module)
     }
 
     func compile(

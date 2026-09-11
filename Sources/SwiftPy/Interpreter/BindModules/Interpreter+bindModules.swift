@@ -103,7 +103,6 @@ extension Interpreter {
             }
         }
 
-        bindModule("modeling", in: .module)
         bindModule("storage", in: .module)
     }
 }
