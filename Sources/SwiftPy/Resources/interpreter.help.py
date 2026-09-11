@@ -261,7 +261,7 @@ def _help_lines(obj):
     if obj is None:
         return [_document('README') or _help_text or _default_help_text()]
 
-    module_type = type(__import__('math'))
+    module_type = type(__import__('sys'))
 
     if isinstance(obj, str):
         document = _document(obj)
@@ -488,7 +488,7 @@ def _owning_module_name(path):
     # says where it came from. The longest prefix that is still a module owns it,
     # which keeps a method under its module rather than its class.
     parts = path.split('.')
-    module_type = type(__import__('math'))
+    module_type = type(__import__('sys'))
 
     name = None
     for index in range(1, len(parts)):
@@ -851,7 +851,7 @@ def _markdown_lines(obj):
         # A host's README is already markdown, so it is passed through as it is.
         return [_document('README') or _help_text or _default_help_text()]
 
-    module_type = type(__import__('math'))
+    module_type = type(__import__('sys'))
 
     if isinstance(obj, str):
         document = _document(obj)

@@ -108,6 +108,7 @@ public final class Interpreter {
         builtinEval = py.getbuiltin("eval")!.pointee._cfunc
 
         bindFunctools()
+        py.installPocketPyModule()
 
         setCallbacks()
 
@@ -122,27 +123,32 @@ public final class Interpreter {
 
         guard Self.bindsModules else { return }
 
+        #if cpython
+        installSourceImporter()
+        #endif
+
         bindPathlib()
         bindAsyncio()
+        bindInterpreter()
 
         #if !cpython
         bindBuiltins()
         bindOS()
         bindSys()
-        bindInterpreter()
         bindP2P()
         bindKeyring()
         bindKeychain()
         bindEmbeddings()
         bindStorage()
 
-        // Register bundled source-only modules.
+        registerBridge()
+        #endif
+
+        // Bundled source-only modules. `keyword` is only reached on pocketpy:
+        // CPython's own comes first on sys.meta_path.
         bindModule("interpreter.help", in: .module)
         bindModule("keyword", in: .module)
         bindModule("rlcompleter", in: .module)
-
-        registerBridge()
-        #endif
     }
 
     func compile(
@@ -368,12 +374,8 @@ public extension Interpreter {
     /// - Parameter text: Text to complete.
     /// - Returns: An array of string completions.
     static func complete(_ text: String) -> [String] {
-        #if cpython
-        return []
-        #else
         let result: [String]? = try? py.module("interpreter")?._completions?(text)
         return result ?? []
-        #endif
     }
 
     static var connection: any InterpreterConnection {
