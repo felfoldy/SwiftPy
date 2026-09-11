@@ -130,6 +130,7 @@ public final class Interpreter {
         bindPathlib()
         bindAsyncio()
         bindInterpreter()
+        bindStorage()
 
         #if !cpython
         bindBuiltins()
@@ -139,7 +140,6 @@ public final class Interpreter {
         bindKeyring()
         bindKeychain()
         bindEmbeddings()
-        bindStorage()
 
         registerBridge()
         #endif

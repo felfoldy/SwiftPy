@@ -91,19 +91,5 @@ extension Interpreter {
             module.class(Peer.self)
         }
     }
-
-    func bindStorage() {
-        bindModule("storage.native") { module in
-            if #available(macOS 15, iOS 18, visionOS 2, *) {
-                module.classes(
-                    Store.self,
-                    ModelData.self,
-                    LookupKeyValue.self,
-                )
-            }
-        }
-
-        bindModule("storage", in: .module)
-    }
 }
 #endif
