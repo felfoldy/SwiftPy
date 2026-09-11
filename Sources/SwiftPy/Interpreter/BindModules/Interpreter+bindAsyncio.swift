@@ -46,13 +46,7 @@ extension Interpreter {
                 """
             ) { argc, argv in
                 PyBind.function(argc, argv) { (seconds: Double) -> AsyncTask in
-                    #if cpython
-                    // AsyncSleep presents itself as a view, which CPython has
-                    // no bridge for yet: the bare task until it does.
                     AsyncTask { try await Task.sleep(for: .seconds(seconds)) }
-                    #else
-                    AsyncSleep(seconds: seconds).task
-                    #endif
                 }
             }
 
