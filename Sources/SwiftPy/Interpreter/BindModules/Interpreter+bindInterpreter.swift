@@ -60,9 +60,26 @@ extension Interpreter {
                 }
             }
 
+            // What a console cell echoes an expression's value through: a
+            // view is presented, anything else prints as its repr.
+            module.def("_displayhook(value) -> None") { argc, argv in
+                PyBind.function(argc, argv) { (value: PyObject?) -> Void in
+                    guard let value else { return }
+                    Interpreter.shared.connection.display(viewObject: value.reference)
+                }
+            }
+
             let appVersion = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? ""
             module.app_version = appVersion
             module.pocketpy_version = py.version
+
+            #if cpython
+            // pocketpy reaches the hook through a callback; CPython through sys.
+            if let hook: PyObject = module._displayhook {
+                py.module("sys")?.displayhook = hook
+            }
+            py.module("builtins")?.View = PyType.View.object
+            #endif
         }
 
         bindModule("interpreter", in: .module)
