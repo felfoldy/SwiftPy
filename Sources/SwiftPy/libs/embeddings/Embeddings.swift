@@ -71,7 +71,6 @@ public final class Embeddings {
     }
 }
 
-#if !cpython
 extension Interpreter {
     func bindEmbeddings() {
         bindModule("embeddings", docs: """
@@ -141,4 +140,3 @@ extension Interpreter {
         }
     }
 }
-#endif

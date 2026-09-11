@@ -9,6 +9,7 @@ import Testing
 @testable import SwiftPy
 
 @MainActor
+@Suite(.serialized)
 struct TraceTests {
     /// Records the events delivered to a trace function for later assertions.
     @MainActor
@@ -108,5 +109,23 @@ struct TraceTests {
 
         #expect(first.entries.isEmpty)
         #expect(!second.entries.isEmpty)
+    }
+
+    @Test func lineTracerRecordsScriptContext() async throws {
+        let tracer = LineTracer()
+        Interpreter.enableTrace()
+        defer { Interpreter.disableTrace() }
+
+        let code = try Interpreter.compile(
+            "first = 1\nsecond = 2",
+            filename: "<script>/42"
+        )
+        _ = try await Interpreter.withOutputCapture(tracer) {
+            try await Interpreter.execute(code)
+        }
+
+        #expect(tracer.entries.map(\.lineNumber) == [1, 2])
+        #expect(tracer.entries.allSatisfy { $0.contextId == 42 })
+        #expect(tracer.lastLine(forContext: 42) == 2)
     }
 }

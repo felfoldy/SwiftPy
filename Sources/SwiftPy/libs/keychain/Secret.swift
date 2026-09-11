@@ -31,11 +31,13 @@ public final class Secret {
     public init(name: String) {
         self.name = name
     }
+
+    public func prefixed(_ prefix: String) -> SecretExpression {
+        SecretExpression(secret: self, prefix: prefix)
+    }
 }
 
 extension Secret {
-    // Declared in an extension, which `@Scriptable` does not read, so the value
-    // reaches Swift callers without becoming a Python attribute.
     /// The stored value, read from the keychain on each access.
     public var value: String? {
         Keychain.storage.value(for: name)

@@ -126,9 +126,66 @@ def _class_lines(cls):
     return lines
 
 
+def _available_modules():
+    # Enumerate what this interpreter ships, not the full CPython distribution.
+    # iter_modules consults sys.path (including zip files) without executing
+    # discovered modules. Recompute so later registrations and paths appear.
+    try:
+        import pkgutil
+        import sys
+        import _imp
+    except ImportError:
+        return _registered_modules()
+    names = set(_registered_modules())
+    names.update(sys.builtin_module_names)
+    names.update([name for name, module in list(sys.modules.items()) if module is not None])
+    names.update(_imp._frozen_module_names())
+    names.update([info.name for info in pkgutil.iter_modules()])
+    # SwiftPy's source importer also searches these locations outside sys.path.
+    import os
+    from pathlib import Path
+    directories = [os.getcwd()]
+    try:
+        site = str(Path.site_packages())
+        directories.append(site)
+        directories.extend([os.path.join(site, entry) for entry in os.listdir(site) if os.path.isdir(os.path.join(site, entry))])
+    except OSError:
+        pass
+    for directory in directories:
+        try:
+            names.update([entry[:-3] for entry in os.listdir(directory) if entry.endswith('.py') and os.path.isfile(os.path.join(directory, entry))])
+        except OSError:
+            pass
+    return sorted([
+        name for name in names
+        if '.' not in name and not name.startswith('_') and name.isidentifier()
+    ])
+
+
 def _module_doc(name):
     try:
-        doc = getattr(__import__(name), '__doc__', None)
+        import sys
+        if getattr(getattr(sys, 'implementation', None), 'name', None) == 'cpython':
+            # Listing help must not import arbitrary user modules for their docs.
+            module = sys.modules.get(name)
+            doc = getattr(module, '__doc__', None) if module is not None else None
+            if module is None:
+                import importlib.util
+                import ast
+                spec = importlib.util.find_spec(name)
+                loader = spec.loader if spec is not None else None
+                source = loader.get_source(name) if hasattr(loader, 'get_source') else None
+                if source:
+                    tree = ast.parse(source)
+                    doc = ast.get_docstring(tree)
+                    if doc is None:
+                        for node in tree.body:
+                            if isinstance(node, ast.Assign) and any([isinstance(t, ast.Name) and t.id == '__doc__' for t in node.targets]):
+                                if isinstance(node.value, ast.Constant) and isinstance(node.value.value, str):
+                                    doc = node.value.value
+                                    break
+        else:
+            doc = getattr(__import__(name), '__doc__', None)
         if doc:
             return doc.strip().split("\n")[0]
     except:
@@ -145,7 +202,7 @@ def _module_summary(name):
 
 def _modules_lines():
     lines = ["Registered modules:", ""]
-    for name in _registered_modules():
+    for name in _available_modules():
         lines.append("  " + _module_summary(name))
     return lines
 
@@ -578,7 +635,7 @@ def _parent_reference_path(path):
 
 def _modules_markdown():
     lines = ["| Module | Description |", "| --- | --- |"]
-    for name in _registered_modules():
+    for name in _available_modules():
         doc = _module_doc(name) or ""
         # A pipe in a summary would end the cell early.
         lines.append("| " + _reference_markdown(name) + " | " + doc.replace("|", "\\|") + " |")

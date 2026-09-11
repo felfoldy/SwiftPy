@@ -32,8 +32,6 @@ public final class LineTracer {
         entries.last { $0.contextId == id }?.lineNumber
     }
 
-#if !cpython
-    // The trace hook itself is pocketpy's; CPython needs PyEval_SetTrace.
     func record(_ frame: PyAPI.Frame, _ event: PyAPI.TraceEvent) {
         guard event == .line,
               let source = frame.sourceLocation,
@@ -46,23 +44,17 @@ public final class LineTracer {
             time: startInstant.duration(to: clock.now)
         ))
     }
-#endif
 }
 
 public extension Interpreter {
-    /// No-ops under CPython: the hook is pocketpy's, and the equivalent needs
-    /// `PyEval_SetTrace`. The API stays so callers need not branch.
+    /// Enables line tracing for the active interpreter backend.
     static func enableTrace() {
-#if !cpython
         py.setTrace { frame, event in
             InterpreterExecutionContext.current.traceRecorder?.record(frame, event)
         }
-#endif
     }
 
     static func disableTrace() {
-#if !cpython
         py.setTrace(nil)
-#endif
     }
 }

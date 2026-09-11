@@ -88,8 +88,12 @@ public final class Interpreter {
             .filter { name in
                 // A leading underscore marks a module as private, the way it
                 // marks anything else in Python.
+                #if cpython
+                !name.contains(".") && !name.contains("/")
+                #else
                 !name.contains(".") && !name.contains("/")
                     && !name.hasPrefix("_") && !hiddenModules.contains(name)
+                #endif
             }
             .sorted()
     }
@@ -136,13 +140,15 @@ public final class Interpreter {
         bindBuiltins()
         bindOS()
         bindSys()
-        bindP2P()
+        
         bindKeyring()
-        bindKeychain()
-        bindEmbeddings()
-
+        
         registerBridge()
         #endif
+
+        bindP2P()
+        bindKeychain()
+        bindEmbeddings()
 
         // Bundled source-only modules. `keyword` is only reached on pocketpy:
         // CPython's own comes first on sys.meta_path.

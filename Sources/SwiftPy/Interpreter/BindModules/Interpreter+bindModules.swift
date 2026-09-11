@@ -85,11 +85,13 @@ extension Interpreter {
         let sys = py.module("sys")
         sys?.os = osName
     }
-    
+}
+#endif
+
+extension Interpreter {
     func bindP2P() {
         bindModule("p2p", docs: "Peer-to-peer discovery and messaging.") { module in
             module.class(Peer.self)
         }
     }
 }
-#endif
