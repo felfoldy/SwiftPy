@@ -10,6 +10,8 @@ import SwiftPy
 
 @MainActor
 struct PyAPITests {
+    // PyRef.bind is pocketpy's; CPython binds through PyType/PyModule.
+    #if !cpython
     @Test func setAttribute() throws {
         let main = py.main
 
@@ -37,6 +39,8 @@ struct PyAPITests {
         #expect(main.x?.param == nil)
     }
     
+    #endif
+
     @Test func referenceCall() throws {
         Interpreter.run("""
         def add(a, b):

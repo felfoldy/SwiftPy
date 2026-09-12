@@ -23,28 +23,18 @@ jobs:
         with:
           xcode-version: latest-stable
 
+      # pocketpy is the only backend a fresh checkout can build: the cpython
+      # default needs a libpython staged locally by that package's build.sh.
       - name: Run tests
-        env:
-          LLVM_PROFILE_FILE: ${{ runner.temp }}/SwiftPy-%p.profraw
-        run: |
-          set -o pipefail
-          xcodebuild test \
-            -scheme SwiftPy \
-            -testPlan SwiftPy \
-            -destination 'platform=macOS' \
-            -derivedDataPath DerivedData \
-            -parallel-testing-enabled NO \
-            -parallel-testing-worker-count 1 \
-            -enableCodeCoverage YES \
-            CODE_SIGNING_ALLOWED=NO
+        run: swift test --traits pocketpy --enable-code-coverage
 
       - name: Export coverage (lcov)
         run: |
-          PROFDATA=$(find DerivedData -name '*.profdata' | head -1)
-          BIN="$(find DerivedData/Build/Products -name 'SwiftPyTests.xctest' | head -1)/Contents/MacOS/SwiftPyTests"
+          PROFDATA=$(swift test --traits pocketpy --show-codecov-path | sed 's|/codecov/.*|/codecov/default.profdata|')
+          BIN=$(find .build -name 'SwiftPyPackageTests.xctest' | head -1)/Contents/MacOS/SwiftPyPackageTests
           xcrun llvm-cov export -format=lcov \
             -instr-profile "$PROFDATA" "$BIN" \
-            -ignore-filename-regex='(Tests|DerivedData|\.build|checkouts|pocketpy)/' \
+            -ignore-filename-regex='(Tests|\.build|checkouts|pocketpy)/' \
             > coverage.lcov
           echo "lcov lines: $(wc -l < coverage.lcov)"
 

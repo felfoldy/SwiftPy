@@ -19,7 +19,7 @@ private class SUT: PythonBindable {
     
     init(keyword: String? = nil) throws {
         if keyword == "bad" {
-            throw PythonError.NameError("Bad argument")
+            throw PythonError.ValueError("Bad argument")
         }
         self.member = keyword
     }
@@ -124,7 +124,7 @@ struct FunctionOverloadTests {
 
         let sut: SUT? = py.main.sut
         #expect(sut == nil)
-        #expect(py.main.error_type == "NameError")
+        #expect(py.main.error_type == "ValueError")
 
         let message: String = try #require(py.main.error_message)
         #expect(message.contains("Bad argument"))

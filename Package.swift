@@ -16,11 +16,17 @@ let package = Package(
             ]
         ),
     ],
+    // One backend at a time; enabling both links pocketpy for nothing.
     traits: [
         .trait(
             name: "cpython",
-            description: "Embed CPython from libswiftpy/cpython alongside pocketpy."
+            description: "Embed CPython from libswiftpy/cpython."
         ),
+        .trait(
+            name: "pocketpy",
+            description: "Embed the bundled pocketpy instead of CPython."
+        ),
+        .default(enabledTraits: ["cpython"]),
     ],
     dependencies: [
         .package(url: "https://github.com/swiftlang/swift-syntax.git", from: "601.0.0"),
@@ -29,7 +35,7 @@ let package = Package(
         .target(
             name: "SwiftPy",
             dependencies: [
-                "PocketPython",
+                .target(name: "PocketPython", condition: .when(traits: ["pocketpy"])),
                 "SwiftPyMacros",
                 .product(name: "Python", package: "cpython", condition: .when(traits: ["cpython"])),
             ],
