@@ -28,7 +28,7 @@ private let allocateEmptyView: PyAPI.CFunction = { cls, _ in
 }
 
 @MainActor
-extension AnyView: PythonConvertible {
+extension AnyView: @retroactive PythonConvertible {
     public static let pyType: PyType = {
         let type = py.newtype(
             name: "AnyView",
