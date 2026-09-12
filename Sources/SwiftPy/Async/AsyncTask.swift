@@ -141,7 +141,10 @@ public class AsyncTask: PythonBindable {
     public func resume() {
         guard let work = pendingWork else { return }
         pendingWork = nil
-        traceEntry = InterpreterExecutionContext.current.traceRecorder?.entries.last
+        let context = InterpreterExecutionContext.current
+        traceEntry = context.traceRecorder?.entries.last {
+            $0.contextId == context.contextId
+        }
         notifyTaskActivity(isActive: true)
         let cancellation = InterpreterExecutionContext.current.cancellation
         let task = Task { [self] in

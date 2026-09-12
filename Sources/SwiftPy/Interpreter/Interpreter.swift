@@ -47,6 +47,7 @@ public final class Interpreter {
     static let shared = Interpreter()
 
     var moduleFactory: [String: (PyRef?) -> Void] = [:]
+    var registeredNativeModules: Set<String> = []
 
     /// Python source registered from bundles, keyed by file name (e.g. `"module.py"`).
     var registeredSources: [String: String] = [:]
@@ -79,7 +80,7 @@ public final class Interpreter {
             "keyword",
             "rlcompleter",
         ]
-        let nativeModules = moduleFactory.keys
+        let nativeModules = registeredNativeModules.union(moduleFactory.keys)
         let sourceModules = registeredSources.keys.map { name in
             name.hasSuffix(".py") ? String(name.dropLast(3)) : name
         }

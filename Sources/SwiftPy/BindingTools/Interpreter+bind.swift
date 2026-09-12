@@ -10,6 +10,7 @@ import Foundation
 extension Interpreter {
     /// Internal module binding.
     func bindModule(_ name: String, docs: String? = nil, block: @escaping (PyModule) -> Void) {
+        registeredNativeModules.insert(name)
 #if cpython
         // Made at startup rather than on import: the lazy-import hook is
         // pocketpy's, and CPython has no equivalent bound yet.

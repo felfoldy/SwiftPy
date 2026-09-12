@@ -32,10 +32,14 @@ public final class Secret {
         self.name = name
     }
 
+    /// Returns a protected expression with text prepended to the secret value.
+    /// 
+    /// prefix: The text to prepend.
     public func prefixed(_ prefix: String) -> SecretExpression {
         SecretExpression(secret: self, prefix: prefix)
     }
 
+    /// Returns a protected expression for an HTTP Bearer authorization value.
     public func bearer() -> SecretExpression {
         prefixed("Bearer ")
     }
