@@ -155,8 +155,8 @@ public final class Interpreter {
         bindModule("interpreter.help", in: .module)
         #if !cpython
         bindModule("keyword", in: .pocketPythonResources)
+        bindModule("rlcompleter", in: .pocketPythonResources)
         #endif
-        bindModule("rlcompleter", in: .module)
         bindModule("modeling", in: .module)
     }
 
