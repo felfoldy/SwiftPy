@@ -1,5 +1,3 @@
-// Not ported to CPython yet; see the migration notes.
-#if !cpython
 //
 //  PyBridge+SwiftPy.swift
 //  SwiftPy
@@ -15,17 +13,19 @@ extension Interpreter {
     func registerBridge() {
         PyBridge.implicitCasts = [
             .str: [Path.pyType],
-            AnyView.pyType: [.View],
         ]
 
         PyBridge.stringConversions = [
             Path.pyType: { Path($0)?.url.path ?? "" }
         ]
 
+        // View casting and boxing are not ported to CPython yet; see the migration notes.
+        #if !cpython
+        PyBridge.implicitCasts[AnyView.pyType] = [.View]
+
         PyBridge.box = { value, reference in
             SwiftObject(value).toPython(reference)
         }
+        #endif
     }
 }
-
-#endif

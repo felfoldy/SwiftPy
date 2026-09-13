@@ -5,6 +5,8 @@
 //  Created by Tibor Felföldy on 2025-10-26.
 //
 
+// pocketpy has no pathlib; CPython wraps the stdlib one, see Path+CPython.swift.
+#if !cpython
 import Foundation
 
 /// A filesystem path that provides Python-style path inspection and file operations.
@@ -211,18 +213,7 @@ public final class Path {
     /// Application Support/site-packages directory. Kept out of Documents so
     /// installed packages stay hidden from the Files app.
     public static func sitePackages() throws -> Path {
-        let sitePackagesUrl = URL.applicationSupportDirectory
-            .appending(path: "site-packages", directoryHint: .isDirectory)
-        let path = Path(url: sitePackagesUrl)
-
-        if !FileManager.default.fileExists(atPath: sitePackagesUrl.path) {
-            try FileManager.default.createDirectory(
-                at: sitePackagesUrl,
-                withIntermediateDirectories: true
-            )
-        }
-
-        return path
+        Path(url: try .sitePackages())
     }
 
     func __truediv__(_ other: String) -> Path {
@@ -235,3 +226,4 @@ extension Path: CustomStringConvertible {
         url.path
     }
 }
+#endif

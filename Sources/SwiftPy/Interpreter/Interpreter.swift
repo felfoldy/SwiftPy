@@ -43,8 +43,12 @@ public final class Interpreter {
     /// unbounded execution.
     public static var timeout: Int? = 1000
 
+    private static var _shared: Interpreter?
+
     @usableFromInline
-    static let shared = Interpreter()
+    static var shared: Interpreter {
+        _shared ?? Interpreter()
+    }
 
     var moduleFactory: [String: (PyRef?) -> Void] = [:]
     var registeredNativeModules: Set<String> = []
@@ -111,7 +115,13 @@ public final class Interpreter {
         // Store builtin exec and eval.
         builtinExec = py.getbuiltin("exec")!.pointee._cfunc
         builtinEval = py.getbuiltin("eval")!.pointee._cfunc
+        #endif
 
+        // Published before the bindings run: an import at startup (pathlib's
+        // optional pwd/grp) reaches the source finder, which needs `shared`.
+        Self._shared = self
+
+        #if !cpython
         bindFunctools()
         py.installPocketPyModule()
 
@@ -143,9 +153,8 @@ public final class Interpreter {
         bindSys()
         
         bindKeyring()
-        
-        registerBridge()
         #endif
+        registerBridge()
 
         bindP2P()
         bindKeychain()

@@ -44,12 +44,24 @@ public struct ThrowingPyObject {
 
     @discardableResult
     public func callAsFunction(_ args: (any PythonConvertible)?...) throws(PythonError) -> ThrowingPyObject {
-        ThrowingPyObject(py.retain(try py.call(object.reference, unpacking: args)))
+        try call(unpacking: args)
     }
 
     @discardableResult
     @_disfavoredOverload
     public func callAsFunction<Result: PythonConvertible>(_ args: (any PythonConvertible)?...) throws(PythonError) -> Result {
+        try call(unpacking: args)
+    }
+
+    /// The same calls with the arguments already in an array.
+    @discardableResult
+    public func call(unpacking args: [(any PythonConvertible)?]) throws(PythonError) -> ThrowingPyObject {
+        ThrowingPyObject(py.retain(try py.call(object.reference, unpacking: args)))
+    }
+
+    @discardableResult
+    @_disfavoredOverload
+    public func call<Result: PythonConvertible>(unpacking args: [(any PythonConvertible)?]) throws(PythonError) -> Result {
         try .cast(try py.call(object.reference, unpacking: args))
     }
 }

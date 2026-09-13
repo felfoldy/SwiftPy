@@ -25,13 +25,13 @@ struct RegisteredSourceImporter: FileImporter {
 
 struct WorkingDirectoryImporter: FileImporter {
     func source(name: String) -> String? {
-        try? String(contentsOf: Path.cwd().url.appending(path: name), encoding: .utf8)
+        try? String(contentsOf: URL.currentDirectory().appending(path: name), encoding: .utf8)
     }
 }
 
 struct SitePackagesImporter: FileImporter {
     func source(name: String) -> String? {
-        guard let sitePackages = try? Path.sitePackages().url else {
+        guard let sitePackages = try? URL.sitePackages() else {
             return nil
         }
 
