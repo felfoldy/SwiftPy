@@ -61,7 +61,9 @@ let package = Package(
         ),
         .target(
             name: "PocketPython",
-            dependencies: ["pocketpy"]
+            dependencies: ["pocketpy"],
+            // Stdlib pocketpy lacks; CPython brings its own.
+            resources: [.process("Resources")]
         ),
         .target(
             name: "pocketpy",

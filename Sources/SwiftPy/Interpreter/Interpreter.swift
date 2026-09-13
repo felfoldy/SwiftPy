@@ -151,10 +151,10 @@ public final class Interpreter {
         bindKeychain()
         bindEmbeddings()
 
-        // Bundled source-only modules. CPython ships its own keyword.
+        // Bundled source-only modules.
         bindModule("interpreter.help", in: .module)
         #if !cpython
-        bindModule("keyword", in: .module)
+        bindModule("keyword", in: .pocketPythonResources)
         #endif
         bindModule("rlcompleter", in: .module)
         bindModule("modeling", in: .module)
