@@ -151,10 +151,11 @@ public final class Interpreter {
         bindKeychain()
         bindEmbeddings()
 
-        // Bundled source-only modules. `keyword` is only reached on pocketpy:
-        // CPython's own comes first on sys.meta_path.
+        // Bundled source-only modules. CPython ships its own keyword.
         bindModule("interpreter.help", in: .module)
+        #if !cpython
         bindModule("keyword", in: .module)
+        #endif
         bindModule("rlcompleter", in: .module)
         bindModule("modeling", in: .module)
     }
