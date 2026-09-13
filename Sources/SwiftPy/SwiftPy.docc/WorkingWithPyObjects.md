@@ -50,6 +50,14 @@ try py.main.logger?.info("started")
 
 Calls throw a ``PythonError`` if the Python side raises an exception.
 
+## Throw instead of nil
+
+The optional API folds a missing attribute, `None`, and a raised exception into `nil`. When the distinction matters, go through ``ThrowingPyObject``: lookups and calls throw the Python exception, and `None` is returned as an object.
+```swift
+let root: Double = try sys.throwing.modules.get("math").sqrt(2.0)
+try py.main.throwing.config.set("retries", to: 3)
+```
+
 ## Subscript dictionaries
 
 When a ``PyObject`` wraps a dictionary, subscript it by key. As with attributes, you can read the value as another ``PyObject`` or bridge it to a Swift type:
@@ -64,5 +72,6 @@ env?["version"] = 12
 ### Related
 
 - ``PyObject``
+- ``ThrowingPyObject``
 - ``PythonConvertible``
 - ``Interpreter``
