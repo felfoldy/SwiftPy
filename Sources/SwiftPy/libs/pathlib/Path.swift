@@ -210,8 +210,7 @@ public final class Path {
         Path(url: FileManager.default.temporaryDirectory)
     }
 
-    /// Application Support/site-packages directory. Kept out of Documents so
-    /// installed packages stay hidden from the Files app.
+    /// Directory of the installed packages.
     public static func sitePackages() throws -> Path {
         Path(url: try .sitePackages())
     }

@@ -41,7 +41,7 @@ extension Interpreter {
             Path.home = classmethod_of(paths.documents, "Documents directory.")
             Path.resources = classmethod_of(paths.resources, "The host bundle's resource directory.")
             Path.tmp = classmethod_of(paths.tmp, "The app's temporary directory. Safe to write scratch files to, but the system may purge its contents at any time.")
-            Path.site_packages = classmethod_of(paths.site_packages, "Application Support/site-packages directory. Kept out of Documents so installed packages stay hidden from the Files app.")
+            Path.site_packages = classmethod_of(paths.site_packages, "Directory of the installed packages.")
 
         _swiftpy_extend_pathlib()
         del _swiftpy_extend_pathlib
