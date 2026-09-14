@@ -19,8 +19,8 @@ typealias TaskResult = PythonConvertible & Sendable
 ///
 /// Use ``is_done`` to check whether work has finished and ``result`` to
 /// inspect a successful result without awaiting again. A running task can be
-/// stopped with ``cancel``, and the current task can publish console progress
-/// with ``set_progress``.
+/// stopped with ``cancel``, and a task handed out by a binding can publish
+/// console progress with ``set_progress``.
 ///
 /// ```python
 /// import asyncio
