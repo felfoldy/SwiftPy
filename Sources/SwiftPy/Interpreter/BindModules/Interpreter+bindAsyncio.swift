@@ -1,3 +1,30 @@
+extension Interpreter {
+    func bindAsyncio() {
+        #if cpython
+        // The stdlib asyncio, driven from Swift: see _swiftpy_asyncio.py.
+        bindModule("_swiftpy_loop") { module in
+            module.class(AsyncTask.self)
+
+            module.def("schedule(callback, delay: float) -> None") { argc, argv in
+                PyBind.function(argc, argv) { (callback: PyObject, delay: Double) in
+                    SwiftEventLoop.schedule(callback, after: delay)
+                }
+            }
+
+            module.def("resolve(token: int, future) -> None") { argc, argv in
+                PyBind.function(argc, argv) { (token: Int, future: PyObject) in
+                    SwiftEventLoop.resolve(token, future)
+                }
+            }
+        }
+        bindModule("_swiftpy_asyncio", in: .module)
+        #else
+        bindPocketPyAsyncio()
+        #endif
+    }
+}
+
+#if !cpython
 /// Starts the task and keeps it alive until its work finishes. ``AsyncTask``
 /// cancels itself when it is released, so a task nothing holds a reference to
 /// would stop the moment Python collects it.
@@ -8,7 +35,7 @@ private func detach(_ task: AsyncTask) {
 }
 
 extension Interpreter {
-    func bindAsyncio() {
+    func bindPocketPyAsyncio() {
         bindModule("asyncio", docs: """
         Run asynchronous Python code without blocking the console.
 
@@ -144,3 +171,4 @@ extension Interpreter {
         }
     }
 }
+#endif

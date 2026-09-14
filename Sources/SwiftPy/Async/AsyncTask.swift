@@ -91,17 +91,10 @@ public class AsyncTask: PythonBindable {
     /// hands back a real coroutine, which is sent into rather than iterated.
     init(generator: PyObject) throws(PythonError) {
 #if cpython
+        // The stdlib loop runs the coroutine as a Task; Swift waits for it.
         pendingWork = {
-            try await PyRuntime.drive(generator) { request in
-                // A stop request cancels this task; unwind instead of sending
-                // the coroutine forward again.
-                try Task.checkCancellation()
-
-                guard let task = AsyncTask(request) else {
-                    throw PythonError.TypeError("cannot await a \(request.typeName)")
-                }
-                return try await task.untilCompletes() ?? .none
-            }
+            let task = try SwiftEventLoop.module.throwing.loop.create_task(generator).object
+            return try await SwiftEventLoop.result(of: task)
         }
 #else
         let iterator = try py.retain(py.iter(generator.reference))
@@ -172,11 +165,12 @@ public class AsyncTask: PythonBindable {
     }
 
     /// CPython reaches an awaitable through `__await__`, which has to be an
-    /// iterator; this one hands the task to the coroutine driver.
+    /// iterator; this one is an asyncio future's, settled by the Swift work.
     func __await__() throws(PythonError) -> PyObject {
 #if cpython
         resume()
-        return try PyRuntime.awaitable(yielding: try toPython())
+        let future = try SwiftEventLoop.future(completing: self)
+        return try future.throwing.__await__().object
 #else
         // pocketpy awaits by iterating, so nothing calls this.
         throw .RuntimeError("__await__ is CPython's")
@@ -225,19 +219,15 @@ public class AsyncTask: PythonBindable {
     /// progress: Completion from `0.0` to `1.0`. Pass `None` to show
     /// indeterminate progress.
     ///
-    /// Returns `None`. Call this from asynchronous work on the value returned
-    /// by ``asyncio.current_task``.
+    /// Returns `None`. Call this on a task handed out by a binding, or on
+    /// pocketpy on ``asyncio.current_task``.
     ///
     /// ```python
     /// import asyncio
     ///
-    /// async def work():
-    ///     task = asyncio.current_task()
-    ///     for step in range(4):
-    ///         task.set_progress(step / 3)
-    ///         await asyncio.sleep(1)
-    ///
-    /// await work()
+    /// task = fetch_all()
+    /// task.set_progress(None)
+    /// await task
     /// ```
     public func setProgress(_ progress: Double?) {
         notifyTaskActivity(isActive: true, progress: progress)

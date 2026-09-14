@@ -167,6 +167,11 @@ public final class Interpreter {
         bindModule("rlcompleter", in: .pocketPythonResources)
         #endif
         bindModule("modeling", in: .module)
+
+        #if cpython
+        // Installs the running loop, so asyncio works before the first await.
+        _ = SwiftEventLoop.module
+        #endif
     }
 
     func compile(
