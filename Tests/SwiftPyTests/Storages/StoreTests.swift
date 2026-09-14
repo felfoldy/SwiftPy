@@ -39,14 +39,14 @@ struct StoreTests {
         """)
         
         // Backing data.
-        let data: ModelData = try #require(try evaluate("sword._data"))
-        #expect(data.json == #"{"name": "Sword", "quantity": 0, "description": null, "_icloud_id": null}"#)
-        #expect(data.keys?["__name__"] == "Item")
+        let handle: ModelHandle = try #require(try evaluate("sword._data"))
+        #expect(handle.json == #"{"name": "Sword", "quantity": 0, "description": null, "_icloud_id": null}"#)
         
         // Is inserted?
         let container: SwiftPy.Store = try #require(try evaluate("container"))
-        let models = try container.context.fetch(FetchDescriptor<ModelData>())
-        #expect(models == [data])
+        let row = try #require(try container.row(id: handle.id))
+        #expect(row.json == handle.json)
+        #expect(row.keys?["__name__"] == "Item")
     }
     
     @available(macOS 15, *)
@@ -62,8 +62,8 @@ struct StoreTests {
 
         let itemCount: Int = try #require(try evaluate("len(items)"))
         #expect(itemCount == 1)
-        let data: ModelData = try #require(try evaluate("items[0]._data"))
-        #expect(data.json == #"{"name": "Sword", "quantity": 0, "description": null, "_icloud_id": null}"#)
+        let handle: ModelHandle = try #require(try evaluate("items[0]._data"))
+        #expect(handle.json == #"{"name": "Sword", "quantity": 0, "description": null, "_icloud_id": null}"#)
     }
     
     @available(macOS 15, *)
@@ -74,16 +74,16 @@ struct StoreTests {
         container.insert(sword)
         """)
         
-        // Backing data.
-        let data: ModelData = try #require(try evaluate("sword._data"))
-        #expect(data.json == #"{"name": "Sword", "quantity": 0, "description": null, "_icloud_id": null}"#)
+        let container: SwiftPy.Store = try #require(try evaluate("container"))
+        let handle: ModelHandle = try #require(try evaluate("sword._data"))
         
         try run("""
         sword.description = "A great sword"
         sword.quantity += 1
         """)
 
-        #expect(data.json == #"{"name": "Sword", "quantity": 1, "description": "A great sword", "_icloud_id": null}"#)
+        let row = try #require(try container.row(id: handle.id))
+        #expect(row.json == #"{"name": "Sword", "quantity": 1, "description": "A great sword", "_icloud_id": null}"#)
     }
     
     @available(macOS 15, *)
@@ -101,11 +101,93 @@ struct StoreTests {
         
         let deletedCount: Int = try #require(try evaluate("len(container.fetch(Item))"))
         #expect(deletedCount == 0)
+
+        // Unstored: a change no longer reaches the store.
+        let isUnstored: Bool = try #require(try evaluate("sword._data is None"))
+        #expect(isUnstored)
+        try run("sword.quantity = 3")
+        let stillDeleted: Int = try #require(try evaluate("len(container.fetch(Item))"))
+        #expect(stillDeleted == 0)
         
-        // Check reinser
+        // Check reinsert
         try run("container.insert(sword)")
         let reinsertedCount: Int = try #require(try evaluate("len(container.fetch(Item))"))
         #expect(reinsertedCount == 1)
+    }
+
+    /// Another device deleting the row, merged by CloudKit under a held model.
+    @available(macOS 15, *)
+    @Test func changeAfterRemoteDeletionStoresAgain() throws {
+        try run("""
+        container = Store('remote_delete_testing', True)
+        sword = Item(name='Sword')
+        container.insert(sword)
+        """)
+        let container: SwiftPy.Store = try #require(try evaluate("container"))
+        let handle: ModelHandle = try #require(try evaluate("sword._data"))
+        let row = try #require(try container.row(id: handle.id))
+        container.context.delete(row)
+        try container.context.save()
+        #expect(try container.row(id: handle.id) == nil)
+
+        try run("sword.quantity = 2")
+
+        let restored = try #require(try container.row(id: handle.id))
+        #expect(restored.json.contains(#""quantity": 2"#))
+        let count: Int = try #require(try evaluate("len(container.fetch(Item))"))
+        #expect(count == 1)
+    }
+
+    /// Rows written before ids existed get one on their first fetch.
+    @available(macOS 15, *)
+    @Test func legacyRowsGetAnId() throws {
+        try run("container = Store('legacy_testing', True)")
+        let container: SwiftPy.Store = try #require(try evaluate("container"))
+        let legacy = ModelData(keys: [LookupKeyValue(key: "__name__", value: "Item")], json: #"{"name": "Old"}"#)
+        container.context.insert(legacy)
+
+        try run("items = container.fetch(Item)")
+        let handle: ModelHandle = try #require(try evaluate("items[0]._data"))
+        #expect(legacy.keys?["__id__"] == handle.id)
+
+        try run("items[0].quantity = 5")
+        #expect(legacy.json.contains(#""quantity": 5"#))
+    }
+
+    @available(macOS 15, *)
+    @Test func observeLocalSave() async throws {
+        try run("""
+        container = Store('observe_local_testing', True)
+        seen = []
+        observation = container.observe(Item, lambda items: seen.append(len(items)))
+        container.insert(Item(name='Sword'))
+        """)
+        let container: SwiftPy.Store = try #require(try evaluate("container"))
+        try container.context.save()
+        try await Task.sleep(for: .milliseconds(400))
+        let seen: [Int] = try #require(try evaluate("seen"))
+        #expect(seen == [1])
+    }
+
+    @available(macOS 15, *)
+    @Test func observe() async throws {
+        try run("""
+        container = Store('observe_testing', True)
+        seen = []
+        observation = container.observe(Item, lambda items: seen.append(len(items)))
+        container.insert(Item(name='Sword'))
+        """)
+        // What the CloudKit mirror posts after merging another device's changes.
+        NotificationCenter.default.post(name: .NSPersistentStoreRemoteChange, object: nil)
+        try await Task.sleep(for: .milliseconds(400))
+        let seen: [Int] = try #require(try evaluate("seen"))
+        #expect(seen == [1])
+
+        try run("observation.cancel()")
+        NotificationCenter.default.post(name: .NSPersistentStoreRemoteChange, object: nil)
+        try await Task.sleep(for: .milliseconds(400))
+        let seenAfterCancel: [Int] = try #require(try evaluate("seen"))
+        #expect(seenAfterCancel == [1])
     }
 
     private func run(_ source: String) throws {

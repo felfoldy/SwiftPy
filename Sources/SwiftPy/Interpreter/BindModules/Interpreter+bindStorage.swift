@@ -11,8 +11,8 @@ extension Interpreter {
             if #available(macOS 15, iOS 18, visionOS 2, *) {
                 module.classes(
                     Store.self,
-                    ModelData.self,
-                    LookupKeyValue.self,
+                    ModelHandle.self,
+                    StoreObservation.self,
                 )
             }
         }
