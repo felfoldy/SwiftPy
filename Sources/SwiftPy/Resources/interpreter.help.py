@@ -196,28 +196,58 @@ def _available_modules():
     ])
 
 
+def _code_docstring(code):
+    """The string a module's code stores as `__doc__`, docstring or assignment."""
+    import dis
+    previous = None
+    for instruction in dis.get_instructions(code):
+        if (instruction.opname == 'STORE_NAME' and instruction.argval == '__doc__'
+                and previous is not None and previous.opname == 'LOAD_CONST'
+                and isinstance(previous.argval, str)):
+            return previous.argval
+        previous = instruction
+    return None
+
+
+def _unimported_module_doc(name):
+    """A module's doc without running it: a listing must not execute user code.
+    Bytecode and source loaders hand out code objects; builtin modules are C
+    already linked into the interpreter, so importing those does nothing."""
+    import importlib.util
+    import importlib.machinery
+    spec = importlib.util.find_spec(name)
+    loader = spec.loader if spec is not None else None
+    if loader is None:
+        return None
+    if loader is importlib.machinery.BuiltinImporter:
+        return getattr(importlib.import_module(name), '__doc__', None)
+    if hasattr(loader, 'get_code'):
+        code = loader.get_code(name)
+        if code is not None:
+            return _code_docstring(code)
+    source = loader.get_source(name) if hasattr(loader, 'get_source') else None
+    if source:
+        import ast
+        tree = ast.parse(source)
+        doc = ast.get_docstring(tree)
+        if doc is None:
+            for node in tree.body:
+                if isinstance(node, ast.Assign) and any([isinstance(t, ast.Name) and t.id == '__doc__' for t in node.targets]):
+                    if isinstance(node.value, ast.Constant) and isinstance(node.value.value, str):
+                        return node.value.value
+        return doc
+    return None
+
+
 def _module_doc(name):
     try:
         import sys
         if getattr(getattr(sys, 'implementation', None), 'name', None) == 'cpython':
-            # Listing help must not import arbitrary user modules for their docs.
             module = sys.modules.get(name)
-            doc = getattr(module, '__doc__', None) if module is not None else None
-            if module is None:
-                import importlib.util
-                import ast
-                spec = importlib.util.find_spec(name)
-                loader = spec.loader if spec is not None else None
-                source = loader.get_source(name) if hasattr(loader, 'get_source') else None
-                if source:
-                    tree = ast.parse(source)
-                    doc = ast.get_docstring(tree)
-                    if doc is None:
-                        for node in tree.body:
-                            if isinstance(node, ast.Assign) and any([isinstance(t, ast.Name) and t.id == '__doc__' for t in node.targets]):
-                                if isinstance(node.value, ast.Constant) and isinstance(node.value.value, str):
-                                    doc = node.value.value
-                                    break
+            if module is not None:
+                doc = getattr(module, '__doc__', None)
+            else:
+                doc = _unimported_module_doc(name)
         else:
             doc = getattr(__import__(name), '__doc__', None)
         if doc:
