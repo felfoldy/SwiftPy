@@ -14,19 +14,21 @@ public extension PyRef {
     /// Written per backend rather than through shared primitives: `getattr`
     /// hands back a borrowed reference under pocketpy and an owned one under
     /// CPython, and only the owning side may drop it.
-    @inlinable
     var view: AnyView? {
 #if cpython
         if AnyView.pyType.isExactType(of: self) {
             return AnyView.fromPython(self)
         }
 
-        guard PyType.View.isInstance(self),
-              let body: PyObject = PyObject(retaining: self).body,
-              let produced = try? body() else {
+        guard PyType.View.isInstance(self), let body = bodyView else {
             return nil
         }
-        return produced.reference.view
+        // A Python subclass keeps state of its own, so its body is called
+        // again when that changes; a Swift-backed view is rendered once.
+        guard let state = ViewState.attached(to: PyObject(retaining: self)) else {
+            return body
+        }
+        return AnyView(PythonView(object: PyObject(retaining: self), state: state, initial: body))
 #else
         // Try AnyView. AnyView cannot be subclassed.
         if py.typeof(self) == AnyView.pyType,
@@ -44,6 +46,20 @@ public extension PyRef {
         return nil
 #endif
     }
+
+#if cpython
+    /// What the view's `body()` produces, or nil, with the error reported,
+    /// when it raises.
+    internal var bodyView: AnyView? {
+        let object = PyObject(retaining: self)
+        do {
+            return try object.throwing.body().object.reference.view
+        } catch {
+            Interpreter.shared.report(error)
+            return nil
+        }
+    }
+#endif
 
     /// The view a host presents for this object: its own, or a markdown block
     /// holding the pretty printed JSON of a dict or list.

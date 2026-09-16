@@ -79,6 +79,7 @@ extension Interpreter {
                 py.module("sys")?.displayhook = hook
             }
             py.module("builtins")?.View = PyType.View.object
+            ViewState.installSetattr()
             #endif
         }
 
