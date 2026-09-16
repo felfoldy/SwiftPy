@@ -122,14 +122,17 @@ extension Interpreter {
         Named secrets kept in the system keychain.
 
         A secret is referred to by name; its value never reaches Python, so it
-        cannot be printed or saved with a session. Secrets follow you to your
-        other devices through iCloud Keychain.
+        cannot be printed or saved with a session. Pass the secret itself as a
+        ``requests`` header value, or ``keychain.Secret/bearer()`` for an
+        `Authorization` header, and the value is filled in as the request is
+        sent. Secrets follow you to your other devices through iCloud Keychain.
 
         ```python
-        import keychain
+        import keychain, requests
 
         key = await keychain.secret("OPENAI_API_KEY")
         print(key)  # <Secret name="OPENAI_API_KEY">
+        response = await requests.get(url, headers={"Authorization": key.bearer()})
         keychain.delete(key)
         ```
         """) { module in
@@ -143,12 +146,15 @@ extension Interpreter {
 
                 key: The name the secret is stored under.
 
-                The value is written to the keychain and never returned to Python.
+                The value is written to the keychain and never returned to Python:
+                pass the secret, or its ``keychain.Secret/bearer()``, as a header
+                value to ``requests`` instead.
 
                 ```python
-                import keychain
+                import keychain, requests
 
-                key = await keychain.secret("OPENAI_API_KEY")
+                key = await keychain.secret("GITLAB_TOKEN")
+                response = await requests.get(url, headers={"PRIVATE-TOKEN": key})
                 ```
                 """
             ) { argc, argv in

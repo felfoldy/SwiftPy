@@ -9,14 +9,18 @@ import Foundation
 
 /// A secret stored in the system keychain, referred to by name.
 ///
-/// Python holds the name only; the value never leaves Swift. Get one with
-/// ``keychain.secret``, which asks for the value when the keychain has none.
+/// Python holds the name only; the value never leaves Swift, so there is no
+/// attribute to read it from. Get one with ``keychain.secret``, which asks
+/// for the value when the keychain has none, and pass it where the value is
+/// needed: a ``requests`` header takes a secret, or ``bearer()`` for an
+/// `Authorization` header, and fills the value in as the request is sent.
 ///
 /// ```python
-/// import keychain
+/// import keychain, requests
 ///
 /// key = await keychain.secret("OPENAI_API_KEY")
 /// print(key)  # <Secret name="OPENAI_API_KEY">
+/// response = await requests.get(url, headers={"Authorization": key.bearer()})
 /// ```
 @Scriptable
 @MainActor
