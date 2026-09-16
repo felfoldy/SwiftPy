@@ -164,8 +164,7 @@ struct StoreTests {
         """)
         let container: SwiftPy.Store = try #require(try evaluate("container"))
         try container.context.save()
-        try await Task.sleep(for: .milliseconds(400))
-        let seen: [Int] = try #require(try evaluate("seen"))
+        let seen = try await callbacks()
         #expect(seen == [1])
     }
 
@@ -179,8 +178,7 @@ struct StoreTests {
         """)
         // What the CloudKit mirror posts after merging another device's changes.
         NotificationCenter.default.post(name: .NSPersistentStoreRemoteChange, object: nil)
-        try await Task.sleep(for: .milliseconds(400))
-        let seen: [Int] = try #require(try evaluate("seen"))
+        let seen = try await callbacks()
         #expect(seen == [1])
 
         try run("observation.cancel()")
@@ -188,6 +186,17 @@ struct StoreTests {
         try await Task.sleep(for: .milliseconds(400))
         let seenAfterCancel: [Int] = try #require(try evaluate("seen"))
         #expect(seenAfterCancel == [1])
+    }
+
+    /// `seen` once the debounced refresh has called back, or as it stands
+    /// after a wait long enough to call the callback missing.
+    private func callbacks() async throws -> [Int] {
+        for _ in 0..<50 {
+            try await Task.sleep(for: .milliseconds(50))
+            let seen: [Int] = try #require(try evaluate("seen"))
+            if !seen.isEmpty { return seen }
+        }
+        return try #require(try evaluate("seen"))
     }
 
     private func run(_ source: String) throws {

@@ -46,8 +46,10 @@ struct CPythonBackendTests {
                 break
             }
         }
-        #expect(text.contains("ValueError: nope"))
-        #expect(text.contains("<script>/1"))
+        // The traceback is colorized; compare it without the escape codes.
+        let plain = text.replacing(/\u{1B}\[[0-9;]*m/, with: "")
+        #expect(plain.contains("ValueError: nope"))
+        #expect(plain.contains("<script>/1"))
         #expect(items.contains(.image(name: "exclamationmark.triangle")))
     }
 

@@ -175,7 +175,11 @@ struct LocalInterpreterConnectionTests {
         """)
 
         let runTask = Task { await connection.run(id: 1) }
-        try? await Task.sleep(for: .milliseconds(50))
+        // A stop before the run registers itself has nothing to cancel, so
+        // wait until the code has reached its await.
+        for _ in 0..<200 where (Interpreter.evaluate("_test_gather_flag") as Bool?) == nil {
+            try? await Task.sleep(for: .milliseconds(10))
+        }
 
         await connection.perform(.stop(id: 1))
         await runTask.value

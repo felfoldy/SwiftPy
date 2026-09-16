@@ -149,7 +149,7 @@ struct ScriptableTests {
     
     @Test func returningArgumentedFunction() async {
         let type = PyObject(TestClassWithProperties.pyType)
-        py.main.TestClass2 = type.reference
+        py.main.TestClass2 = type
 
         await Interpreter.run("""
         tc8 = TestClass2.create()

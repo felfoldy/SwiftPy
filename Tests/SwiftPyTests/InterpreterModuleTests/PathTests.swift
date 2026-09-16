@@ -9,6 +9,7 @@ import Testing
 @testable import SwiftPy
 import Foundation
 
+@MainActor
 struct PathTests {
     private func path(_ string: String) -> Path {
         Path(url: URL(filePath: string))

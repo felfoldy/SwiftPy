@@ -1054,7 +1054,7 @@ private class Responder: PythonBindable {
 
             prompt: What to respond to.
             """
-        ) { _, _ in true }
+        ) { _, _ in PyAPI.return { nil } }
 
         type.function(
             "respond(self, prompt: str, schema: Any) -> Any",
@@ -1064,6 +1064,6 @@ private class Responder: PythonBindable {
             prompt: What to respond to.
             schema: The type the response conforms to.
             """
-        ) { _, _ in true }
+        ) { _, _ in PyAPI.return { nil } }
     }
 }

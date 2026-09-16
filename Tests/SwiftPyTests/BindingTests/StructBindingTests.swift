@@ -5,6 +5,9 @@
 //  Created by Tibor Felföldy on 2026-05-27.
 //
 
+// Value types are bound by the pocketpy backend only: its userdata slot holds
+// the struct itself, where CPython's holds a retained class instance.
+#if pocketpy
 import SwiftPy
 import SwiftUI
 import Testing
@@ -105,3 +108,4 @@ struct StructBindingTests {
         #expect(py.main.b?.value == "default")
     }
 }
+#endif

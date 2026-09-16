@@ -17,9 +17,14 @@ struct ConversionTests {
     }
     
     @Test func optionalPyObjectConvertsNoneToNil() {
+        #if pocketpy
         let reference = py.pushtmp()
         defer { py.pop() }
         py.newnone(reference)
+        #else
+        let none = PyObject.none
+        let reference = none.reference
+        #endif
 
         let value = Optional<PyObject>.fromPython(reference)
 

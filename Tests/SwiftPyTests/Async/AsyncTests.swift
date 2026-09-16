@@ -69,6 +69,8 @@ struct AsyncTests {
         #expect(task != nil)
     }
     
+    #if !cpython
+    // pocketpy's coroutines are generators; CPython's refuse next().
     static var asyncTaskIterator_task: AsyncTask!
     
     @Test("AsyncTask iterator.")
@@ -101,6 +103,7 @@ struct AsyncTests {
 
         #expect(Interpreter.evaluate("iterate()") == 2)
     }
+    #endif
     
     @Test
     func asyncTaskFromGenerator() async throws {
