@@ -105,6 +105,8 @@ struct AsyncTests {
     }
     #endif
     
+    #if !cpython
+    // CPython refuses a return value in an async generator.
     @Test
     func asyncTaskFromGenerator() async throws {
         await Interpreter.run("""
@@ -117,6 +119,7 @@ struct AsyncTests {
         
         #expect(Interpreter.evaluate("asyncTaskFromGenerator_result") == 2)
     }
+    #endif
     
     @Test
     func chainAsyncTasks() async throws {
@@ -174,9 +177,13 @@ struct AsyncTests {
         awaitingPrintOnly_done = True
         """)
 
+        #if cpython
+        #expect(main.awaitingPrintOnly_done == true)
+        #else
         withKnownIssue("Awaiting a print-only async def should complete, not raise 'None is not iterable'") {
             #expect(main.awaitingPrintOnly_done == true)
         }
+        #endif
     }
 
     @Test func sleep() async {
@@ -224,7 +231,11 @@ struct AsyncTests {
 
         #expect(name == "asyncDecoratorPreserves_func")
         #expect(doc == "My docstring.")
+        #if cpython
+        #expect(annotationsString == "{'x': <class 'int'>}")
+        #else
         #expect(annotationsString == "{'x': 'int'}")
+        #endif
     }
 
     @Test

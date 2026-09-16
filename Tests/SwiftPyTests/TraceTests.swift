@@ -29,8 +29,10 @@ struct TraceTests {
             }
         }
 
-        func count(of event: PyAPI.TraceEvent) -> Int {
-            entries.filter { $0.event == event }.count
+        /// Only the cell's own frames: on CPython, compiling runs Python
+        /// helpers of its own under the same trace.
+        func count(of event: PyAPI.TraceEvent, inSource source: String) -> Int {
+            entries.filter { $0.event == event && $0.source == source }.count
         }
 
         func record(_ frame: PyAPI.Frame, _ event: PyAPI.TraceEvent) {
@@ -61,9 +63,7 @@ struct TraceTests {
 
         Interpreter.run("value = 1", filename: "<named>", mode: .execution)
 
-        let lineEntries = recorder.entries.filter { $0.event == .line }
-        #expect(!lineEntries.isEmpty)
-        #expect(lineEntries.allSatisfy { $0.source == "<named>" })
+        #expect(recorder.lines(inSource: "<named>") == [1])
     }
 
     @Test func pushAndPopAreBalancedAcrossCalls() {
@@ -79,8 +79,8 @@ struct TraceTests {
         """, filename: "<trace>", mode: .execution)
 
         // The module frame plus the `foo` call frame both push and pop.
-        #expect(recorder.count(of: .push) == 2)
-        #expect(recorder.count(of: .push) == recorder.count(of: .pop))
+        #expect(recorder.count(of: .push, inSource: "<trace>") == 2)
+        #expect(recorder.count(of: .pop, inSource: "<trace>") == 2)
     }
 
     @Test func setTraceNilRemovesTheHook() {

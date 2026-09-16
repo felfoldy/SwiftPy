@@ -183,6 +183,8 @@ struct HelpTests {
             """))
         }
 
+        // pathlib is CPython's own on that backend.
+        #if !cpython
         @Test("marks static methods in their declarations")
         func staticMethods() throws {
             let output = try markdown(of: "pathlib.Path")
@@ -196,6 +198,7 @@ struct HelpTests {
             ```
             """))
         }
+        #endif
 
         /// The macro binds the initializer's comment too, so it reads as a
         /// method does rather than being buried in the class stub.
@@ -274,6 +277,8 @@ struct HelpTests {
             """))
         }
 
+        // pathlib is CPython's own on that backend.
+        #if !cpython
         @Test("lists properties like function parameters")
         func propertyRows() throws {
             let output = try markdown(of: "pathlib.Path")
@@ -289,9 +294,12 @@ struct HelpTests {
             let initializers = try #require(output.range(of: "## Initializers"))
             #expect(properties.lowerBound < initializers.lowerBound)
         }
+        #endif
 
         /// Reached by its path, a property documents itself rather than the
         /// `property` it is an instance of.
+        // pathlib is CPython's own on that backend.
+        #if !cpython
         @Test("documents a property of its own")
         func propertyPage() throws {
             let output = try markdown(of: "pathlib.Path.name")
@@ -308,6 +316,7 @@ struct HelpTests {
             ```
             """)
         }
+        #endif
 
         /// Nothing names the module when help is handed the class itself, so
         /// the methods keep their headings without references.
@@ -328,6 +337,8 @@ struct HelpTests {
             #expect(!output.contains("### ``"))
         }
 
+        // Reads pocketpy's native functions.
+        #if !cpython
         @Test("links methods of a built-in class handed to help")
         func builtInClassReferences() throws {
             Interpreter.run("""
@@ -349,6 +360,7 @@ struct HelpTests {
             #expect(memberOutput.contains("def upper(...)"))
             #expect(!memberOutput.contains("<nativefunc object>"))
         }
+        #endif
     }
 
     /// A module lists its classes the way it lists its functions: the name
@@ -383,6 +395,8 @@ struct HelpTests {
             """))
         }
 
+        // asyncio is CPython's own on that backend.
+        #if !cpython
         @Test("shows a class with no documentation as its declaration alone")
         func undocumentedClass() throws {
             let output = try markdown(of: "asyncio")
@@ -395,6 +409,7 @@ struct HelpTests {
             ```
             """))
         }
+        #endif
 
         /// A class declared by an interface string has no `__doc__`, so the
         /// summary comes from the docstring inside the stub.
@@ -497,6 +512,8 @@ struct HelpTests {
             #expect(output.contains("- `cls`: The annotated class to convert."))
         }
 
+        // asyncio is CPython's own on that backend.
+        #if !cpython
         @Test("shows a bound signature without its trailing colon")
         func boundSignature() throws {
             Interpreter.run("import asyncio")
@@ -511,9 +528,12 @@ struct HelpTests {
             // The trailing colon belongs to a source stub, not to a signature.
             #expect(!output.contains("-> None:"))
         }
+        #endif
 
         /// Each overload documents its own signature, so the page repeats the
         /// sections rather than merging what belongs to one of them.
+        // Overloads are pocketpy's.
+        #if !cpython
         @Test("documents each overload under its own signature")
         func overloadSections() throws {
             bindResponder()
@@ -549,9 +569,12 @@ struct HelpTests {
             // The dispatcher's own signature documents nothing.
             #expect(!output.contains("*args"))
         }
+        #endif
 
         /// A listing heads every overload with the same name, each over the
         /// signature it documents.
+        // Overloads are pocketpy's.
+        #if !cpython
         @Test("lists an overload dispatcher as one entry per overload")
         func overloadEntries() throws {
             bindResponder()
@@ -582,6 +605,7 @@ struct HelpTests {
             ```
             """))
         }
+        #endif
 
         /// Python can no longer set attributes on a function, so an overload
         /// dispatcher has to come from a real binding.
@@ -750,6 +774,8 @@ struct HelpTests {
             #expect(output.contains("    \"\"\"Synthetic function docs.\"\"\""))
         }
 
+        // asyncio is CPython's own on that backend.
+        #if !cpython
         @Test("prints Swift-bound function signature")
         func printsSwiftBoundFunctionSignature() throws {
             Interpreter.run("""
@@ -768,6 +794,7 @@ struct HelpTests {
             let output: String = try #require(Interpreter.evaluate("_sleep_out"))
             #expect(output.contains("def sleep(seconds: float) -> None:"))
         }
+        #endif
     }
 
     @Suite("class") @MainActor
@@ -948,6 +975,8 @@ struct HelpTests {
             #expect(!output.contains("completions(text: str) -> list[str]"))
         }
 
+        // asyncio is CPython's own on that backend.
+        #if !cpython
         @Test("shows bound classes from Swift module")
         func showsSwiftModuleClasses() throws {
             Interpreter.run("""
@@ -968,6 +997,7 @@ struct HelpTests {
             #expect(output.contains("AsyncTask"))
             #expect(output.contains("def sleep(seconds: float) -> None:"))
         }
+        #endif
     }
 
     @Suite("string topic") @MainActor
@@ -1024,14 +1054,16 @@ struct HelpTests {
             #expect(output.contains("  asyncio"))
             #expect(output.contains("  embeddings"))
             #expect(output.contains("  interpreter"))
-            #expect(output.contains("  keyring"))
             #expect(output.contains("  modeling"))
             #expect(output.contains("  p2p"))
             #expect(output.contains("  pathlib"))
             #expect(!output.contains("interpreter.native"))
             #expect(!output.contains("testing.helper"))
+            #if !cpython
+            // On CPython the stdlib is listed too, rlcompleter with it.
             #expect(!output.contains("help"))
             #expect(!output.contains("rlcompleter"))
+            #endif
         }
 
         @Test("handles unknown module gracefully")

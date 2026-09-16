@@ -22,6 +22,13 @@ def _completions(text: str) -> list[str]:
     return completion_list
 
 
+def _json_markdown(value) -> str:
+    # Called from Swift for the display of a dict or list; Swift has no way
+    # to pass CPython's keyword-only indent.
+    import json
+    return json.dumps(value, indent=2)
+
+
 import builtins as _builtins
 
 # pocketpy's builtin dir is incomplete; the module only exists on that backend.

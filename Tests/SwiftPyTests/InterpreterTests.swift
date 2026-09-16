@@ -24,10 +24,13 @@ struct InterpreterTests {
         #expect(Interpreter.evaluate("\"they're bill's\".title()") == "They'Re Bill'S")
         #expect(Interpreter.evaluate("\"123abc foo-bar\".title()") == "123Abc Foo-Bar")
         #expect(Interpreter.evaluate("\"ßeta\".title()") == "Sseta")
+        #if !cpython
+        // The docstring of pocketpy's reimplementation.
         #expect(
             Interpreter.evaluate("str.title.__doc__")
                 == "Return a titlecased version of the string, with each word starting with an uppercase character."
         )
+        #endif
     }
 
     @Test func stringIsAlphanumeric() {
@@ -37,10 +40,12 @@ struct InterpreterTests {
         #expect(Interpreter.evaluate("'abc-123'.isalnum()") == false)
         #expect(Interpreter.evaluate("'é中١²'.isalnum()") == true)
         #expect(Interpreter.evaluate("'á'.isalnum()") == false)
+        #if !cpython
         #expect(
             Interpreter.evaluate("str.isalnum.__doc__")
                 == "Return True if the string is an alpha-numeric string, False otherwise."
         )
+        #endif
     }
 
     @Test func stringRSplit() {
@@ -58,7 +63,8 @@ struct InterpreterTests {
         #expect(Interpreter.evaluate("dir is None") == false)
     }
 
-    #if os(macOS)
+    // sys.os is pocketpy's; CPython has sys.platform.
+    #if os(macOS) && !cpython
     @Test func sysOS() throws {
         Interpreter.run("import sys")
         #expect(Interpreter.evaluate("sys.os") == "macos")

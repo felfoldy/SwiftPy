@@ -81,7 +81,12 @@ struct PyAPITests {
 
         let error = try #require(PythonError(py.main.err))
         #expect(error.type == .KeyError)
+        #if cpython
+        // str() of a KeyError is the repr of its key.
+        #expect(String(describing: error.value) == "'missing'")
+        #else
         #expect(String(describing: error.value) == "missing")
+        #endif
     }
 
     @Test func errorDescriptionFallsBackToValue() {

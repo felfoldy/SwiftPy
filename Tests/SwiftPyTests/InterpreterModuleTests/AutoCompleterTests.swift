@@ -21,11 +21,19 @@ struct AutoCompleterTests {
         #expect(py.main.x == "\t")
     }
 
+    // CPython's rlcompleter offers the call form for every callable match;
+    // the pocketpy one keeps a partial prefix plain, so it can still become
+    // `print.` or `print(`.
+    #if cpython
+    private static let partial = "("
+    #else
+    private static let partial = ""
+    #endif
+
     @Test()
     func globalMatches() {
-        // A partial prefix stays plain so it can still become `print.`/`print(`.
         Interpreter.run("x = completer.complete('pri', 0)")
-        #expect(py.main.x == "print")
+        #expect(py.main.x == "print" + Self.partial)
 
         // The whole name offers the call form (paren left open for the console).
         Interpreter.run("x = completer.complete('str', 0)")
@@ -33,9 +41,8 @@ struct AutoCompleterTests {
     }
 
     @Test func attributeMatches() {
-        // Partial attribute stays plain.
         Interpreter.run("x = completer.complete('completer.comp', 0)")
-        #expect(py.main.x == "completer.complete")
+        #expect(py.main.x == "completer.complete" + Self.partial)
 
         // Full attribute name offers the call form.
         Interpreter.run("x = completer.complete('completer.complete', 0)")
@@ -43,11 +50,10 @@ struct AutoCompleterTests {
     }
 
     @Test func complete() {
-        // Prefix matches are partial, so they stay plain.
         let completions = Interpreter.complete("s")
 
-        #expect(completions.contains("str"))
-        #expect(completions.contains("setattr"))
+        #expect(completions.contains("str" + Self.partial))
+        #expect(completions.contains("setattr" + Self.partial))
     }
     
     @Test func completeKeywords_addsColon() {

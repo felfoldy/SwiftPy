@@ -71,12 +71,15 @@ public extension PyRef {
         // Dumped through Python so the keys keep the order they were inserted in.
 #if cpython
         let boxed = PyObject(retaining: self)
+        guard let pretty: String = try? py.module("interpreter")?._json_markdown?(boxed) else {
+            return nil
+        }
 #else
         let boxed = PyObject(self)
-#endif
         guard let pretty: String = try? py.module("json")?.dumps?(boxed, 2) else {
             return nil
         }
+#endif
 
         return "```json\n\(pretty)\n```"
     }

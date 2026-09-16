@@ -151,8 +151,6 @@ public final class Interpreter {
         bindBuiltins()
         bindOS()
         bindSys()
-        
-        bindKeyring()
         #endif
         registerBridge()
 

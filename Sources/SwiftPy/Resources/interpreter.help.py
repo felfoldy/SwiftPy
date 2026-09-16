@@ -498,7 +498,9 @@ def _parameter_names(definition):
             if cut != -1:
                 name = name[:cut].strip()
         name = name.lstrip("*").strip()
-        if name and name != "self":
+        # A bare "/" or "*" marks where positional-only or keyword-only
+        # parameters end; it names nothing.
+        if name and name not in ("self", "/"):
             names.append(name)
     return names
 
@@ -828,6 +830,10 @@ def _class_initializers(cls):
     if initializer is None or not callable(initializer):
         return []
 
+    # object's own, inherited by every class that declares none.
+    if initializer is getattr(object, '__init__', None):
+        return []
+
     return [('__init__', initializer)]
 
 
@@ -859,7 +865,7 @@ def _class_property_names(cls):
         if type(attr).__name__ == 'property':
             names.append(attr_name)
 
-    for attr_name in getattr(cls, '__annotations__', None) or {}:
+    for attr_name in _class_annotations(cls):
         if not attr_name.startswith('_') and attr_name not in names:
             names.append(attr_name)
 
@@ -867,13 +873,29 @@ def _class_property_names(cls):
     return names
 
 
+def _class_annotations(cls):
+    # pocketpy stores annotations as their source; CPython holds the types,
+    # evaluated lazily since 3.14, and can render them back as source.
+    try:
+        import annotationlib
+    except ImportError:
+        return getattr(cls, '__annotations__', None) or {}
+    try:
+        return annotationlib.get_annotations(cls, format=annotationlib.Format.STRING)
+    except Exception:
+        return {}
+
+
 def _property_declaration(cls, name):
-    annotation = (getattr(cls, '__annotations__', None) or {}).get(name)
+    annotation = _class_annotations(cls).get(name)
     return name + ": " + annotation if annotation else name
 
 
 def _property_summary(cls, name):
     getter = getattr(getattr(cls, name, None), 'fget', None)
+    # An annotation-only name has no getter, and None has a docstring.
+    if getter is None:
+        return None
     doc = getattr(getter, '__doc__', None)
     if not doc:
         return None

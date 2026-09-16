@@ -5,6 +5,8 @@
 //  Created by Tibor Felföldy on 2026-05-31.
 //
 
+// Overloads are pocketpy's: on CPython the last binding of a name wins.
+#if !cpython
 import SwiftPy
 import Testing
 
@@ -187,3 +189,4 @@ struct FunctionOverloadTests {
         #expect(py.main.result == result)
     }
 }
+#endif

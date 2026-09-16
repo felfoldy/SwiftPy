@@ -150,14 +150,19 @@ struct PythonConvertibleClassTests {
 
         #expect(Interpreter.evaluate("first is second") == true)
 
+        #if !cpython
+        // Instances of a CPython bound type have no __dict__ (yet).
         Interpreter.run("first.extra = 99")
         #expect(Interpreter.evaluate("second.extra") == 99)
+        #endif
     }
 
     @Test func classAttribute() {
         #expect(main.TestClass?.text == "Hello")
     }
     
+    #if !cpython
+    // Picks between __init__ overloads, which only pocketpy has.
     @Test func createFromPython() throws {
         Interpreter.run("""
         init_with_number = TestClass(12)
@@ -168,6 +173,7 @@ struct PythonConvertibleClassTests {
         #expect(TestClass_init.number == nil)
         
     }
+    #endif
     
     @Test func pythonMutation() {
         let obj = TestClass(number: 32)
