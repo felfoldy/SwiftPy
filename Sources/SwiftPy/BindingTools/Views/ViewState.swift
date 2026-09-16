@@ -50,22 +50,27 @@ final class ViewState: PythonBindable {
         return state
     }
 
-    /// Routes every attribute write on a `View` to its box. Assigned from
-    /// Python so that the slot updates for the subclasses too.
+    /// Routes every attribute write on a `View` to its box. Set on the type,
+    /// the slot updates for its subclasses too.
     static func installSetattr() {
-        let source = """
-        def _view_setattr(self, name, value):
-            object.__setattr__(self, name, value)
-            state = getattr(self, '__dict__', {}).get('_view_state')
-            if state is not None:
-                state.invalidate()
-        View.__setattr__ = _view_setattr
-        """
-        do {
-            let namespace = try PyObject.newDict()
-            try Interpreter.execute(try Interpreter.compile(source), globals: namespace)
-        } catch {
-            log.error("Could not install View.__setattr__: \(error)")
+        PyType.View.function("__setattr__(self, name: str, value: Any) -> None") { receiver, args in
+            PyAPI.return {
+                let arguments = PyArguments(method: receiver, args)
+                guard let object = arguments[0].map(PyObject.init(retaining:)),
+                      let name = arguments[1].map(PyObject.init(retaining:)),
+                      let value = arguments[2].map(PyObject.init(retaining:)) else {
+                    throw PythonError.TypeError("__setattr__ takes an object, a name and a value")
+                }
+                // `object` itself, looked up as an attribute: `.object` on a
+                // throwing view is the box it wraps.
+                let base: PyObject = try py.module("builtins")!.throwing[dynamicMember: "object"]
+                try base.throwing.__setattr__(object, name, value)
+                let dict: PyObject? = object.__dict__
+                if let state: ViewState = dict?[ViewState.key] {
+                    state.invalidate()
+                }
+                return nil
+            }
         }
     }
 }
