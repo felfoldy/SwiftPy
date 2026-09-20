@@ -91,13 +91,14 @@ extension SUT {
 }
 
 @MainActor
+@Suite(.serialized)
 struct FunctionOverloadTests {
-    init() {
+    init() async {
         PyBind.module("FunctionOverloadTests") { module in
             module.class(SUT.self)
         }
 
-        Interpreter.run("from FunctionOverloadTests import SUT")
+        await Interpreter.run("from FunctionOverloadTests import SUT")
     }
     
     @Test(arguments: [
@@ -105,15 +106,15 @@ struct FunctionOverloadTests {
         ("sut = SUT()", String?.none),
         ("sut = SUT('test')", "test"),
     ])
-    func initOverloading(script: String, member: String?) throws {
-        Interpreter.run(script)
+    func initOverloading(script: String, member: String?) async throws {
+        await Interpreter.run(script)
         let sut: SUT = try #require(py.main.sut)
         #expect(sut.member == member)
     }
     
     @Test
-    func initBodyErrorIsPropagated() throws {
-        Interpreter.run("""
+    func initBodyErrorIsPropagated() async throws {
+        await Interpreter.run("""
         sut = None
         try:
             sut = SUT(keyword='bad')
@@ -139,8 +140,8 @@ struct FunctionOverloadTests {
         ("sut.update('hello')", "hello"),
         ("sut.update()", String?.none),
     ])
-    func functionOverload(script: String, member: String?) throws {
-        Interpreter.run("""
+    func functionOverload(script: String, member: String?) async throws {
+        await Interpreter.run("""
         sut = SUT()
         \(script)
         """)
@@ -160,8 +161,8 @@ struct FunctionOverloadTests {
     }
 
     @Test
-    func functionOverloadBodyErrorIsPropagated() throws {
-        Interpreter.run("""
+    func functionOverloadBodyErrorIsPropagated() async throws {
+        await Interpreter.run("""
         sut = SUT()
         try:
             sut.update(1, 2, 3)
@@ -184,8 +185,8 @@ struct FunctionOverloadTests {
         ("result = SUT.make('hello')", "hello"),
         ("result = SUT.make()", "none"),
     ])
-    func staticMethodOverload(script: String, result: String) throws {
-        Interpreter.run(script)
+    func staticMethodOverload(script: String, result: String) async throws {
+        await Interpreter.run(script)
         #expect(py.main.result == result)
     }
 }

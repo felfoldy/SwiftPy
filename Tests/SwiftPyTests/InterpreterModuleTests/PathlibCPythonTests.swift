@@ -11,9 +11,10 @@ import Testing
 
 // The stdlib pathlib with the app's locations, and Path bridging both ways.
 @MainActor
+@Suite(.serialized)
 struct PathlibCPythonTests {
-    @Test func stdlibPathWithExtras() throws {
-        try Interpreter.execute(try Interpreter.compile("""
+    @Test func stdlibPathWithExtras() async throws {
+        try await Interpreter.execute(try Interpreter.compile("""
         import pathlib
         from pathlib import Path
         assert isinstance(Path.home(), pathlib.PurePath)
@@ -26,7 +27,7 @@ struct PathlibCPythonTests {
         """))
     }
 
-    @Test func bindingsTakePathOrStr() throws {
+    @Test func bindingsTakePathOrStr() async throws {
         let module = py.newmodule("pathlib_test")!
         module.def("name(p: Path) -> str") { argc, argv in
             PyBind.function(argc, argv) { (p: Path) in p.name }
@@ -34,7 +35,7 @@ struct PathlibCPythonTests {
         module.def("text(s: str) -> str") { argc, argv in
             PyBind.function(argc, argv) { (s: String) in s }
         }
-        try Interpreter.execute(try Interpreter.compile("""
+        try await Interpreter.execute(try Interpreter.compile("""
         import pathlib_test
         from pathlib import Path
         assert pathlib_test.name(Path('/q/w.txt')) == 'w.txt'

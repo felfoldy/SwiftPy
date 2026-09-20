@@ -13,10 +13,10 @@ import Foundation
 /// initialization, optionals, `list` fields, `__repr__`, mutation tracking,
 /// and argument validation.
 @MainActor
-@Suite
+@Suite(.serialized)
 struct ModelDecoratorTests {
-    init() {
-        Interpreter.run("""
+    init() async {
+        await Interpreter.run("""
         from modeling import model
         import json
 
@@ -33,8 +33,8 @@ struct ModelDecoratorTests {
         """)
     }
 
-    @Test func appliesDefaults() {
-        Interpreter.run("item = Item()")
+    @Test func appliesDefaults() async {
+        await Interpreter.run("item = Item()")
         #expect(Interpreter.evaluate("item.name") == "")
         #expect(Interpreter.evaluate("item.quantity") == 0)
         #expect(Interpreter.evaluate("item.tags") == [String]())
@@ -42,20 +42,20 @@ struct ModelDecoratorTests {
         #expect(Interpreter.evaluate("item.description is None") == true)
     }
 
-    @Test func keywordInit() {
-        Interpreter.run("item = Item(name='Sword', quantity=2)")
+    @Test func keywordInit() async {
+        await Interpreter.run("item = Item(name='Sword', quantity=2)")
         #expect(Interpreter.evaluate("item.name") == "Sword")
         #expect(Interpreter.evaluate("item.quantity") == 2)
     }
 
-    @Test func positionalInit() {
-        Interpreter.run("item = Item('Sword', 3)")
+    @Test func positionalInit() async {
+        await Interpreter.run("item = Item('Sword', 3)")
         #expect(Interpreter.evaluate("item.name") == "Sword")
         #expect(Interpreter.evaluate("item.quantity") == 3)
     }
 
-    @Test func listField() {
-        Interpreter.run("""
+    @Test func listField() async {
+        await Interpreter.run("""
         item = Item()
         item.tags = item.tags + ['a', 'b']
         """)
@@ -63,41 +63,41 @@ struct ModelDecoratorTests {
         #expect(Interpreter.evaluate("type(item.tags).__name__") == "list")
     }
 
-    @Test func annotationsPreserveElementType() {
+    @Test func annotationsPreserveElementType() async {
         // The parametrized element type is retained on the annotation.
         #expect(Interpreter.evaluate("Item.__annotations__['tags']") == "list[str]")
     }
 
-    @Test func schemaReflectsFieldsAndTypes() {
+    @Test func schemaReflectsFieldsAndTypes() async {
         let schema: String? = Interpreter.evaluate("json.dumps(Item._schema)")
         #expect(schema == #"{"name": "Item", "properties": [{"name": "name", "type": "str", "default": ""}, {"name": "quantity", "type": "int", "default": 0}, {"name": "tags", "type": "list[str]", "default": []}, {"name": "description", "type": "str | None"}]}"#)
     }
 
-    @Test func schemaOmitsDefaultForFieldsWithoutOne() {
+    @Test func schemaOmitsDefaultForFieldsWithoutOne() async {
         // `description` has no default, so its schema entry has no 'default' key,
         // while `name` (which has one) does.
         #expect(Interpreter.evaluate("'default' in Item._schema['properties'][0]") == true)
         #expect(Interpreter.evaluate("'default' in Item._schema['properties'][3]") == false)
     }
 
-    @Test func repr() {
-        Interpreter.run("item = Item(name='Sword')")
+    @Test func repr() async {
+        await Interpreter.run("item = Item(name='Sword')")
         #expect(
             Interpreter.evaluate("repr(item)")
                 == "Item(name='Sword', quantity=0, tags=[], description=None)"
         )
     }
 
-    @Test func setterUpdatesFields() {
-        Interpreter.run("""
+    @Test func setterUpdatesFields() async {
+        await Interpreter.run("""
         item = Item()
         item.quantity = 5
         """)
         #expect(Interpreter.evaluate("item._fields['quantity']") == 5)
     }
 
-    @Test func missingRequiredArgumentRaises() {
-        Interpreter.run("""
+    @Test func missingRequiredArgumentRaises() async {
+        await Interpreter.run("""
         def _raises():
             try:
                 Required()
@@ -108,8 +108,8 @@ struct ModelDecoratorTests {
         #expect(Interpreter.evaluate("_raises()") == true)
     }
 
-    @Test func unexpectedKeywordRaises() {
-        Interpreter.run("""
+    @Test func unexpectedKeywordRaises() async {
+        await Interpreter.run("""
         def _raises():
             try:
                 Item(color='red')
@@ -120,8 +120,8 @@ struct ModelDecoratorTests {
         #expect(Interpreter.evaluate("_raises()") == true)
     }
 
-    @Test func tooManyPositionalArgumentsRaises() {
-        Interpreter.run("""
+    @Test func tooManyPositionalArgumentsRaises() async {
+        await Interpreter.run("""
         def _raises():
             try:
                 Item('a', 1, [], None, 'extra')

@@ -9,7 +9,7 @@ import pocketpy
 
 public extension PyAPI {
     /// A VM trace event, mirroring pocketpy's `py_TraceEvent`.
-    enum TraceEvent: Equatable {
+    nonisolated enum TraceEvent: Equatable, Sendable {
         /// About to execute a new source line.
         case line
         /// A frame was pushed (a call was entered).

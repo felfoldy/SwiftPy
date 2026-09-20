@@ -97,7 +97,7 @@ class SwiftEventLoop(asyncio.AbstractEventLoop):
         raise RuntimeError("the event loop is already running; use await instead")
 
     def run_in_executor(self, executor, func, *args):
-        raise NotImplementedError("run_in_executor: Python only runs on the main thread")
+        raise NotImplementedError("run_in_executor: Python has no thread pool here")
 
     async def shutdown_asyncgens(self):
         pass
@@ -156,6 +156,12 @@ def fail(future, type_name, message):
     if not isinstance(exception_type, type) or not issubclass(exception_type, BaseException):
         exception_type = RuntimeError
     future.set_exception(exception_type(message))
+
+
+def _install_on_this_thread():
+    """The running loop is kept per thread; this one runs on every thread
+    Python runs on, so each of them is told."""
+    events._set_running_loop(loop)
 
 
 def _run(main, **kwargs):

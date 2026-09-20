@@ -69,14 +69,15 @@ extension StructView: PythonValueBindable {
 }
 
 @MainActor
+@Suite(.serialized)
 struct StructBindingTests {
     init() {
         py.main.StructView = PyObject(StructView.pyType)
     }
     
     @Test
-    func initializerBinding() throws {
-        Interpreter.run("""
+    func initializerBinding() async throws {
+        await Interpreter.run("""
         view = StructView('content')
         value = view.value
         """)
@@ -87,8 +88,8 @@ struct StructBindingTests {
     }
     
     @Test
-    func setter() throws {
-        Interpreter.run("""
+    func setter() async throws {
+        await Interpreter.run("""
         view = StructView('content')
         view.value = 'new content'
         """)
@@ -98,8 +99,8 @@ struct StructBindingTests {
     }
 
     @Test
-    func staticMethodOverload() throws {
-        Interpreter.run("""
+    func staticMethodOverload() async throws {
+        await Interpreter.run("""
         a = StructView.make('content')
         b = StructView.make()
         """)

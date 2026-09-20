@@ -7,10 +7,10 @@ import Testing
 @testable import SwiftPy
 
 @MainActor
-@Suite("display json markdown")
+@Suite("display json markdown", .serialized)
 struct DisplayJSONTests {
-    init() {
-        Interpreter.run("import interpreter")
+    init() async {
+        await Interpreter.run("import interpreter")
     }
 
     private func markdown(_ source: String) -> String? {

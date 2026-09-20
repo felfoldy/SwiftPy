@@ -6,10 +6,11 @@
 //
 
 import Foundation
+import Synchronization
 
 /// Resolves Python source for a file name from a particular location.
-@MainActor
-protocol FileImporter {
+/// Nonisolated: CPython imports on whichever thread runs the code.
+protocol FileImporter: Sendable {
     /// Returns the contents of `name` if this importer can resolve it.
     ///
     /// - Parameter name: The file name to resolve (e.g. `"module.py"`).
@@ -17,9 +18,26 @@ protocol FileImporter {
     func source(name: String) -> String?
 }
 
+/// Sources registered from bundles, readable from any thread.
+final class SourceStore: Sendable {
+    private let storage = Mutex<[String: String]>([:])
+
+    subscript(name: String) -> String? {
+        storage.withLock { $0[name] }
+    }
+
+    var names: [String] {
+        storage.withLock { Array($0.keys) }
+    }
+
+    func register(_ source: String, as name: String) {
+        storage.withLock { $0[name] = source }
+    }
+}
+
 struct RegisteredSourceImporter: FileImporter {
     func source(name: String) -> String? {
-        Interpreter.shared.registeredSources[name]
+        Interpreter.registeredSources[name]
     }
 }
 
@@ -57,7 +75,7 @@ struct SitePackagesImporter: FileImporter {
 
 extension Interpreter {
     /// Importers consulted in order when resolving Python source.
-    static let fileImporters: [FileImporter] = [
+    nonisolated static let fileImporters: [FileImporter] = [
         WorkingDirectoryImporter(),
         RegisteredSourceImporter(),
         SitePackagesImporter(),
@@ -68,7 +86,7 @@ extension Interpreter {
     ///
     /// - Parameter name: The file name to resolve (e.g. `"module.py"`).
     /// - Returns: The file contents, or `nil` if no source could be found.
-    static func importFromSource(name: String) -> String? {
+    nonisolated static func importFromSource(name: String) -> String? {
         for importer in fileImporters {
             if let content = importer.source(name: name) {
                 return content
@@ -84,7 +102,7 @@ public extension Interpreter {
     ///
     /// - Parameter name: A module name (`"mylib"`), a dotted submodule name
     ///   (`"console.session"`), or a file name (`"mylib.py"`).
-    static func source(name: String) -> String? {
+    nonisolated static func source(name: String) -> String? {
         guard !name.hasSuffix(".py") else {
             return importFromSource(name: name)
         }

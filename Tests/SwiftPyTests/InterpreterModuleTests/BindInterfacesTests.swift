@@ -19,9 +19,10 @@ class TestClass4 {
 }
 
 @MainActor
+@Suite(.serialized)
 struct BindInterfacesTests {
-    init() {
-        Interpreter.run("import interpreter")
+    init() async {
+        await Interpreter.run("import interpreter")
 
         PyBind.module("test") { test in
             test.classes(
@@ -35,8 +36,8 @@ struct BindInterfacesTests {
         }
     }
     
-    @Test func helpOnModule() throws {
-        Interpreter.run("""
+    @Test func helpOnModule() async throws {
+        await Interpreter.run("""
         import builtins as _b
         import test
         _test_help_cap = []
@@ -54,8 +55,8 @@ struct BindInterfacesTests {
         #expect(output.contains("TestClass4"))
     }
 
-    @Test func moduleDocsParameterSetsDocstring() throws {
-        Interpreter.run("""
+    @Test func moduleDocsParameterSetsDocstring() async throws {
+        await Interpreter.run("""
         import documented_test
         _documented_test_doc = documented_test.__doc__
         """)

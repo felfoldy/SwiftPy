@@ -8,6 +8,7 @@ import Foundation
 @testable import SwiftPy
 
 @MainActor
+@Suite(.serialized)
 struct LocalInterpreterConnectionTests {
 
     // MARK: - complete

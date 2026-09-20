@@ -112,28 +112,29 @@ extension TestClass: PythonBindable {
 }
 
 @MainActor
+@Suite(.serialized)
 struct PythonConvertibleClassTests {
     let main = py.main
     let type = TestClass.pyType
     
-    @Test func returnCachedFromToPython() throws {
+    @Test func returnCachedFromToPython() async throws {
         let obj = TestClass(number: 12)
         
         #expect(obj._pythonCache.reference == nil)
         
         main.test3 = obj
         
-        Interpreter.run("test3.number")
+        await Interpreter.run("test3.number")
         #expect(obj._pythonCache.reference != nil)
         
         // Uses cache.
         main.test4 = obj
                 
-        Interpreter.run("del test3")
+        await Interpreter.run("del test3")
         try py.module("gc")?.collect?()
         #expect(obj._pythonCache.reference != nil)
         
-        Interpreter.run("del test4")
+        await Interpreter.run("del test4")
         try py.module("gc")?.collect?()
         #expect(obj._pythonCache.reference == nil)
     }
@@ -141,7 +142,7 @@ struct PythonConvertibleClassTests {
     /// The cache is what makes one Swift object one Python object. Without it
     /// each conversion makes a new wrapper, so `is` fails and anything Python
     /// put on the object is lost.
-    @Test func oneSwiftObjectIsOnePythonObject() {
+    @Test func oneSwiftObjectIsOnePythonObject() async {
         let obj = TestClass()
         obj.number = 5
 
@@ -152,19 +153,19 @@ struct PythonConvertibleClassTests {
 
         #if !cpython
         // Instances of a CPython bound type have no __dict__ (yet).
-        Interpreter.run("first.extra = 99")
+        await Interpreter.run("first.extra = 99")
         #expect(Interpreter.evaluate("second.extra") == 99)
         #endif
     }
 
-    @Test func classAttribute() {
+    @Test func classAttribute() async {
         #expect(main.TestClass?.text == "Hello")
     }
     
     #if !cpython
     // Picks between __init__ overloads, which only pocketpy has.
-    @Test func createFromPython() throws {
-        Interpreter.run("""
+    @Test func createFromPython() async throws {
+        await Interpreter.run("""
         init_with_number = TestClass(12)
         TestClass_init = TestClass()
         """)
@@ -209,7 +210,7 @@ struct PythonConvertibleClassTests {
         try #expect(main.test7?.__repr__?() == obj.description)
     }
     
-    @Test func staticFunc() throws {
+    @Test func staticFunc() async throws {
         let static_func = try #require(main.TestClass?.static_func)
         let result: TestClass = try #require(try static_func(10))
 

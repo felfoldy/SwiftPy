@@ -55,6 +55,7 @@ class TestClassWithProperties: PythonBindable {
 }
 
 @MainActor
+@Suite(.serialized)
 struct ScriptableTests {
     let main = py.main
     let type = TestClassWithProperties.pyType
@@ -64,7 +65,7 @@ struct ScriptableTests {
     ///
     /// The type is reached through an instance because binding it doesn't make
     /// its name a global.
-    @Test func bindsClassDocumentation() {
+    @Test func bindsClassDocumentation() async {
         main.tc_doc = TestClassWithProperties()
 
         #expect(Interpreter.evaluate("type(tc_doc).__doc__") == "The TestClass.")
@@ -72,26 +73,26 @@ struct ScriptableTests {
 
     /// The comment sits above `@Scriptable`, which is not the only attribute,
     /// so it is read from the declaration rather than from the attribute.
-    @Test func documentationIsReadPastOtherAttributes() {
+    @Test func documentationIsReadPastOtherAttributes() async {
         main.tc_iface = TestClassWithProperties()
 
         let interface: String? = Interpreter.evaluate("type(tc_iface)._interface")
         #expect(interface?.contains("The TestClass.") == true)
     }
 
-    @Test func dtor() {
-        Interpreter.run("import gc")
+    @Test func dtor() async {
+        await Interpreter.run("import gc")
         
         let testClass = TestClassWithProperties()
         main.tc1 = testClass
         #expect(testClass._pythonCache.reference != nil)
         
-        Interpreter.run("del tc1")
-        Interpreter.run("gc.collect()")
+        await Interpreter.run("del tc1")
+        await Interpreter.run("gc.collect()")
         #expect(testClass._pythonCache.reference == nil)
     }
     
-    @Test func bindIntProperty() {
+    @Test func bindIntProperty() async {
         let testClass = TestClassWithProperties()
 
         main.tc2 = testClass
@@ -99,30 +100,30 @@ struct ScriptableTests {
         #expect(Interpreter.evaluate("tc2.int_property") == 12)
     }
     
-    @Test func bindFloatProperty() {
+    @Test func bindFloatProperty() async {
         let testClass = TestClassWithProperties()
         main.tc5 = testClass
         
         #expect(Interpreter.evaluate("tc5.float_property") == Float(3.14))
 
-        Interpreter.run("tc5.float_property = 1000.0")        
+        await Interpreter.run("tc5.float_property = 1000.0")        
         #expect(testClass.floatProperty == 1000.0)
     }
 
-    @Test func bindStringProperty() {
+    @Test func bindStringProperty() async {
         let testClass = TestClassWithProperties()
         main.tc3 = testClass
-        Interpreter.run("tc3.content = 'new content'")
+        await Interpreter.run("tc3.content = 'new content'")
         
         #expect(Interpreter.evaluate("tc3.content") == "new content")
     }
     
-    @Test func functionCall() {
+    @Test func functionCall() async {
         let testClass = TestClassWithProperties()
 
         main.tc4 = testClass
 
-        Interpreter.run("tc4.change_content('changed')")
+        await Interpreter.run("tc4.change_content('changed')")
         
         #expect(Interpreter.evaluate("tc4.get_content()") == "changed")
     }
@@ -161,17 +162,17 @@ struct ScriptableTests {
         #expect(main.number2 == 0)
     }
     
-    @Test func staticProperty() {
+    @Test func staticProperty() async {
         let testClass = TestClassWithProperties()
         main.tc3 = testClass
 
         #expect(main.tc3?.static_property == TestClassWithProperties.staticProperty)
     }
 
-    @Test func initWithUnpack() {
+    @Test func initWithUnpack() async {
         main.TestClass2 = PyObject(TestClassWithProperties.pyType)
 
-        Interpreter.run("tc9 = TestClass2('a', 'b', 'c')")
+        await Interpreter.run("tc9 = TestClass2('a', 'b', 'c')")
 
         #expect(main.tc9?.content == "a\nb\nc")
     }

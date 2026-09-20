@@ -17,9 +17,10 @@ class CustomView {
 }
 
 @MainActor
+@Suite(.serialized)
 struct ViewRepresentationTests {
     @Test
-    func customView() {
+    func customView() async {
         let main = py.main
 
         var displayed: AnyView?
@@ -32,13 +33,13 @@ struct ViewRepresentationTests {
         let customView = CustomView()
         main.custom_view = customView
 
-        Interpreter.run("custom_view", mode: .single)
+        await Interpreter.run("custom_view", mode: .single)
 
         #expect(displayed != nil)
     }
 
     @Test
-    func displayBinding() {
+    func displayBinding() async {
         let main = py.main
 
         var displayed: AnyView?
@@ -50,7 +51,7 @@ struct ViewRepresentationTests {
 
         main.display_view = CustomView()
 
-        Interpreter.run("""
+        await Interpreter.run("""
         from interpreter import display
         display(display_view)
         """)
@@ -62,14 +63,14 @@ struct ViewRepresentationTests {
     /// A Python subclass keeps state of its own; writing it must reach the
     /// box the SwiftUI side observes, and a Swift-backed view has no box.
     @Test
-    func pythonSubclassWritesInvalidateItsState() throws {
+    func pythonSubclassWritesInvalidateItsState() async throws {
         let main = py.main
         // Made on the Swift side: the macro binds no __init__ for a class
         // without one, so CustomView() from Python would carry no value.
         main.inner = CustomView()
         main.plain = CustomView()
 
-        Interpreter.run("""
+        await Interpreter.run("""
         class Counter(View):
             def __init__(self):
                 super().__init__()
@@ -83,7 +84,7 @@ struct ViewRepresentationTests {
         #expect(counter.reference.view != nil)
         #expect(Interpreter.evaluate("counter._view_state.revision") == 0)
 
-        Interpreter.run("counter.count += 1")
+        await Interpreter.run("counter.count += 1")
         #expect(Interpreter.evaluate("counter._view_state.revision") == 1)
         #expect(Interpreter.evaluate("counter.count") == 1)
 

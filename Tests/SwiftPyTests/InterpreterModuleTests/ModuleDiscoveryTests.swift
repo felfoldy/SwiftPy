@@ -6,7 +6,7 @@ import Testing
 @MainActor
 @Suite(.serialized)
 struct ModuleDiscoveryTests {
-    @Test func listsBundledNativeAndUnimportedModulesWithoutExecutingThem() throws {
+    @Test func listsBundledNativeAndUnimportedModulesWithoutExecutingThem() async throws {
         let directory = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: directory) }
@@ -16,8 +16,8 @@ struct ModuleDiscoveryTests {
         try "\"\"\"A discoverable package.\"\"\"".write(to: package.appending(path: "__init__.py"), atomically: true, encoding: .utf8)
         _ = try Interpreter.compile("pass")
         py.main._discovery_path = directory.path
-        defer { Interpreter.run("sys.path.remove(_discovery_path)", mode: .execution) }
-        try Interpreter.execute(Interpreter.compile("""
+        defer { await Interpreter.run("sys.path.remove(_discovery_path)", mode: .execution) }
+        try await Interpreter.execute(Interpreter.compile("""
         import sys
         from interpreter.help import _available_modules, _modules_markdown
         before = _available_modules()

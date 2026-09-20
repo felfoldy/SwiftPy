@@ -9,11 +9,12 @@ import Testing
 import SwiftPy
 
 @MainActor
+@Suite(.serialized)
 struct PyWrapsTests {
     // MARK: - default: positional args (kind 0/1)
 
-    @Test func positionalForwarding() {
-        Interpreter.run("""
+    @Test func positionalForwarding() async {
+        await Interpreter.run("""
         import functools
 
         def add(a: int, b: int) -> int:
@@ -31,8 +32,8 @@ struct PyWrapsTests {
 
     // MARK: - case 2: *args tuple unpacking
 
-    @Test func varArgsForwarding() {
-        Interpreter.run("""
+    @Test func varArgsForwarding() async {
+        await Interpreter.run("""
         import functools
 
         def sumall(*args: int) -> int:
@@ -50,8 +51,8 @@ struct PyWrapsTests {
 
     // MARK: - case 4: **kwargs dict forwarding
 
-    @Test func varKwargsForwarding() {
-        Interpreter.run("""
+    @Test func varKwargsForwarding() async {
+        await Interpreter.run("""
         import functools
 
         def merge(**kwargs: int) -> int:
@@ -67,12 +68,12 @@ struct PyWrapsTests {
         #expect(py.main.wraps_varkwargs == 103)
     }
 
-    @Test func fallbackForwarding() {
+    @Test func fallbackForwarding() async {
         py.main.def("wraps_native(x: int) -> int") { argc, argv in
             PyBind.function(argc, argv) { (x: Int) in x * 2 }
         }
 
-        Interpreter.run("""
+        await Interpreter.run("""
         import functools
 
         @functools.wraps(wraps_native)
@@ -87,8 +88,8 @@ struct PyWrapsTests {
 
     // MARK: - Metadata propagation
 
-    @Test func nameIsPropagated() {
-        Interpreter.run("""
+    @Test func nameIsPropagated() async {
+        await Interpreter.run("""
         import functools
 
         def original_func() -> None:
@@ -104,8 +105,8 @@ struct PyWrapsTests {
         #expect(py.main.wraps_name == "original_func")
     }
 
-    @Test func wrappedAttributeIsSet() {
-        Interpreter.run("""
+    @Test func wrappedAttributeIsSet() async {
+        await Interpreter.run("""
         import functools
 
         def original_func() -> None:

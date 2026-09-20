@@ -30,30 +30,31 @@ extension Interpreter {
         }
     }
 
+    /// Runs on ``PythonActor``; main is free meanwhile.
     @discardableResult
-    func executeWithCPython(
+    nonisolated func executeWithCPython(
         _ code: PyObject,
         globals: PyObject? = nil,
         locals: PyObject? = nil
-    ) throws(PythonError) -> PyObject {
+    ) async throws(PythonError) -> PyObject {
         do {
-            return try PyRuntime.execute(code, globals: globals, locals: locals)
+            return try await PyRuntime.execute(code, globals: globals, locals: locals)
         } catch {
             throw PythonError.RuntimeError("\(error)").withTraceback("\(error)")
         }
     }
 
     /// Points CPython's stdout and stderr at the sink pocketpy's `print` uses,
-    /// so both interpreters reach the console the same way.
+    /// so both interpreters reach the console the same way. Called on whichever
+    /// thread runs Python, inside the execution's task, so the task-local sink
+    /// is in reach.
     func redirectCPythonOutput() {
         try? PyRuntime.redirectOutput { text in
-            MainActor.assumeIsolated {
-                if let output = InterpreterExecutionContext.current.output {
-                    output(text)
-                } else {
-                    fputs(text, stdout)
-                    fflush(stdout)
-                }
+            if let output = InterpreterExecutionContext.current.output {
+                output(text)
+            } else {
+                fputs(text, stdout)
+                fflush(stdout)
             }
         }
     }

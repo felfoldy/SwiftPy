@@ -9,11 +9,12 @@ import Testing
 @testable import SwiftPy
 
 @MainActor
+@Suite(.serialized)
 struct EmbeddingsTests {
     /// Sentence embedding assets aren't present on every run destination, so
     /// the model-dependent tests bail out instead of failing.
-    private func isAvailable() -> Bool {
-        Interpreter.run("""
+    private func isAvailable() async -> Bool {
+        await Interpreter.run("""
         import embeddings
         try:
             _available = len(embeddings.embed('hello').vector) > 0
@@ -23,19 +24,19 @@ struct EmbeddingsTests {
         return Interpreter.evaluate("_available") == true
     }
 
-    @Test func embed_tagsVectorWithLanguage() {
-        guard isAvailable() else { return }
+    @Test func embed_tagsVectorWithLanguage() async {
+        guard await isAvailable() else { return }
 
-        Interpreter.run("_e = embeddings.embed('Where is my order?')")
+        await Interpreter.run("_e = embeddings.embed('Where is my order?')")
 
         #expect(Interpreter.evaluate("len(_e.vector) > 0") == true)
         #expect(Interpreter.evaluate("_e.language") == "en")
     }
 
-    @Test func similarity_scoresRelatedTextHigher() throws {
-        guard isAvailable() else { return }
+    @Test func similarity_scoresRelatedTextHigher() async throws {
+        guard await isAvailable() else { return }
 
-        Interpreter.run("""
+        await Interpreter.run("""
         _a = embeddings.embed('Where is my order?')
         _b = embeddings.embed('How do I check my order status?')
         _c = embeddings.embed('The weather is cold today.')
@@ -48,10 +49,10 @@ struct EmbeddingsTests {
         #expect(related > unrelated)
     }
 
-    @Test func similarity_withItself_isOne() throws {
-        guard isAvailable() else { return }
+    @Test func similarity_withItself_isOne() async throws {
+        guard await isAvailable() else { return }
 
-        Interpreter.run("_a = embeddings.embed('a sentence')")
+        await Interpreter.run("_a = embeddings.embed('a sentence')")
 
         let similarity: Double = try #require(
             Interpreter.evaluate("embeddings.similarity(_a, _a)")
@@ -59,10 +60,10 @@ struct EmbeddingsTests {
         #expect(abs(similarity - 1) < 0.0001)
     }
 
-    @Test func embedding_rebuiltFromStoredVector_matchesOriginal() throws {
-        guard isAvailable() else { return }
+    @Test func embedding_rebuiltFromStoredVector_matchesOriginal() async throws {
+        guard await isAvailable() else { return }
 
-        Interpreter.run("""
+        await Interpreter.run("""
         _a = embeddings.embed('a sentence')
         _restored = embeddings.Embedding(_a.vector, _a.language)
         """)
@@ -73,8 +74,8 @@ struct EmbeddingsTests {
         #expect(abs(similarity - 1) < 0.0001)
     }
 
-    @Test func embed_withUnknownLanguage_raises() {
-        Interpreter.run("""
+    @Test func embed_withUnknownLanguage_raises() async {
+        await Interpreter.run("""
         import embeddings
         try:
             embeddings.embed('hello', 'zz')
@@ -86,10 +87,10 @@ struct EmbeddingsTests {
         #expect(Interpreter.evaluate("_raised") == true)
     }
 
-    @Test func similarity_acrossLanguages_raises() {
-        guard isAvailable() else { return }
+    @Test func similarity_acrossLanguages_raises() async {
+        guard await isAvailable() else { return }
 
-        Interpreter.run("""
+        await Interpreter.run("""
         _a = embeddings.embed('hello')
         _de = embeddings.Embedding(_a.vector, 'de')
         try:
@@ -102,8 +103,8 @@ struct EmbeddingsTests {
         #expect(Interpreter.evaluate("_raised") == true)
     }
 
-    @Test func repr_omitsVectorContents() throws {
-        guard isAvailable() else { return }
+    @Test func repr_omitsVectorContents() async throws {
+        guard await isAvailable() else { return }
 
         let repr: String = try #require(
             Interpreter.evaluate("repr(embeddings.embed('hello'))")

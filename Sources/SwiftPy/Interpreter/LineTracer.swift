@@ -5,9 +5,12 @@
 //  Created by Tibor Felföldy on 2026. 08. 07..
 //
 
-@MainActor
-public final class LineTracer {
-    public struct Entry: Equatable {
+import Synchronization
+
+/// Records the lines an execution runs through. The trace arrives on whichever
+/// thread runs the code, so the entries sit behind a lock.
+public final class LineTracer: Sendable {
+    public struct Entry: Equatable, Sendable {
         public let source: String
         public let lineNumber: Int
         public let time: Duration
@@ -21,7 +24,11 @@ public final class LineTracer {
 
     private let clock = ContinuousClock()
     private let startInstant: ContinuousClock.Instant
-    public private(set) var entries: [Entry] = []
+    private let storage = Mutex<[Entry]>([])
+
+    public var entries: [Entry] {
+        storage.withLock { $0 }
+    }
 
     public init() {
         startInstant = clock.now
@@ -38,11 +45,12 @@ public final class LineTracer {
               let lineNumber = frame.lineNumber
         else { return }
 
-        entries.append(Entry(
+        let entry = Entry(
             source: source,
             lineNumber: lineNumber,
             time: startInstant.duration(to: clock.now)
-        ))
+        )
+        storage.withLock { $0.append(entry) }
     }
 }
 

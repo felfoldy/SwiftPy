@@ -31,9 +31,9 @@ struct KeychainTests {
     private let main = py.main
     private let storage = InMemorySecretStorage()
 
-    init() {
+    init() async {
         Keychain.storage = storage
-        Interpreter.run("import keychain")
+        await Interpreter.run("import keychain")
     }
 
     private func restore() {

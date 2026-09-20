@@ -41,6 +41,6 @@ extension Interpreter {
         // Dotted submodules (e.g. "console.session") are requested by the
         // import machinery as a slashed path ("console/session.py").
         let key = name.replacingOccurrences(of: ".", with: "/") + ".py"
-        registeredSources[key] = content
+        Self.registeredSources.register(content, as: key)
     }
 }

@@ -10,13 +10,14 @@ import Testing
 import Foundation
 
 @MainActor
+@Suite(.serialized)
 struct ConversionTests {
-    @Test func dataToPython() {
+    @Test func dataToPython() async {
         py.main.test_bytes = "Hello".data(using: .utf8)
         #expect(Interpreter.evaluate("test_bytes.decode()") == "Hello")
     }
     
-    @Test func optionalPyObjectConvertsNoneToNil() {
+    @Test func optionalPyObjectConvertsNoneToNil() async {
         #if pocketpy
         let reference = py.pushtmp()
         defer { py.pop() }
@@ -31,29 +32,29 @@ struct ConversionTests {
         #expect(value == nil)
     }
 
-    @Test func floatCastFromInt() throws {
-        Interpreter.run("floatCastFromInt = 3")
+    @Test func floatCastFromInt() async throws {
+        await Interpreter.run("floatCastFromInt = 3")
         let value = py.main.floatCastFromInt
         let number = try Float.cast(value?.reference)
         #expect(number == 3.0)
     }
     
-    @Test func dataFromPython() throws {
+    @Test func dataFromPython() async throws {
         let data: Data = try #require(Interpreter.evaluate("b'test'"))
         
         #expect(String(data: data, encoding: .utf8) == "test")
     }
     
-    @Test func strArrayToPython() {
+    @Test func strArrayToPython() async {
         let array: [String] = ["Hello", "World"]
         
-        Interpreter.run("x = []")
+        await Interpreter.run("x = []")
         py.main.x = array
         
         #expect(py.main.x == ["Hello", "World"])
     }
     
-    @Test func dictionaryToPython() {
+    @Test func dictionaryToPython() async {
         let dictionary: [String: Any] = ["Hello": 1, "World": Int64(2)]
         
         py.main.dictionary = dictionary
@@ -62,8 +63,8 @@ struct ConversionTests {
         #expect(Interpreter.evaluate(#"dictionary["World"]"#) == 2)
     }
 
-    @Test func dictionaryFromPython() throws {
-        Interpreter.run(#"dictionary = {"topic": "dict", "task": "iterate"}"#)
+    @Test func dictionaryFromPython() async throws {
+        await Interpreter.run(#"dictionary = {"topic": "dict", "task": "iterate"}"#)
         
         let result: [String: String] = try #require(py.main.dictionary)
         
@@ -71,8 +72,8 @@ struct ConversionTests {
         #expect(result["task"] == "iterate")
     }
     
-    @Test func jsonDictionaryFromPython() throws {
-        Interpreter.run("""
+    @Test func jsonDictionaryFromPython() async throws {
+        await Interpreter.run("""
         dictionary = {
             "string": "hello",
             "integer": 42,
@@ -106,14 +107,14 @@ struct ConversionTests {
     
     static var casted: Double?
     
-    @Test func castFloatFromInt() {        
+    @Test func castFloatFromInt() async {        
         py.main.def("will_cast(x: float) -> None") { argc, argv in
             PyBind.function(argc, argv) { (x: Double) in
                 ConversionTests.casted = x
             }
         }
         
-        Interpreter.run("will_cast(42)")
+        await Interpreter.run("will_cast(42)")
         
         #expect(ConversionTests.casted == 42)
     }

@@ -8,22 +8,22 @@
 import Testing
 import SwiftPy
 
-@Suite("help()") @MainActor
+@Suite("help()", .serialized) @MainActor
 struct HelpTests {
 
-    init() {
-        Interpreter.run("import interpreter")
+    init() async {
+        await Interpreter.run("import interpreter")
     }
 
     @Test("is registered as builtin")
-    func isRegistered() {
+    func isRegistered() async {
         #expect(Interpreter.evaluate("help is None") == false)
         #expect(Interpreter.evaluate("callable(help)") == true)
     }
 
     @Test("composes the output into a single print")
-    func printsOnce() throws {
-        Interpreter.run("""
+    func printsOnce() async throws {
+        await Interpreter.run("""
         import math
         import builtins as _b
         _once_cap = []
@@ -41,8 +41,8 @@ struct HelpTests {
     }
 
     @Test("module is importable")
-    func moduleIsImportable() {
-        Interpreter.run("""
+    func moduleIsImportable() async {
+        await Interpreter.run("""
         import builtins as _b
         import interpreter.help as _help_module
         _help_module_is_registered = callable(_b.help) and callable(_help_module.help)
@@ -52,8 +52,8 @@ struct HelpTests {
     }
 
     @Test("renders host-provided markdown documents as reference topics")
-    func hostMarkdownDocuments() throws {
-        Interpreter.run("""
+    func hostMarkdownDocuments() async throws {
+        await Interpreter.run("""
         import interpreter.help as _help_module
         _help_module._documents = {
             'README': '# Welcome',
@@ -73,22 +73,22 @@ struct HelpTests {
         #expect(Interpreter.evaluate("_readme_is_reference") == true)
     }
 
-    @Suite("no args") @MainActor
+    @Suite("no args", .serialized) @MainActor
     struct NoArgs {
-        init() {
-            Interpreter.run("import interpreter")
-            Interpreter.run("import interpreter.help as _help; _help._help_text = None")
+        init() async {
+            await Interpreter.run("import interpreter")
+            await Interpreter.run("import interpreter.help as _help; _help._help_text = None")
         }
 
         @Test("returns None")
-        func returnsNone() {
-            Interpreter.run("_help_none_r = help()")
+        func returnsNone() async {
+            await Interpreter.run("_help_none_r = help()")
             #expect(Interpreter.evaluate("_help_none_r is None") == true)
         }
 
         @Test("prints welcome text")
-        func printsWelcomeText() throws {
-            Interpreter.run("""
+        func printsWelcomeText() async throws {
+            await Interpreter.run("""
             import builtins as _b
             import interpreter.help as _help
             _help._help_text = None
@@ -111,8 +111,8 @@ struct HelpTests {
         }
 
         @Test("prints configured welcome text")
-        func printsConfiguredWelcomeText() throws {
-            Interpreter.run("""
+        func printsConfiguredWelcomeText() async throws {
+            await Interpreter.run("""
             import builtins as _b
             import interpreter.help as _help
             _help._help_text = 'Custom app help'
@@ -134,15 +134,15 @@ struct HelpTests {
 
     /// A class's own page reads as a module's does: what it is, then what it
     /// offers. Properties are left out for now.
-    @Suite("class markdown") @MainActor
+    @Suite("class markdown", .serialized) @MainActor
     struct ClassMarkdown {
-        init() {
-            Interpreter.run("import interpreter")
-            Interpreter.run("import interpreter.help as _help_module")
+        init() async {
+            await Interpreter.run("import interpreter")
+            await Interpreter.run("import interpreter.help as _help_module")
         }
 
-        private func markdown(of path: String) throws -> String {
-            Interpreter.run("""
+        private func markdown(of path: String) async throws -> String {
+            await Interpreter.run("""
             import \(path.split(separator: ".")[0])
             _cm_out = "\\n".join(_help_module._markdown_lines('\(path)'))
             """)
@@ -150,8 +150,8 @@ struct HelpTests {
         }
 
         @Test("opens with its parent, declaration, and summary")
-        func opening() throws {
-            let output = try markdown(of: "p2p.Peer")
+        func opening() async throws {
+            let output = try await markdown(of: "p2p.Peer")
 
             #expect(output.hasPrefix("""
             ``p2p``
@@ -167,8 +167,8 @@ struct HelpTests {
         /// The macro binds each method's comment, so the summary comes from the
         /// method rather than from the class's interface stub.
         @Test("lists the methods with their own summaries")
-        func methods() throws {
-            let output = try markdown(of: "p2p.Peer")
+        func methods() async throws {
+            let output = try await markdown(of: "p2p.Peer")
 
             #expect(output.contains("""
             ## Functions
@@ -186,8 +186,8 @@ struct HelpTests {
         // pathlib is CPython's own on that backend.
         #if !cpython
         @Test("marks static methods in their declarations")
-        func staticMethods() throws {
-            let output = try markdown(of: "pathlib.Path")
+        func staticMethods() async throws {
+            let output = try await markdown(of: "pathlib.Path")
 
             #expect(output.contains("""
             ### ``pathlib.Path/cwd()``
@@ -203,8 +203,8 @@ struct HelpTests {
         /// The macro binds the initializer's comment too, so it reads as a
         /// method does rather than being buried in the class stub.
         @Test("lists the initializer above the methods")
-        func initializers() throws {
-            let output = try markdown(of: "p2p.Peer")
+        func initializers() async throws {
+            let output = try await markdown(of: "p2p.Peer")
 
             #expect(output.contains("""
             ## Initializers
@@ -226,8 +226,8 @@ struct HelpTests {
         /// A class that declares no initializer binds no `__init__`, so it gets
         /// no empty section.
         @Test("leaves the section out where nothing is initialized")
-        func withoutInitializer() throws {
-            Interpreter.run("""
+        func withoutInitializer() async throws {
+            await Interpreter.run("""
             _no_init = "\\n".join(_help_module._markdown_lines(int))
             """)
             let output: String = try #require(Interpreter.evaluate("_no_init"))
@@ -236,8 +236,8 @@ struct HelpTests {
         }
 
         @Test("takes the method signature from the binding")
-        func methodSignature() throws {
-            let output = try markdown(of: "p2p.Peer")
+        func methodSignature() async throws {
+            let output = try await markdown(of: "p2p.Peer")
 
             #expect(output.contains("def autoconnect(self, name: str) -> None"))
             // The trailing colon belongs to a source stub, not to a signature.
@@ -245,8 +245,8 @@ struct HelpTests {
         }
 
         @Test("is not the plain stub it used to be")
-        func isNotAStub() throws {
-            let output = try markdown(of: "p2p.Peer")
+        func isNotAStub() async throws {
+            let output = try await markdown(of: "p2p.Peer")
 
             #expect(!output.hasPrefix("```python"))
             #expect(!output.contains("\"\"\""))
@@ -255,8 +255,8 @@ struct HelpTests {
         /// A property carries no signature, so its declaration stands in for
         /// one, and what documents it is its getter.
         @Test("lists the properties with what declares and describes them")
-        func properties() throws {
-            Interpreter.run("""
+        func properties() async throws {
+            await Interpreter.run("""
             class _Card:
                 title: str
 
@@ -280,8 +280,8 @@ struct HelpTests {
         // pathlib is CPython's own on that backend.
         #if !cpython
         @Test("lists properties like function parameters")
-        func propertyRows() throws {
-            let output = try markdown(of: "pathlib.Path")
+        func propertyRows() async throws {
+            let output = try await markdown(of: "pathlib.Path")
 
             #expect(output.contains("""
             ## Properties
@@ -301,8 +301,8 @@ struct HelpTests {
         // pathlib is CPython's own on that backend.
         #if !cpython
         @Test("documents a property of its own")
-        func propertyPage() throws {
-            let output = try markdown(of: "pathlib.Path.name")
+        func propertyPage() async throws {
+            let output = try await markdown(of: "pathlib.Path.name")
 
             #expect(output == """
             # name
@@ -321,8 +321,8 @@ struct HelpTests {
         /// Nothing names the module when help is handed the class itself, so
         /// the methods keep their headings without references.
         @Test("documents a class reached without a path")
-        func withoutPath() throws {
-            Interpreter.run("""
+        func withoutPath() async throws {
+            await Interpreter.run("""
             import p2p
             _np_out = "\\n".join(_help_module._markdown_lines(p2p.Peer))
             """)
@@ -340,8 +340,8 @@ struct HelpTests {
         // Reads pocketpy's native functions.
         #if !cpython
         @Test("links methods of a built-in class handed to help")
-        func builtInClassReferences() throws {
-            Interpreter.run("""
+        func builtInClassReferences() async throws {
+            await Interpreter.run("""
             _builtin_out = "\\n".join(_help_module._markdown_lines(str))
             _builtin_member_out = "\\n".join(_help_module._markdown_lines('str.upper'))
             """)
@@ -365,15 +365,15 @@ struct HelpTests {
 
     /// A module lists its classes the way it lists its functions: the name
     /// linked to its own help, over what it declares and what it is for.
-    @Suite("module class listing") @MainActor
+    @Suite("module class listing", .serialized) @MainActor
     struct ModuleClassListing {
-        init() {
-            Interpreter.run("import interpreter")
-            Interpreter.run("import interpreter.help as _help_module")
+        init() async {
+            await Interpreter.run("import interpreter")
+            await Interpreter.run("import interpreter.help as _help_module")
         }
 
-        private func markdown(of module: String) throws -> String {
-            Interpreter.run("""
+        private func markdown(of module: String) async throws -> String {
+            await Interpreter.run("""
             import \(module)
             _cl_out = "\\n".join(_help_module._markdown_lines('\(module)'))
             """)
@@ -381,8 +381,8 @@ struct HelpTests {
         }
 
         @Test("links a documented class over its declaration and summary")
-        func documentedClass() throws {
-            let output = try markdown(of: "p2p")
+        func documentedClass() async throws {
+            let output = try await markdown(of: "p2p")
 
             #expect(output.contains("""
             ### ``p2p/Peer``
@@ -398,8 +398,8 @@ struct HelpTests {
         // asyncio is CPython's own on that backend.
         #if !cpython
         @Test("shows a class with no documentation as its declaration alone")
-        func undocumentedClass() throws {
-            let output = try markdown(of: "asyncio")
+        func undocumentedClass() async throws {
+            let output = try await markdown(of: "asyncio")
 
             #expect(output.contains("""
             ### ``asyncio/AsyncTask``
@@ -414,8 +414,8 @@ struct HelpTests {
         /// A class declared by an interface string has no `__doc__`, so the
         /// summary comes from the docstring inside the stub.
         @Test("summarises a class declared by an interface string")
-        func interfaceDeclaredClass() throws {
-            Interpreter.run("""
+        func interfaceDeclaredClass() async throws {
+            await Interpreter.run("""
             class _Stubbed:
                 _interface = 'class Response(Base):\\n    \\"\\"\\"Holds a reply.\\n\\n    More prose.\\n    \\"\\"\\"'
             _if_out = "\\n".join(_help_module._class_entries('probe', [('Response', _Stubbed)]))
@@ -434,8 +434,8 @@ struct HelpTests {
         }
 
         @Test("uses __all__ as the documented public API in declared order")
-        func explicitPublicAPI() throws {
-            Interpreter.run("""
+        func explicitPublicAPI() async throws {
+            await Interpreter.run("""
             class _DocumentedModule:
                 __all__ = ['second', 'first']
                 def first(self): pass
@@ -450,8 +450,8 @@ struct HelpTests {
         }
 
         @Test("no longer stacks the classes into one code block")
-        func notOneCodeBlock() throws {
-            let output = try markdown(of: "p2p")
+        func notOneCodeBlock() async throws {
+            let output = try await markdown(of: "p2p")
 
             #expect(!output.contains("""
             ## Classes
@@ -464,12 +464,12 @@ struct HelpTests {
     /// The markdown a function's help renders as. The reference for the layout
     /// is `help('requests.get')`, checked against the real module in
     /// swiftpy-requests; these cover the parsing on its own.
-    @Suite("function markdown") @MainActor
+    @Suite("function markdown", .serialized) @MainActor
     struct FunctionMarkdown {
-        init() { Interpreter.run("import interpreter") }
+        init() async { await Interpreter.run("import interpreter") }
 
-        private func markdown(of expression: String) throws -> String {
-            Interpreter.run("""
+        private func markdown(of expression: String) async throws -> String {
+            await Interpreter.run("""
             import interpreter.help as _help_module
             _fm_out = "\\n".join(_help_module._markdown_lines(\(expression)))
             """)
@@ -477,14 +477,14 @@ struct HelpTests {
         }
 
         @Test("shows syntax before the summary without a redundant title")
-        func syntaxAndSummary() throws {
-            Interpreter.run("""
+        func syntaxAndSummary() async throws {
+            await Interpreter.run("""
             def _summarized(value):
                 '''Does a thing.'''
                 pass
             """)
 
-            let output = try markdown(of: "_summarized")
+            let output = try await markdown(of: "_summarized")
 
             #expect(output.hasPrefix("""
             ```python
@@ -496,8 +496,8 @@ struct HelpTests {
         }
 
         @Test("documents the model decorator")
-        func modelDecorator() throws {
-            let output = try markdown(of: "'modeling.model'")
+        func modelDecorator() async throws {
+            let output = try await markdown(of: "'modeling.model'")
 
             #expect(output.contains("Convert an annotated class into a data model."))
             #expect(output.contains("Annotated attributes become mutable model fields."))
@@ -515,10 +515,10 @@ struct HelpTests {
         // asyncio is CPython's own on that backend.
         #if !cpython
         @Test("shows a bound signature without its trailing colon")
-        func boundSignature() throws {
-            Interpreter.run("import asyncio")
+        func boundSignature() async throws {
+            await Interpreter.run("import asyncio")
 
-            let output = try markdown(of: "asyncio.sleep")
+            let output = try await markdown(of: "asyncio.sleep")
 
             #expect(output.contains("""
             ```python
@@ -535,10 +535,10 @@ struct HelpTests {
         // Overloads are pocketpy's.
         #if !cpython
         @Test("documents each overload under its own signature")
-        func overloadSections() throws {
-            bindResponder()
+        func overloadSections() async throws {
+            await bindResponder()
 
-            let output = try markdown(of: "Responder.respond")
+            let output = try await markdown(of: "Responder.respond")
 
             // Help is handed the method itself, so nothing names the class it
             // is reached through and the page opens on the first signature.
@@ -576,9 +576,9 @@ struct HelpTests {
         // Overloads are pocketpy's.
         #if !cpython
         @Test("lists an overload dispatcher as one entry per overload")
-        func overloadEntries() throws {
-            bindResponder()
-            Interpreter.run("""
+        func overloadEntries() async throws {
+            await bindResponder()
+            await Interpreter.run("""
             _overload_entries = "\\n".join(
                 _help_module._function_entries(
                     'agents.Agent', [('respond', Responder.respond)]
@@ -609,19 +609,19 @@ struct HelpTests {
 
         /// Python can no longer set attributes on a function, so an overload
         /// dispatcher has to come from a real binding.
-        private func bindResponder() {
+        private func bindResponder() async {
             PyBind.module("HelpOverloadTests") { module in
                 module.class(Responder.self)
             }
-            Interpreter.run("""
+            await Interpreter.run("""
             import interpreter.help as _help_module
             from HelpOverloadTests import Responder
             """)
         }
 
         @Test("lists the documented parameters and leaves the rest out")
-        func parameters() throws {
-            Interpreter.run("""
+        func parameters() async throws {
+            await Interpreter.run("""
             def _fetch(url, params, timeout):
                 '''Sends a request.
 
@@ -631,7 +631,7 @@ struct HelpTests {
                 pass
             """)
 
-            let output = try markdown(of: "_fetch")
+            let output = try await markdown(of: "_fetch")
 
             #expect(output.contains("""
             ## Parameters
@@ -644,8 +644,8 @@ struct HelpTests {
         }
 
         @Test("keeps prose out of the parameters")
-        func discussion() throws {
-            Interpreter.run("""
+        func discussion() async throws {
+            await Interpreter.run("""
             def _documented(value, other):
                 '''Does a thing.
 
@@ -657,7 +657,7 @@ struct HelpTests {
                 pass
             """)
 
-            let output = try markdown(of: "_documented")
+            let output = try await markdown(of: "_documented")
 
             #expect(output.contains("""
             ## Parameters
@@ -673,8 +673,8 @@ struct HelpTests {
         }
 
         @Test("carries a wrapped parameter description onto one line")
-        func wrappedParameterDescription() throws {
-            Interpreter.run("""
+        func wrappedParameterDescription() async throws {
+            await Interpreter.run("""
             def _wrapped(count):
                 '''Wraps.
 
@@ -684,15 +684,15 @@ struct HelpTests {
                 pass
             """)
 
-            let output = try markdown(of: "_wrapped")
+            let output = try await markdown(of: "_wrapped")
 
             #expect(output.contains("- `count`: How many, described at length over two lines."))
             #expect(!output.contains("## Discussion"))
         }
 
         @Test("a colon in prose isn't a parameter")
-        func colonInProse() throws {
-            Interpreter.run("""
+        func colonInProse() async throws {
+            await Interpreter.run("""
             def _prose(value):
                 '''Explains.
 
@@ -701,15 +701,15 @@ struct HelpTests {
                 pass
             """)
 
-            let output = try markdown(of: "_prose")
+            let output = try await markdown(of: "_prose")
 
             #expect(!output.contains("## Parameters"))
             #expect(output.contains("Note: this is prose, not a parameter."))
         }
 
         @Test("tells a module-rooted path from a name only the session owns")
-        func isReference() throws {
-            Interpreter.run("""
+        func isReference() async throws {
+            await Interpreter.run("""
             import interpreter.help as _help_module
             def _session_only(x):
                 pass
@@ -728,13 +728,13 @@ struct HelpTests {
         }
 
         @Test("shows the signature where there is no docstring")
-        func noDocstring() throws {
-            Interpreter.run("""
+        func noDocstring() async throws {
+            await Interpreter.run("""
             def _bare(x):
                 pass
             """)
 
-            let output = try markdown(of: "_bare")
+            let output = try await markdown(of: "_bare")
 
             // The signature is all there is to show; a title would only repeat it.
             #expect(output == """
@@ -747,14 +747,14 @@ struct HelpTests {
         }
     }
 
-    @Suite("callable") @MainActor
+    @Suite("callable", .serialized) @MainActor
     struct Callable {
-        init() { Interpreter.run("import interpreter") }
+        init() async { await Interpreter.run("import interpreter") }
 
         // pocketpy native builtins don't expose __name__, so we use a user-defined function
         @Test("prints function name")
-        func printsFunctionName() throws {
-            Interpreter.run("""
+        func printsFunctionName() async throws {
+            await Interpreter.run("""
             import builtins as _b
             _fn_cap = []
             _fn_orig = _b.print
@@ -777,8 +777,8 @@ struct HelpTests {
         // asyncio is CPython's own on that backend.
         #if !cpython
         @Test("prints Swift-bound function signature")
-        func printsSwiftBoundFunctionSignature() throws {
-            Interpreter.run("""
+        func printsSwiftBoundFunctionSignature() async throws {
+            await Interpreter.run("""
             import asyncio
             import builtins as _b
             _sleep_cap = []
@@ -797,13 +797,13 @@ struct HelpTests {
         #endif
     }
 
-    @Suite("class") @MainActor
+    @Suite("class", .serialized) @MainActor
     struct Class {
-        init() { Interpreter.run("import interpreter") }
+        init() async { await Interpreter.run("import interpreter") }
 
         @Test("prints class name")
-        func printsClassName() throws {
-            Interpreter.run("""
+        func printsClassName() async throws {
+            await Interpreter.run("""
             import builtins as _b
             _tp_cap = []
             _tp_orig = _b.print
@@ -820,8 +820,8 @@ struct HelpTests {
         }
 
         @Test("prints public methods")
-        func printsMethods() throws {
-            Interpreter.run("""
+        func printsMethods() async throws {
+            await Interpreter.run("""
             import builtins as _b
             _cls_cap = []
             _cls_orig = _b.print
@@ -845,8 +845,8 @@ struct HelpTests {
         // The interpreter drops class docstrings, so documentation has to be
         // assigned to __doc__ to be visible here.
         @Test("prints class documentation")
-        func printsClassDocumentation() throws {
-            Interpreter.run("""
+        func printsClassDocumentation() async throws {
+            await Interpreter.run("""
             import builtins as _b
             _doc_cap = []
             _doc_orig = _b.print
@@ -868,8 +868,8 @@ struct HelpTests {
         }
 
         @Test("uses class interface when available")
-        func usesClassInterfaceWhenAvailable() throws {
-            Interpreter.run("""
+        func usesClassInterfaceWhenAvailable() async throws {
+            await Interpreter.run("""
             import builtins as _b
             _sb_cap = []
             _sb_orig = _b.print
@@ -890,13 +890,13 @@ struct HelpTests {
         }
     }
 
-    @Suite("instance") @MainActor
+    @Suite("instance", .serialized) @MainActor
     struct Instance {
-        init() { Interpreter.run("import interpreter") }
+        init() async { await Interpreter.run("import interpreter") }
 
         @Test("routes to type help")
-        func routesToTypeHelp() throws {
-            Interpreter.run("""
+        func routesToTypeHelp() async throws {
+            await Interpreter.run("""
             import builtins as _b
             _inst_cap = []
             _inst_orig = _b.print
@@ -913,13 +913,13 @@ struct HelpTests {
         }
     }
 
-    @Suite("module") @MainActor
+    @Suite("module", .serialized) @MainActor
     struct Module {
-        init() { Interpreter.run("import interpreter") }
+        init() async { await Interpreter.run("import interpreter") }
 
         @Test("prints module name")
-        func printsModuleName() throws {
-            Interpreter.run("""
+        func printsModuleName() async throws {
+            await Interpreter.run("""
             import math
             import builtins as _b
             _mod_cap = []
@@ -937,8 +937,8 @@ struct HelpTests {
         }
 
         @Test("shows Python module functions with signatures")
-        func showsPythonModuleFunctionsWithSignatures() throws {
-            Interpreter.run("""
+        func showsPythonModuleFunctionsWithSignatures() async throws {
+            await Interpreter.run("""
             import builtins as _b
             import interpreter.help as _help_module
             _pymod_cap = []
@@ -957,8 +957,8 @@ struct HelpTests {
         }
 
         @Test("shows documented module functions")
-        func showsDocumentedModuleFunctions() throws {
-            Interpreter.run("""
+        func showsDocumentedModuleFunctions() async throws {
+            await Interpreter.run("""
             import builtins as _b
             _interp_cap = []
             _interp_orig = _b.print
@@ -978,8 +978,8 @@ struct HelpTests {
         // asyncio is CPython's own on that backend.
         #if !cpython
         @Test("shows bound classes from Swift module")
-        func showsSwiftModuleClasses() throws {
-            Interpreter.run("""
+        func showsSwiftModuleClasses() async throws {
+            await Interpreter.run("""
             import asyncio
             import builtins as _b
             _smod_cap = []
@@ -1000,18 +1000,18 @@ struct HelpTests {
         #endif
     }
 
-    @Suite("string topic") @MainActor
+    @Suite("string topic", .serialized) @MainActor
     struct StringTopic {
-        init() { Interpreter.run("import interpreter") }
+        init() async { await Interpreter.run("import interpreter") }
 
         @Test("imports module by name")
-        func importsByName() {
-            Interpreter.run("help('math')")
+        func importsByName() async {
+            await Interpreter.run("help('math')")
         }
 
         @Test("resolves a member inside a module")
-        func resolvesModuleMember() throws {
-            Interpreter.run("""
+        func resolvesModuleMember() async throws {
+            await Interpreter.run("""
             import builtins as _b
             import interpreter.help as _help_module
             _member_cap = []
@@ -1034,10 +1034,10 @@ struct HelpTests {
         }
 
         @Test("lists registered modules")
-        func listsRegisteredModules() throws {
+        func listsRegisteredModules() async throws {
             PyBind.module("testing.helper") { _ in }
 
-            Interpreter.run("""
+            await Interpreter.run("""
             import builtins as _b
             _mods_cap = []
             _mods_orig = _b.print
@@ -1067,8 +1067,8 @@ struct HelpTests {
         }
 
         @Test("handles unknown module gracefully")
-        func handlesUnknown() {
-            Interpreter.run("help('_no_such_module_xyz')")
+        func handlesUnknown() async {
+            await Interpreter.run("help('_no_such_module_xyz')")
         }
     }
 }

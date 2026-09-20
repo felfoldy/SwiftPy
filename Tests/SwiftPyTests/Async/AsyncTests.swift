@@ -217,8 +217,8 @@ struct AsyncTests {
     }
 
     @Test
-    func asyncDecoratorPreservesMetadata() throws {
-        Interpreter.run("""
+    func asyncDecoratorPreservesMetadata() async throws {
+        await Interpreter.run("""
         async def asyncDecoratorPreserves_func(x: int):
             \"\"\"My docstring.\"\"\"
             yield

@@ -6,9 +6,12 @@
 //
 
 import Foundation
+import Synchronization
 
 enum InterpreterExecutionContext {
-    typealias Output = @MainActor @Sendable (String) -> Void
+    /// Called on whichever thread runs Python: main for pocketpy, either
+    /// main or the Python actor's for CPython.
+    typealias Output = @Sendable (String) -> Void
     typealias InputHandler = @MainActor @Sendable (String) async throws -> Void
 
     struct Context {
@@ -85,14 +88,14 @@ public extension Interpreter {
         _ traceRecorder: LineTracer? = nil,
         operation: @Sendable () async throws -> Void
     ) async rethrows -> String {
-        var capturedOutput = ""
+        let captured = Mutex("")
 
         try await InterpreterExecutionContext.withOutput(traceRecorder) {
             try await operation()
         } stdout: { text in
-            capturedOutput += text
+            captured.withLock { $0 += text }
         }
 
-        return capturedOutput
+        return captured.withLock { $0 }
     }
 }

@@ -9,16 +9,17 @@ import Testing
 import SwiftPy
 
 @MainActor
+@Suite(.serialized)
 struct AutoCompleterTests {
-    init() {
-        Interpreter.run("from rlcompleter import Completer")
-        Interpreter.run("completer = Completer()")
+    init() async {
+        await Interpreter.run("from rlcompleter import Completer")
+        await Interpreter.run("completer = Completer()")
     }
 
-    @Test func returnTabOnEmptyString() {
-        Interpreter.run("x = completer.complete('', 0)")
+    @Test func returnTabOnEmptyString() async {
+        await Interpreter.run("completion = completer.complete('', 0)")
 
-        #expect(py.main.x == "\t")
+        #expect(py.main.completion == "\t")
     }
 
     // CPython's rlcompleter offers the call form for every callable match;
@@ -31,22 +32,22 @@ struct AutoCompleterTests {
     #endif
 
     @Test()
-    func globalMatches() {
-        Interpreter.run("x = completer.complete('pri', 0)")
-        #expect(py.main.x == "print" + Self.partial)
+    func globalMatches() async {
+        await Interpreter.run("completion = completer.complete('pri', 0)")
+        #expect(py.main.completion == "print" + Self.partial)
 
         // The whole name offers the call form (paren left open for the console).
-        Interpreter.run("x = completer.complete('str', 0)")
-        #expect(py.main.x == "str(")
+        await Interpreter.run("completion = completer.complete('str', 0)")
+        #expect(py.main.completion == "str(")
     }
 
-    @Test func attributeMatches() {
-        Interpreter.run("x = completer.complete('completer.comp', 0)")
-        #expect(py.main.x == "completer.complete" + Self.partial)
+    @Test func attributeMatches() async {
+        await Interpreter.run("completion = completer.complete('completer.comp', 0)")
+        #expect(py.main.completion == "completer.complete" + Self.partial)
 
         // Full attribute name offers the call form.
-        Interpreter.run("x = completer.complete('completer.complete', 0)")
-        #expect(py.main.x == "completer.complete(")
+        await Interpreter.run("completion = completer.complete('completer.complete', 0)")
+        #expect(py.main.completion == "completer.complete(")
     }
 
     @Test func complete() {

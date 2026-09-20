@@ -20,13 +20,14 @@ private class Base: PythonBindable {
 }
 
 @MainActor
+@Suite(.serialized)
 struct SubclassBindableTests {
     let main = py.main
     let type = Base.pyType
     
-    init() {
+    init() async {
         main.Base = PyObject(Base.pyType)
-        Interpreter.run("""
+        await Interpreter.run("""
         class Subclass(Base):
             def __init__(self):
                 super().__init__()
@@ -36,20 +37,20 @@ struct SubclassBindableTests {
         """)
     }
     
-    @Test func startCalled() {
+    @Test func startCalled() async {
         let base: Base? = main.subclass_test
-        Interpreter.run("subclass_test.start()")
+        await Interpreter.run("subclass_test.start()")
         
         #expect(base?.startCalled == true)
     }
     
-    @Test func removeCache() {
-        Interpreter.run("""
+    @Test func removeCache() async {
+        await Interpreter.run("""
         test2 = Base()
         """)
         
         let base: Base? = Interpreter.evaluate("test2")
-        Interpreter.run("""
+        await Interpreter.run("""
         import gc
         
         del test2

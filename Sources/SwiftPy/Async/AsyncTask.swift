@@ -236,8 +236,9 @@ public class AsyncTask: PythonBindable {
 
 public extension AsyncTask {
     /// The task whose awaited work is running, available to that work and to
-    /// everything it awaits.
-    @TaskLocal static var current: AsyncTask?
+    /// everything it awaits. Nonisolated: read where a binding was called
+    /// from, which with CPython may be the Python actor.
+    @TaskLocal nonisolated static var current: AsyncTask?
 }
 
 extension AsyncTask {

@@ -32,12 +32,12 @@ struct BenchmarkTests {
         report(name, samples.sorted()[2])
     }
 
-    init() {
+    init() async {
         Interpreter.enableTrace()
         py.newmodule("bench")?.def("touch(value: int) -> int") { argc, argv in
             PyBind.function(argc, argv) { (value: Int) in value + 1 }
         }
-        Interpreter.run("""
+        await Interpreter.run("""
         class Component:
             def __init__(self):
                 self.ticks = 0

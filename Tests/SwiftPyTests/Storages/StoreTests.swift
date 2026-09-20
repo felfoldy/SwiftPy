@@ -11,14 +11,14 @@ import Foundation
 import SwiftData
 
 @MainActor
-@Suite
+@Suite(.serialized)
 struct StoreTests {
     private let namespace: PyObject
 
-    init() throws {
+    init() async throws {
         let code = try Interpreter.compile("{'__builtins__': __import__('builtins')}", mode: .evaluation)
-        namespace = try #require(try Interpreter.execute(code))
-        try run("""
+        namespace = try #require(try await Interpreter.execute(code))
+        try await run("""
         from modeling import model
         from storage import Store
 
@@ -31,27 +31,27 @@ struct StoreTests {
     }
     
     @available(macOS 15, *)
-    @Test func insert() throws {
-        try run("""
+    @Test func insert() async throws {
+        try await run("""
         container = Store('insert_testing', in_memory=True)
         sword = Item(name='Sword')
         container.insert(sword)
         """)
         
         // Backing data.
-        let handle: ModelHandle = try #require(try evaluate("sword._data"))
+        let handle: ModelHandle = try #require(try await evaluate("sword._data"))
         #expect(handle.json == #"{"name": "Sword", "quantity": 0, "description": null, "_icloud_id": null}"#)
         
         // Is inserted?
-        let container: SwiftPy.Store = try #require(try evaluate("container"))
+        let container: SwiftPy.Store = try #require(try await evaluate("container"))
         let row = try #require(try container.row(id: handle.id))
         #expect(row.json == handle.json)
         #expect(row.keys?["__name__"] == "Item")
     }
     
     @available(macOS 15, *)
-    @Test func fetch() throws {
-        try run("""
+    @Test func fetch() async throws {
+        try await run("""
         container = Store('fetch_testing', True)
         container.insert(Item(name='Sword'))
         items = container.fetch(Item)
@@ -60,24 +60,24 @@ struct StoreTests {
         print(len(items))
         """)
 
-        let itemCount: Int = try #require(try evaluate("len(items)"))
+        let itemCount: Int = try #require(try await evaluate("len(items)"))
         #expect(itemCount == 1)
-        let handle: ModelHandle = try #require(try evaluate("items[0]._data"))
+        let handle: ModelHandle = try #require(try await evaluate("items[0]._data"))
         #expect(handle.json == #"{"name": "Sword", "quantity": 0, "description": null, "_icloud_id": null}"#)
     }
     
     @available(macOS 15, *)
-    @Test func update() throws {
-        try run("""
+    @Test func update() async throws {
+        try await run("""
         container = Store('update_testing', True)
         sword = Item(name='Sword')
         container.insert(sword)
         """)
         
-        let container: SwiftPy.Store = try #require(try evaluate("container"))
-        let handle: ModelHandle = try #require(try evaluate("sword._data"))
+        let container: SwiftPy.Store = try #require(try await evaluate("container"))
+        let handle: ModelHandle = try #require(try await evaluate("sword._data"))
         
-        try run("""
+        try await run("""
         sword.description = "A great sword"
         sword.quantity += 1
         """)
@@ -87,82 +87,82 @@ struct StoreTests {
     }
     
     @available(macOS 15, *)
-    @Test func delete() throws {
-        try run("""
+    @Test func delete() async throws {
+        try await run("""
         container = Store('delete_testing', True)
         sword = Item(name='Sword')
         container.insert(sword)
         """)
         
-        let insertedCount: Int = try #require(try evaluate("len(container.fetch(Item))"))
+        let insertedCount: Int = try #require(try await evaluate("len(container.fetch(Item))"))
         #expect(insertedCount == 1)
         
-        try run("container.delete(sword)")
+        try await run("container.delete(sword)")
         
-        let deletedCount: Int = try #require(try evaluate("len(container.fetch(Item))"))
+        let deletedCount: Int = try #require(try await evaluate("len(container.fetch(Item))"))
         #expect(deletedCount == 0)
 
         // Unstored: a change no longer reaches the store.
-        let isUnstored: Bool? = try evaluate("sword._data is None")
+        let isUnstored: Bool? = try await evaluate("sword._data is None")
         #expect(isUnstored == true)
-        try run("sword.quantity = 3")
-        let stillDeleted: Int = try #require(try evaluate("len(container.fetch(Item))"))
+        try await run("sword.quantity = 3")
+        let stillDeleted: Int = try #require(try await evaluate("len(container.fetch(Item))"))
         #expect(stillDeleted == 0)
         
         // Check reinsert
-        try run("container.insert(sword)")
-        let reinsertedCount: Int = try #require(try evaluate("len(container.fetch(Item))"))
+        try await run("container.insert(sword)")
+        let reinsertedCount: Int = try #require(try await evaluate("len(container.fetch(Item))"))
         #expect(reinsertedCount == 1)
     }
 
     /// Another device deleting the row, merged by CloudKit under a held model.
     @available(macOS 15, *)
-    @Test func changeAfterRemoteDeletionStoresAgain() throws {
-        try run("""
+    @Test func changeAfterRemoteDeletionStoresAgain() async throws {
+        try await run("""
         container = Store('remote_delete_testing', True)
         sword = Item(name='Sword')
         container.insert(sword)
         """)
-        let container: SwiftPy.Store = try #require(try evaluate("container"))
-        let handle: ModelHandle = try #require(try evaluate("sword._data"))
+        let container: SwiftPy.Store = try #require(try await evaluate("container"))
+        let handle: ModelHandle = try #require(try await evaluate("sword._data"))
         let row = try #require(try container.row(id: handle.id))
         container.context.delete(row)
         try container.context.save()
         #expect(try container.row(id: handle.id) == nil)
 
-        try run("sword.quantity = 2")
+        try await run("sword.quantity = 2")
 
         let restored = try #require(try container.row(id: handle.id))
         #expect(restored.json.contains(#""quantity": 2"#))
-        let count: Int = try #require(try evaluate("len(container.fetch(Item))"))
+        let count: Int = try #require(try await evaluate("len(container.fetch(Item))"))
         #expect(count == 1)
     }
 
     /// Rows written before ids existed get one on their first fetch.
     @available(macOS 15, *)
-    @Test func legacyRowsGetAnId() throws {
-        try run("container = Store('legacy_testing', True)")
-        let container: SwiftPy.Store = try #require(try evaluate("container"))
+    @Test func legacyRowsGetAnId() async throws {
+        try await run("container = Store('legacy_testing', True)")
+        let container: SwiftPy.Store = try #require(try await evaluate("container"))
         let legacy = ModelData(keys: [LookupKeyValue(key: "__name__", value: "Item")], json: #"{"name": "Old"}"#)
         container.context.insert(legacy)
 
-        try run("items = container.fetch(Item)")
-        let handle: ModelHandle = try #require(try evaluate("items[0]._data"))
+        try await run("items = container.fetch(Item)")
+        let handle: ModelHandle = try #require(try await evaluate("items[0]._data"))
         #expect(legacy.keys?["__id__"] == handle.id)
 
-        try run("items[0].quantity = 5")
+        try await run("items[0].quantity = 5")
         #expect(legacy.json.contains(#""quantity": 5"#))
     }
 
     @available(macOS 15, *)
     @Test func observeLocalSave() async throws {
-        try run("""
+        try await run("""
         container = Store('observe_local_testing', True)
         seen = []
         observation = container.observe(Item, lambda items: seen.append(len(items)))
         container.insert(Item(name='Sword'))
         """)
-        let container: SwiftPy.Store = try #require(try evaluate("container"))
+        let container: SwiftPy.Store = try #require(try await evaluate("container"))
         try container.context.save()
         let seen = try await callbacks()
         #expect(seen == [1])
@@ -170,7 +170,7 @@ struct StoreTests {
 
     @available(macOS 15, *)
     @Test func observe() async throws {
-        try run("""
+        try await run("""
         container = Store('observe_testing', True)
         seen = []
         observation = container.observe(Item, lambda items: seen.append(len(items)))
@@ -181,10 +181,10 @@ struct StoreTests {
         let seen = try await callbacks()
         #expect(seen == [1])
 
-        try run("observation.cancel()")
+        try await run("observation.cancel()")
         NotificationCenter.default.post(name: .NSPersistentStoreRemoteChange, object: nil)
         try await Task.sleep(for: .milliseconds(400))
-        let seenAfterCancel: [Int] = try #require(try evaluate("seen"))
+        let seenAfterCancel: [Int] = try #require(try await evaluate("seen"))
         #expect(seenAfterCancel == [1])
     }
 
@@ -193,20 +193,20 @@ struct StoreTests {
     private func callbacks() async throws -> [Int] {
         for _ in 0..<50 {
             try await Task.sleep(for: .milliseconds(50))
-            let seen: [Int] = try #require(try evaluate("seen"))
+            let seen: [Int] = try #require(try await evaluate("seen"))
             if !seen.isEmpty { return seen }
         }
-        return try #require(try evaluate("seen"))
+        return try #require(try await evaluate("seen"))
     }
 
-    private func run(_ source: String) throws {
+    private func run(_ source: String) async throws {
         let code = try Interpreter.compile(source)
-        try Interpreter.execute(code, globals: namespace)
+        try await Interpreter.execute(code, globals: namespace)
     }
 
-    private func evaluate<Result: PythonConvertible>(_ expression: String) throws -> Result? {
+    private func evaluate<Result: PythonConvertible>(_ expression: String) async throws -> Result? {
         let code = try Interpreter.compile(expression, mode: .evaluation)
-        guard let result = try Interpreter.execute(code, globals: namespace) else {
+        guard let result = try await Interpreter.execute(code, globals: namespace) else {
             return nil
         }
         return try Result.cast(result.reference)

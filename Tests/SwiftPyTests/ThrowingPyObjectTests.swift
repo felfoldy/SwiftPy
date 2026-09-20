@@ -9,9 +9,10 @@ import Testing
 @testable import SwiftPy
 
 @MainActor
+@Suite(.serialized)
 struct ThrowingPyObjectTests {
-    init() {
-        Interpreter.run("""
+    init() async {
+        await Interpreter.run("""
         import math
         class Box:
             value = 3

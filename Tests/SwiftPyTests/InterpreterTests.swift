@@ -9,17 +9,18 @@ import Testing
 @testable import SwiftPy
 
 @MainActor
+@Suite(.serialized)
 struct InterpreterTests {
-    @Test func loadBundleModule() {
-        Interpreter.run("from rlcompleter import Completer")
+    @Test func loadBundleModule() async {
+        await Interpreter.run("from rlcompleter import Completer")
         #expect(py.main.Completer != nil)
     }
     
-    @Test func evaluate() {
+    @Test func evaluate() async {
         #expect(Interpreter.evaluate("3 + 4") == 7)
     }
 
-    @Test func stringTitle() {
+    @Test func stringTitle() async {
         #expect(Interpreter.evaluate("\"hello WORLD\".title()") == "Hello World")
         #expect(Interpreter.evaluate("\"they're bill's\".title()") == "They'Re Bill'S")
         #expect(Interpreter.evaluate("\"123abc foo-bar\".title()") == "123Abc Foo-Bar")
@@ -33,7 +34,7 @@ struct InterpreterTests {
         #endif
     }
 
-    @Test func stringIsAlphanumeric() {
+    @Test func stringIsAlphanumeric() async {
         #expect(Interpreter.evaluate("'abc123'.isalnum()") == true)
         #expect(Interpreter.evaluate("''.isalnum()") == false)
         #expect(Interpreter.evaluate("'abc 123'.isalnum()") == false)
@@ -48,7 +49,7 @@ struct InterpreterTests {
         #endif
     }
 
-    @Test func stringRSplit() {
+    @Test func stringRSplit() async {
         #expect(Interpreter.evaluate("'a,b,c'.rsplit(',', 1)") == ["a,b", "c"])
         #expect(Interpreter.evaluate("'a--b--c'.rsplit('--', 1)") == ["a--b", "c"])
         #expect(Interpreter.evaluate("'a,,b,'.rsplit(',')") == ["a", "", "b", ""])
@@ -57,16 +58,16 @@ struct InterpreterTests {
         #expect(Interpreter.evaluate("'a,b'.rsplit(',', 0)") == ["a,b"])
     }
 
-    @Test func dirIsNotNone() {
-        Interpreter.run("import interpreter")
+    @Test func dirIsNotNone() async {
+        await Interpreter.run("import interpreter")
 
         #expect(Interpreter.evaluate("dir is None") == false)
     }
 
     // sys.os is pocketpy's; CPython has sys.platform.
     #if os(macOS) && !cpython
-    @Test func sysOS() throws {
-        Interpreter.run("import sys")
+    @Test func sysOS() async throws {
+        await Interpreter.run("import sys")
         #expect(Interpreter.evaluate("sys.os") == "macos")
     }
     #endif
@@ -86,8 +87,8 @@ struct InterpreterTests {
     // fails them all when run in parallel. Re-enable once `clearMain` can take
     // a namespace to clear.
     @Test(.disabled("clears __main__ under concurrently running suites"))
-    func clearMain_removesUserDefinedVariables() {
-        Interpreter.run("_test_clear_x = 42")
+    func clearMain_removesUserDefinedVariables() async {
+        await Interpreter.run("_test_clear_x = 42")
         #expect(Interpreter.evaluate("_test_clear_x") == 42 as Int?)
 
         py.clearMain()
@@ -165,8 +166,8 @@ struct InterpreterTests {
     @Test(
         .disabled("Performance benchmark")
     )
-    func performance() {
-        Interpreter.run(primes)
+    func performance() async {
+        await Interpreter.run(primes)
     }
 }
 

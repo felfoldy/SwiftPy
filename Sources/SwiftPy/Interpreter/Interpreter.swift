@@ -15,9 +15,9 @@ import OSLog
 /// bind Swift types as Python modules, and handle REPL input.
 ///
 /// ### Examples:
-/// Execute a script with ``run(_:filename:mode:)-1ohhm``:
+/// Execute a script with ``run(_:filename:mode:)``:
 /// ```swift
-/// Interpreter.run("print('Hello from Python')")
+/// await Interpreter.run("print('Hello from Python')")
 /// ```
 ///
 /// Evaluate an expression with ``evaluate(_:)``:
@@ -54,7 +54,8 @@ public final class Interpreter {
     var registeredNativeModules: Set<String> = []
 
     /// Python source registered from bundles, keyed by file name (e.g. `"module.py"`).
-    var registeredSources: [String: String] = [:]
+    /// Behind a lock: CPython asks for sources on whichever thread imports.
+    nonisolated static let registeredSources = SourceStore()
 
     let profiler = OSSignposter(logger: Logger(
         OSLog(subsystem: "com.felfoldy.SwiftPy",
@@ -85,7 +86,7 @@ public final class Interpreter {
             "rlcompleter",
         ]
         let nativeModules = registeredNativeModules.union(moduleFactory.keys)
-        let sourceModules = registeredSources.keys.map { name in
+        let sourceModules = Self.registeredSources.names.map { name in
             name.hasSuffix(".py") ? String(name.dropLast(3)) : name
         }
 
@@ -199,14 +200,16 @@ public final class Interpreter {
     }
 #endif
 
+    /// Runs compiled code: on ``PythonActor`` with CPython, on main with
+    /// pocketpy.
     @discardableResult
     func execute(
         _ code: CompiledCode,
         globals: InterpreterObject? = nil,
         locals: InterpreterObject? = nil
-    ) throws(PythonError) -> InterpreterObject? {
+    ) async throws(PythonError) -> InterpreterObject? {
         #if cpython
-        try executeWithCPython(code.code, globals: globals, locals: locals)
+        try await executeWithCPython(code.code, globals: globals, locals: locals)
         #else
         try execute(code.code, globals: globals, locals: locals, mode: code.mode)
         #endif
@@ -254,26 +257,10 @@ public extension Interpreter {
         shared.relays?.enableStderrRelay()
     }
 
-    /// Compiles and runs source synchronously.
-    ///
-    /// Only plain code is run; source with top-level async is ignored.
-    /// Errors are reported to the interpreter's output as `stderr`.
-    /// - Parameters:
-    ///   - source: The Python source to execute.
-    ///   - filename: Name used to identify the source in tracebacks. Defaults to `"<string>"`.
-    ///   - mode: The compilation mode to use. Defaults to `.execution`.
-    static func run(_ source: String, filename: String = "<string>", mode: CompileMode = .single) {
-        do {
-            let code = try compile(source, filename: filename, mode: mode)
-            try execute(code)
-        } catch {
-            shared.report(error)
-        }
-    }
-
     /// Compiles and runs source, awaiting top-level async.
     ///
-    /// Source with top-level async is awaited; other source runs synchronously.
+    /// With CPython the code runs on ``PythonActor``, off the main actor;
+    /// source with top-level async is awaited through the event loop.
     /// Errors are reported to the interpreter's output as `stderr`.
     ///
     /// ### Example:
@@ -315,28 +302,11 @@ public extension Interpreter {
         try shared.compile(source, filename: filename, mode: mode)
     }
 
-    /// Executes compiled code synchronously.
-    ///
-    /// Use ``compile(_:filename:mode:)`` to produce the ``CompiledCode``.
-    ///
-    /// - Parameters:
-    ///   - code: The compiled code to execute.
-    ///   - globals: The global namespace. Defaults to the shared interpreter state.
-    ///   - locals: The local namespace. Defaults to the same mapping as `globals`.
-    /// - Throws: A ``PythonError`` if execution fails.
-    @discardableResult
-    static func execute(
-        _ code: CompiledCode,
-        globals: InterpreterObject? = nil,
-        locals: InterpreterObject? = nil
-    ) throws(PythonError) -> InterpreterObject? {
-        try shared.execute(code, globals: globals, locals: locals)
-    }
-
     /// Executes compiled code, awaiting any generator the code returns.
     ///
-    /// If the code returns a generator (e.g. from a top-level `await`), it is
-    /// iterated asynchronously as an ``AsyncTask``.
+    /// With CPython the code runs on ``PythonActor``, so the main actor is
+    /// free while it does. If the code returns a generator (e.g. from a
+    /// top-level `await`), it is iterated asynchronously as an ``AsyncTask``.
     /// Use ``compile(_:filename:mode:)`` to produce the ``CompiledCode``.
     ///
     /// - Parameters:
@@ -350,7 +320,7 @@ public extension Interpreter {
         globals: InterpreterObject? = nil,
         locals: InterpreterObject? = nil
     ) async throws(PythonError) -> InterpreterObject? {
-        guard let result = try shared.execute(code, globals: globals, locals: locals) else {
+        guard let result = try await shared.execute(code, globals: globals, locals: locals) else {
             return nil
         }
         // Top-level await compiles to a generator in pocketpy and to a
@@ -371,13 +341,16 @@ public extension Interpreter {
 
     /// Evaluates the expression, casts to the given type and returns the result.
     ///
+    /// Synchronous, on the main actor, which holds the GIL whenever it runs:
+    /// the shape of a call from a view, not of a cell.
+    ///
     /// - Parameter expression: Expression to evaluate.
     /// - Returns: The result of the expression.
     static func evaluate<Result: PythonConvertible>(_ expression: String) -> Result? {
         do {
             #if cpython
             let code = try shared.compile(expression, mode: .evaluation)
-            guard let result = try shared.execute(code) else { return nil }
+            let result = try PyRuntime.execute(code.code)
             return try Result.cast(result.reference)
             #else
             let code = try shared.compileWithPocketPy(expression, mode: .evaluation)

@@ -10,6 +10,7 @@ import Testing
 import Foundation
 
 @MainActor
+@Suite(.serialized)
 struct PathTests {
     private func path(_ string: String) -> Path {
         Path(url: URL(filePath: string))

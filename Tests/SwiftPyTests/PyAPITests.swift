@@ -9,13 +9,14 @@ import Testing
 import SwiftPy
 
 @MainActor
+@Suite(.serialized)
 struct PyAPITests {
     // PyRef.bind is pocketpy's; CPython binds through PyType/PyModule.
     #if !cpython
-    @Test func setAttribute() throws {
+    @Test func setAttribute() async throws {
         let main = py.main
 
-        Interpreter.run("class Test: ...")
+        await Interpreter.run("class Test: ...")
 
         let Test = main.Test
 
@@ -28,7 +29,7 @@ struct PyAPITests {
             }
         }
         
-        Interpreter.run("""
+        await Interpreter.run("""
         x = Test('secret value')
         """)
 
@@ -41,8 +42,8 @@ struct PyAPITests {
     
     #endif
 
-    @Test func referenceCall() throws {
-        Interpreter.run("""
+    @Test func referenceCall() async throws {
+        await Interpreter.run("""
         def add(a, b):
             return a + b
         """)
@@ -50,8 +51,8 @@ struct PyAPITests {
         try #expect(py.main.add?(10, 20) == 30)
     }
     
-    @Test func referenceCallThrows() throws {
-        Interpreter.run("""
+    @Test func referenceCallThrows() async throws {
+        await Interpreter.run("""
         def referenceCallThrows():
             raise ValueError('incorrect')
         """)
@@ -61,10 +62,10 @@ struct PyAPITests {
         }
     }
 
-    @Test func errorToPython() {
+    @Test func errorToPython() async {
         py.main.err = PythonError.ValueError("boom")
 
-        Interpreter.run("""
+        await Interpreter.run("""
         def reraise():
             raise err
         """)

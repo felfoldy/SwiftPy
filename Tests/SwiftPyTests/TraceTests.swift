@@ -6,21 +6,27 @@
 //
 
 import Testing
+import Synchronization
 @testable import SwiftPy
 
 @MainActor
 @Suite(.serialized)
 struct TraceTests {
     /// Records the events delivered to a trace function for later assertions.
-    @MainActor
-    final class Recorder {
-        struct Entry {
+    /// Nonisolated with a lock: CPython traces on the Python thread.
+    nonisolated final class Recorder: Sendable {
+        struct Entry: Sendable {
             let event: PyAPI.TraceEvent
             let line: Int?
             let source: String?
         }
 
-        var entries: [Entry] = []
+        private let storage = Mutex<[Entry]>([])
+
+        var entries: [Entry] {
+            get { storage.withLock { $0 } }
+            set { storage.withLock { $0 = newValue } }
+        }
 
         /// Line numbers of `.line` events from `source`, in delivery order.
         func lines(inSource source: String) -> [Int] {
@@ -36,18 +42,19 @@ struct TraceTests {
         }
 
         func record(_ frame: PyAPI.Frame, _ event: PyAPI.TraceEvent) {
-            entries.append(Entry(event: event,
-                                 line: frame.lineNumber,
-                                 source: frame.sourceLocation))
+            let entry = Entry(event: event,
+                              line: frame.lineNumber,
+                              source: frame.sourceLocation)
+            storage.withLock { $0.append(entry) }
         }
     }
 
-    @Test func lineEventsReportSourceLinesInOrder() {
+    @Test func lineEventsReportSourceLinesInOrder() async {
         let recorder = Recorder()
         py.setTrace(recorder.record)
         defer { py.setTrace(nil) }
 
-        Interpreter.run("""
+        await Interpreter.run("""
         x = 10
         y = 20
         z = x + y
@@ -56,22 +63,22 @@ struct TraceTests {
         #expect(recorder.lines(inSource: "<trace>") == [1, 2, 3])
     }
 
-    @Test func lineEventsReportSourceFilename() {
+    @Test func lineEventsReportSourceFilename() async {
         let recorder = Recorder()
         py.setTrace(recorder.record)
         defer { py.setTrace(nil) }
 
-        Interpreter.run("value = 1", filename: "<named>", mode: .execution)
+        await Interpreter.run("value = 1", filename: "<named>", mode: .execution)
 
         #expect(recorder.lines(inSource: "<named>") == [1])
     }
 
-    @Test func pushAndPopAreBalancedAcrossCalls() {
+    @Test func pushAndPopAreBalancedAcrossCalls() async {
         let recorder = Recorder()
         py.setTrace(recorder.record)
         defer { py.setTrace(nil) }
 
-        Interpreter.run("""
+        await Interpreter.run("""
         def foo():
             return 42
 
@@ -83,21 +90,21 @@ struct TraceTests {
         #expect(recorder.count(of: .pop, inSource: "<trace>") == 2)
     }
 
-    @Test func setTraceNilRemovesTheHook() {
+    @Test func setTraceNilRemovesTheHook() async {
         let recorder = Recorder()
         py.setTrace(recorder.record)
 
-        Interpreter.run("first = 1", filename: "<trace>", mode: .execution)
+        await Interpreter.run("first = 1", filename: "<trace>", mode: .execution)
         #expect(!recorder.entries.isEmpty)
 
         py.setTrace(nil)
         recorder.entries.removeAll()
 
-        Interpreter.run("second = 2", filename: "<trace>", mode: .execution)
+        await Interpreter.run("second = 2", filename: "<trace>", mode: .execution)
         #expect(recorder.entries.isEmpty)
     }
 
-    @Test func replacingTraceUsesTheNewFunction() {
+    @Test func replacingTraceUsesTheNewFunction() async {
         let first = Recorder()
         let second = Recorder()
 
@@ -105,7 +112,7 @@ struct TraceTests {
         py.setTrace(second.record)
         defer { py.setTrace(nil) }
 
-        Interpreter.run("only = 1", filename: "<trace>", mode: .execution)
+        await Interpreter.run("only = 1", filename: "<trace>", mode: .execution)
 
         #expect(first.entries.isEmpty)
         #expect(!second.entries.isEmpty)

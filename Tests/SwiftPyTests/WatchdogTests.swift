@@ -13,10 +13,11 @@ import Testing
 #if !cpython
 
 @MainActor
+@Suite(.serialized)
 struct WatchdogTests {
     /// Executing through the interpreter aborts a runaway loop with a
     /// `TimeoutError` instead of hanging.
-    @Test func interpreterAbortsRunawayLoop() throws {
+    @Test func interpreterAbortsRunawayLoop() async throws {
         Interpreter.timeout = 10
         defer { Interpreter.timeout = 1000 }
 
@@ -25,8 +26,8 @@ struct WatchdogTests {
             pass
         """, mode: .execution)
 
-        let error = #expect(throws: PythonError.self) {
-            try Interpreter.execute(code)
+        let error = await #expect(throws: PythonError.self) {
+            try await Interpreter.execute(code)
         }
 
         #expect(error.map { py.tpname($0.type) } == "TimeoutError")
@@ -34,16 +35,16 @@ struct WatchdogTests {
 
     /// `interpreter.set_timeout` configures the timeout from Python, and `None`
     /// disables it.
-    @Test func pythonSetTimeoutConfiguresInterpreter() {
+    @Test func pythonSetTimeoutConfiguresInterpreter() async {
         defer { Interpreter.timeout = 1000 }
 
-        Interpreter.run("""
+        await Interpreter.run("""
         import interpreter
         interpreter.set_timeout(250)
         """)
         #expect(Interpreter.timeout == 250)
 
-        Interpreter.run("interpreter.set_timeout(None)")
+        await Interpreter.run("interpreter.set_timeout(None)")
         #expect(Interpreter.timeout == nil)
     }
 }

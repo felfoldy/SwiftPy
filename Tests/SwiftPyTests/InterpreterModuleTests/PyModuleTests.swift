@@ -9,6 +9,7 @@ import Testing
 import SwiftPy
 
 @MainActor
+@Suite(.serialized)
 struct PyModuleTests {
     init() {
         PyBind.module("module_handle_test") { module in

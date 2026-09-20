@@ -14,6 +14,10 @@ import Foundation
 enum SwiftEventLoop {
     /// Importing installs the loop, so this is where asyncio starts.
     static let module: PyModule = {
+        // The Python actor's thread learns the loop as it starts.
+        PyRuntime.prepareThread = {
+            try? PyRuntime.run("import _swiftpy_asyncio; _swiftpy_asyncio._install_on_this_thread()")
+        }
         if let module = py.module("_swiftpy_asyncio") { return module }
         // Import again through importlib for the error py.module swallowed.
         do {
@@ -26,9 +30,9 @@ enum SwiftEventLoop {
 
     // MARK: Scheduling
 
-    private struct Scheduled {
+    private struct Scheduled: Sendable {
         let callback: PyObject
-        // Callbacks run from the main queue, outside the task that scheduled
+        // Callbacks run on the Python actor, outside the task that scheduled
         // them, so output routing and the current task are carried across.
         let context: InterpreterExecutionContext.Context
         let task: AsyncTask?
@@ -53,21 +57,26 @@ enum SwiftEventLoop {
         ready.append(item)
         guard !drainScheduled else { return }
         drainScheduled = true
-        // The main queue keeps call_soon's FIFO order, which asyncio relies on.
-        DispatchQueue.main.async {
-            MainActor.assumeIsolated { drain() }
+        // One task per batch, made in order: the main actor's queue keeps
+        // call_soon's FIFO order, which asyncio relies on, and each batch
+        // reaches the Python actor in that order too.
+        Task { @MainActor in
+            drainScheduled = false
+            let batch = ready
+            ready.removeAll()
+            await run(batch)
         }
     }
 
-    private static func drain() {
-        drainScheduled = false
-        let batch = ready
-        ready.removeAll()
+    /// The callbacks step coroutines: that is where code after an `await`
+    /// runs, so it runs where a cell does.
+    @PythonActor
+    private static func run(_ batch: [Scheduled]) {
         for item in batch {
             InterpreterExecutionContext.$current.withValue(item.context) {
                 AsyncTask.$current.withValue(item.task) {
                     // Handle._run reports its own errors to the loop.
-                    do { try item.callback.throwing() } catch {
+                    do { try PyRuntime.call(item.callback) } catch {
                         log.error("event loop callback failed: \(error)")
                     }
                 }
