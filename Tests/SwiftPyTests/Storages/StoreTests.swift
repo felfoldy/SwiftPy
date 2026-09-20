@@ -103,8 +103,8 @@ struct StoreTests {
         #expect(deletedCount == 0)
 
         // Unstored: a change no longer reaches the store.
-        let isUnstored: Bool = try #require(try evaluate("sword._data is None"))
-        #expect(isUnstored)
+        let isUnstored: Bool? = try evaluate("sword._data is None")
+        #expect(isUnstored == true)
         try run("sword.quantity = 3")
         let stillDeleted: Int = try #require(try evaluate("len(container.fetch(Item))"))
         #expect(stillDeleted == 0)
