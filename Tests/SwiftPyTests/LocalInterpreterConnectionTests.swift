@@ -188,6 +188,48 @@ struct LocalInterpreterConnectionTests {
         #expect(Interpreter.evaluate("_test_gather_flag") == false)
     }
 
+#if cpython
+    @Test func stopInterruptsSynchronousCode() async {
+        let connection = LocalInterpreterConnection()
+        let stream = await connection.events
+
+        await connection.compile(id: 1, source: """
+        import time
+        _test_interrupt_flag = 'running'
+        try:
+            while True:
+                pass
+        finally:
+            _test_interrupt_flag = 'unwound'
+        """)
+
+        var iterator = stream.makeAsyncIterator()
+        let runTask = Task { await connection.run(id: 1) }
+        for _ in 0..<200 where (Interpreter.evaluate("_test_interrupt_flag") as String?) != "running" {
+            try? await Task.sleep(for: .milliseconds(10))
+        }
+
+        // The stop reaches the loop, not the cell queued behind it.
+        await connection.compile(id: 2, source: "_test_interrupt_flag = 'next'")
+        let nextTask = Task { await connection.run(id: 2) }
+        try? await Task.sleep(for: .milliseconds(20))
+        await connection.perform(.stop(id: 2))
+        await connection.perform(.stop(id: 1))
+        await runTask.value
+        await nextTask.value
+
+        var stopped = false
+        while let event = await iterator.next() {
+            if case .stopped = event.payload, event.id == 1 {
+                stopped = true
+                break
+            }
+        }
+        #expect(stopped)
+        #expect(Interpreter.evaluate("_test_interrupt_flag") == "next")
+    }
+#endif
+
     @Test func stopWithUnknownIdDoesNotEmitStopped() async {
         let connection = LocalInterpreterConnection()
         let stream = await connection.events

@@ -7,8 +7,23 @@
 
 #if cpython
 import Foundation
+import Synchronization
 
 extension Interpreter {
+    /// The context id of the code ``PythonActor`` is running, while it does.
+    /// A stop interrupts that one only: a cell queued behind it must not be
+    /// the one to die.
+    nonisolated static let executing = Mutex<UInt64?>(nil)
+
+    /// Raises `KeyboardInterrupt` in the execution `contextId`, if it is the
+    /// one running. It lands at the next bytecode; a blocking C call
+    /// returns first.
+    static func interrupt(contextId: UInt64) {
+        Self.executing.withLock { executing in
+            if executing == contextId { PyRuntime.interrupt() }
+        }
+    }
+
     func startCPython() {
         // Touching `cpy` starts CPython, which also keeps the linker from
         // dropping it: a static libpython contributes nothing unless something
@@ -31,12 +46,22 @@ extension Interpreter {
     }
 
     /// Runs on ``PythonActor``; main is free meanwhile.
+    @PythonActor
     @discardableResult
-    nonisolated func executeWithCPython(
+    func executeWithCPython(
         _ code: PyObject,
         globals: PyObject? = nil,
         locals: PyObject? = nil
     ) async throws(PythonError) -> PyObject {
+        Self.executing.withLock { $0 = InterpreterExecutionContext.current.contextId }
+        defer {
+            // Under the lock, so an interrupt can't land after the code ended
+            // and wait for the next cell.
+            Self.executing.withLock {
+                $0 = nil
+                PyRuntime.clearInterrupt()
+            }
+        }
         do {
             return try await PyRuntime.execute(code, globals: globals, locals: locals)
         } catch {

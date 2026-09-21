@@ -35,9 +35,12 @@ public actor LocalInterpreterConnection: InterpreterConnection {
 
         case let .stop(id):
             // Reentrancy: this runs while `.run` is suspended awaiting execution.
-            guard let cancellation = running.removeValue(forKey: id) else { return }
+            // `.stopped` follows once the run has actually ended.
+            guard let cancellation = running[id] else { return }
             await cancellation.cancel()
-            send(id: id, .stopped)
+            #if cpython
+            await Interpreter.interrupt(contextId: id)
+            #endif
 
         case let .execute(token, source):
             // Allocate a fresh context id and return after reporting it. The
@@ -138,12 +141,18 @@ public actor LocalInterpreterConnection: InterpreterConnection {
                 self.send(id: id, .stdout(text: text))
             }
 
-            // A stop request already acknowledged with `.stopped`; don't also
-            // report success for the unwound execution.
-            if await cancellation?.isCancelled == true { return }
+            // A stopped run reports that alone, not success or the unwinding
+            // error too.
+            if await cancellation?.isCancelled == true {
+                send(id: id, .stopped)
+                return
+            }
             send(id: id, .attachment(items: [.image(name: "checkmark.circle"), .text(text: executionTime())]))
         } catch {
-            if await cancellation?.isCancelled == true { return }
+            if await cancellation?.isCancelled == true {
+                send(id: id, .stopped)
+                return
+            }
             if let error = error as? PythonError, let traceback = error.traceback {
                 send(id: id, .stderr(text: traceback))
             }
