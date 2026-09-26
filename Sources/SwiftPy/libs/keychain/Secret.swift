@@ -18,9 +18,9 @@ import Foundation
 /// ```python
 /// import keychain, requests
 ///
-/// key = await keychain.secret("OPENAI_API_KEY")
+/// key = keychain.secret("OPENAI_API_KEY")
 /// print(key)  # <Secret name="OPENAI_API_KEY">
-/// response = await requests.get(url, headers={"Authorization": key.bearer()})
+/// response = requests.get(url, headers={"Authorization": key.bearer()})
 /// ```
 @Scriptable
 @MainActor

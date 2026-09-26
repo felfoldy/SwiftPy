@@ -25,7 +25,7 @@ struct ViewRepresentationTests {
 
         var displayed: AnyView?
         Interpreter.interface.display = { displayed = $0 }
-        defer { Interpreter.interface = InterpreterInterface() }
+        defer { Interpreter.interface.display = InterpreterInterface().display }
 
         _ = AnyView.pyType
         _ = CustomView.pyType
@@ -44,7 +44,7 @@ struct ViewRepresentationTests {
 
         var displayed: AnyView?
         Interpreter.interface.display = { displayed = $0 }
-        defer { Interpreter.interface = InterpreterInterface() }
+        defer { Interpreter.interface.display = InterpreterInterface().display }
 
         _ = AnyView.pyType
         _ = CustomView.pyType

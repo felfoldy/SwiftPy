@@ -130,19 +130,19 @@ extension Interpreter {
         ```python
         import keychain, requests
 
-        key = await keychain.secret("OPENAI_API_KEY")
+        key = keychain.secret("OPENAI_API_KEY")
         print(key)  # <Secret name="OPENAI_API_KEY">
-        response = await requests.get(url, headers={"Authorization": key.bearer()})
+        response = requests.get(url, headers={"Authorization": key.bearer()})
         keychain.delete(key)
         ```
         """) { module in
             module.class(Secret.self)
 
-            module.asyncDef(
+            module.def(
                 "secret(key: str) -> Secret",
                 docstring: """
                 Returns the secret stored under a name, asking for its value when \
-                the keychain has none. Await the result.
+                the keychain has none.
 
                 key: The name the secret is stored under.
 
@@ -153,12 +153,12 @@ extension Interpreter {
                 ```python
                 import keychain, requests
 
-                key = await keychain.secret("GITLAB_TOKEN")
-                response = await requests.get(url, headers={"PRIVATE-TOKEN": key})
+                key = keychain.secret("GITLAB_TOKEN")
+                response = requests.get(url, headers={"PRIVATE-TOKEN": key})
                 ```
                 """
             ) { argc, argv in
-                PyBind.function(argc, argv) { (key: String) in
+                PyBind.blocking(argc, argv) { (key: String) in
                     try await Keychain.secret(named: key)
                 }
             }

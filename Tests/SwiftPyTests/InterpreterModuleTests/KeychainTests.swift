@@ -38,7 +38,19 @@ struct KeychainTests {
 
     private func restore() {
         Keychain.storage = KeychainStorage()
-        Interpreter.interface = InterpreterInterface()
+        // Only the field this suite owns: `Interpreter.interface` is global and
+        // replacing it wholesale wipes what a suite running beside us installed.
+        Interpreter.interface.requestSecret = InterpreterInterface().requestSecret
+    }
+
+    /// `PyBind.blocking` parks the cell on CPython but hands pocketpy the task,
+    /// so the call site differs by backend. See `PyBind+Blocking.swift`.
+    private func secret(_ key: String) -> String {
+        #if cpython
+        "keychain.secret('\(key)')"
+        #else
+        "await keychain.secret('\(key)')"
+        #endif
     }
 
     @Test func storedSecretResolvesWithoutAsking() async {
@@ -51,7 +63,7 @@ struct KeychainTests {
             return "asked value"
         }
 
-        await Interpreter.run("stored = await keychain.secret('STORED_KEY')")
+        await Interpreter.run("stored = \(secret("STORED_KEY"))")
 
         #expect(!asked)
         #expect(main.stored?.name == "STORED_KEY")
@@ -67,7 +79,7 @@ struct KeychainTests {
             return "sk-entered"
         }
 
-        await Interpreter.run("entered = await keychain.secret('OPENAI_API_KEY')")
+        await Interpreter.run("entered = \(secret("OPENAI_API_KEY"))")
 
         #expect(askedFor == ["OPENAI_API_KEY"])
         #expect(main.entered?.name == "OPENAI_API_KEY")
@@ -80,7 +92,7 @@ struct KeychainTests {
 
         await Interpreter.run("""
         try:
-            await keychain.secret('EMPTY_KEY')
+            \(secret("EMPTY_KEY"))
             raised = False
         except ValueError:
             raised = True
@@ -95,7 +107,7 @@ struct KeychainTests {
 
         await Interpreter.run("""
         try:
-            await keychain.secret('NO_HOST_KEY')
+            \(secret("NO_HOST_KEY"))
             unhandled = False
         except KeyError:
             unhandled = True
@@ -120,7 +132,7 @@ struct KeychainTests {
         #expect(storage.values["ROUND_TRIP"] == "second")
 
         await Interpreter.run("""
-        round_trip = await keychain.secret('ROUND_TRIP')
+        round_trip = \(secret("ROUND_TRIP"))
         keychain.delete(round_trip)
         """)
 
@@ -130,7 +142,7 @@ struct KeychainTests {
         // Deleting a secret that is not stored is not an error.
         await Interpreter.run("keychain.delete(round_trip)")
 
-        await Interpreter.run("round_trip = await keychain.secret('ROUND_TRIP')")
+        await Interpreter.run("round_trip = \(secret("ROUND_TRIP"))")
         #expect(asked == 1)
         #expect(storage.values["ROUND_TRIP"] == "asked value")
     }
@@ -139,7 +151,7 @@ struct KeychainTests {
         defer { restore() }
         storage.values["OPENAI_API_KEY"] = "sk-hidden"
 
-        await Interpreter.run("shown = await keychain.secret('OPENAI_API_KEY')")
+        await Interpreter.run("shown = \(secret("OPENAI_API_KEY"))")
 
         let secret = try #require(main.shown)
         #expect(try py.repr(secret.reference) == "<Secret name=\"OPENAI_API_KEY\">")
