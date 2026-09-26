@@ -114,7 +114,7 @@ public actor LocalInterpreterConnection: InterpreterConnection {
 
     private func time(id: UInt64, cancellation: RunCancellation? = nil, _ call: @Sendable () async throws -> Void) async {
         let time = DispatchTime.now().uptimeNanoseconds
-        let tracer = await LineTracer()
+        let tracer = LineTracer()
 
         func executionTime() -> String {
             let delta = DispatchTime.now().uptimeNanoseconds - time
@@ -157,7 +157,7 @@ public actor LocalInterpreterConnection: InterpreterConnection {
                 send(id: id, .stderr(text: traceback))
             }
             // Flag the last line executed in this context as the one that raised.
-            if let line = await tracer.lastLine(forContext: id) {
+            if let line = tracer.lastLine(forContext: id) {
                 send(id: id, .feedback(item: ExecutionFeedback(lineNumber: line, type: .error)))
             }
             send(id: id, .attachment(items: [.image(name: "exclamationmark.triangle"), .text(text: executionTime())]))
