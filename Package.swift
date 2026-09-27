@@ -99,7 +99,8 @@ if let cpython = ProcessInfo.processInfo.environment["SWIFTPY_CPYTHON_PATH"] {
     package.dependencies.append(.package(path: cpython))
 } else {
     package.dependencies.append(
-        .package(url: "https://github.com/libswiftpy/cpython.git", branch: "swiftpy/3.15")
+        // Exact: the fork also carries upstream tags such as v3.14.0.
+        .package(url: "https://github.com/libswiftpy/cpython.git", exact: "3.15.0-swiftpy.1")
     )
 }
 
