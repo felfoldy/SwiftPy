@@ -99,7 +99,7 @@ if let cpython = ProcessInfo.processInfo.environment["SWIFTPY_CPYTHON_PATH"] {
     package.dependencies.append(.package(path: cpython))
 } else {
     package.dependencies.append(
-        .package(url: "https://github.com/libswiftpy/cpython.git", branch: "main")
+        .package(url: "https://github.com/libswiftpy/cpython.git", branch: "swiftpy/3.15")
     )
 }
 
