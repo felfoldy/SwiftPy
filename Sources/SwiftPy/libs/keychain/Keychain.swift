@@ -122,7 +122,7 @@ extension Interpreter {
         Named secrets kept in the system keychain.
 
         A secret is referred to by name; its value never reaches Python, so it
-        cannot be printed or saved with a session. Pass the secret itself as a
+        cannot be printed or saved with a notebook. Pass the secret itself as a
         ``requests`` header value, or ``keychain.Secret/bearer()`` for an
         `Authorization` header, and the value is filled in as the request is
         sent. Secrets follow you to your other devices through iCloud Keychain.

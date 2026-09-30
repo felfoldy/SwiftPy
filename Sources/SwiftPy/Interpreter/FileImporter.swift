@@ -101,7 +101,7 @@ public extension Interpreter {
     /// a native module bound in Swift, or an unknown name.
     ///
     /// - Parameter name: A module name (`"mylib"`), a dotted submodule name
-    ///   (`"console.session"`), or a file name (`"mylib.py"`).
+    ///   (`"console.notebook"`), or a file name (`"mylib.py"`).
     nonisolated static func source(name: String) -> String? {
         guard !name.hasSuffix(".py") else {
             return importFromSource(name: name)
