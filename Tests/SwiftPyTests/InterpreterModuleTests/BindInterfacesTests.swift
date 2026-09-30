@@ -55,6 +55,16 @@ struct BindInterfacesTests {
         #expect(output.contains("TestClass4"))
     }
 
+    @Test func classReportsTheModuleRegisteringItFirst() async throws {
+        await Interpreter.run("""
+        import test, documented_test
+        _class3_module = documented_test.TestClass3.__module__
+        """)
+
+        let module: String = try #require(Interpreter.evaluate("_class3_module"))
+        #expect(module == "test")
+    }
+
     @Test func moduleDocsParameterSetsDocstring() async throws {
         await Interpreter.run("""
         import documented_test
