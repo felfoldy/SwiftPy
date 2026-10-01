@@ -30,6 +30,10 @@ extension Interpreter {
         // references it.
         log.info("CPython [\(cpy.version)] initialized")
         redirectCPythonOutput()
+        // The app bundle is read-only, so bytecode compiled from source
+        // outside the stdlib zip is kept in Caches instead of rebuilt per launch.
+        let pycache = URL.cachesDirectory.appending(path: "pycache").path(percentEncoded: false)
+        try? PyRuntime.run("import sys; sys.pycache_prefix = \(Self.pythonLiteral(pycache))")
     }
 
     func compileWithCPython(

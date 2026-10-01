@@ -42,6 +42,11 @@ public actor LocalInterpreterConnection: InterpreterConnection {
             await Interpreter.interrupt(contextId: id)
             #endif
 
+        case let .check(token, source, prelude):
+            // Off the actor's queue while mypy runs, so commands keep arriving.
+            let items = await Interpreter.check(source, after: prelude)
+            send(id: 0, .diagnostics(items: items, token: token))
+
         case let .execute(token, source, name):
             // Allocate a fresh context id and return after reporting it. The
             // execution task keeps event delivery responsive while plain Python

@@ -38,6 +38,7 @@ let package = Package(
                 .target(name: "PocketPython", condition: .when(traits: ["pocketpy"])),
                 "SwiftPyMacros",
                 .product(name: "Python", package: "cpython", condition: .when(traits: ["cpython"])),
+                .product(name: "Mypy", package: "cpython", condition: .when(traits: ["cpython"])),
             ],
             resources: [
                 .process("Resources")
