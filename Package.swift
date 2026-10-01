@@ -26,6 +26,11 @@ let package = Package(
             name: "pocketpy",
             description: "Embed the bundled pocketpy instead of CPython."
         ),
+        .trait(
+            name: "mypy",
+            description: "Type-check scripts with mypy, in about 7 MB more of the app.",
+            enabledTraits: ["cpython"]
+        ),
         .default(enabledTraits: ["cpython"]),
     ],
     dependencies: [
@@ -38,7 +43,7 @@ let package = Package(
                 .target(name: "PocketPython", condition: .when(traits: ["pocketpy"])),
                 "SwiftPyMacros",
                 .product(name: "Python", package: "cpython", condition: .when(traits: ["cpython"])),
-                .product(name: "Mypy", package: "cpython", condition: .when(traits: ["cpython"])),
+                .product(name: "Mypy", package: "cpython", condition: .when(traits: ["mypy"])),
             ],
             resources: [
                 .process("Resources")

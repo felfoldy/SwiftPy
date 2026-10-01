@@ -192,7 +192,7 @@ struct LocalInterpreterConnectionTests {
 
     // MARK: - check
 
-#if cpython
+#if mypy
     private func check(_ source: String, after prelude: String = "") async -> [Diagnostic] {
         let connection = LocalInterpreterConnection()
         var iterator = await connection.events.makeAsyncIterator()

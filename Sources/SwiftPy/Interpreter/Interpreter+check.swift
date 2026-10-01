@@ -7,9 +7,9 @@ import Foundation
 
 extension Interpreter {
     /// mypy's diagnostics for `source`, read as the code that follows
-    /// `prelude`. Empty where mypy isn't available, or it failed.
+    /// `prelude`. Empty without the `mypy` trait, or when mypy failed.
     static func check(_ source: String, after prelude: String) async -> [Diagnostic] {
-        #if cpython
+        #if mypy
         // Started first: PythonActor's thread needs a running interpreter.
         _ = await MainActor.run { Interpreter.shared }
         return await checkWithMypy(source, after: prelude)
@@ -17,9 +17,17 @@ extension Interpreter {
         []
         #endif
     }
+
+    /// A Python string literal: JSON's is one, once `/` isn't escaped.
+    nonisolated static func pythonLiteral(_ text: String) -> String {
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = .withoutEscapingSlashes
+        let data = (try? encoder.encode(text)) ?? Data("\"\"".utf8)
+        return String(decoding: data, as: UTF8.self)
+    }
 }
 
-#if cpython
+#if mypy
 import mypy
 
 extension Interpreter {
@@ -50,14 +58,6 @@ extension Interpreter {
             log.error("check: \(error)")
             return []
         }
-    }
-
-    /// A Python string literal: JSON's is one, once `/` isn't escaped.
-    nonisolated static func pythonLiteral(_ text: String) -> String {
-        let encoder = JSONEncoder()
-        encoder.outputFormatting = .withoutEscapingSlashes
-        let data = (try? encoder.encode(text)) ?? Data("\"\"".utf8)
-        return String(decoding: data, as: UTF8.self)
     }
 }
 #endif
