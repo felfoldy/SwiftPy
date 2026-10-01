@@ -79,7 +79,8 @@ public class AsyncTask: PythonBindable {
     internal var task: Task<Void, Never>?
     internal var outcome: Result<PyObject?, PythonError>?
 
-    private var traceEntry: LineTracer.Entry?
+    /// The script line that started the task, and the run it reports to.
+    private var startLine: (run: UInt64, line: Int)?
 
     /// The work to run, held until the task is first started.
     /// Returns the task's result, or `nil` if it produces none.
@@ -135,9 +136,7 @@ public class AsyncTask: PythonBindable {
         guard let work = pendingWork else { return }
         pendingWork = nil
         let context = InterpreterExecutionContext.current
-        traceEntry = context.traceRecorder?.entries.last {
-            $0.contextId == context.contextId
-        }
+        startLine = ScriptRuns.currentLine(tracer: context.traceRecorder, run: context.contextId)
         notifyTaskActivity(isActive: true)
         let cancellation = InterpreterExecutionContext.current.cancellation
         let task = Task { [self] in
@@ -189,12 +188,12 @@ public class AsyncTask: PythonBindable {
     }
 
     private func notifyTaskActivity(isActive: Bool, progress: Double? = nil) {
-        guard let traceEntry, let contextId = traceEntry.contextId else { return }
+        guard let startLine else { return }
 
         Interpreter.shared.connection.send(
-            id: contextId,
+            id: startLine.run,
             .feedback(item: ExecutionFeedback(
-                lineNumber: traceEntry.lineNumber,
+                lineNumber: startLine.line,
                 type: isActive ? .task(progress: progress) : nil
             ))
         )

@@ -42,7 +42,7 @@ public actor LocalInterpreterConnection: InterpreterConnection {
             await Interpreter.interrupt(contextId: id)
             #endif
 
-        case let .execute(token, source):
+        case let .execute(token, source, name):
             // Allocate a fresh context id and return after reporting it. The
             // execution task keeps event delivery responsive while plain Python
             // code runs synchronously.
@@ -50,7 +50,7 @@ public actor LocalInterpreterConnection: InterpreterConnection {
             let id = currentContextId
             send(id: id, .started(token: token))
             Task {
-                await compile(id: id, source: source)
+                await compile(id: id, source: source, name: name)
                 await run(id: id)
             }
         }
@@ -134,9 +134,8 @@ public actor LocalInterpreterConnection: InterpreterConnection {
                 // Flash the line the output came from. Skip past library frames to
                 // the last line that belongs to a script context, so output that
                 // originates in a lib still flashes the user's call site.
-                if let entry = tracer.entries.last(where: { $0.contextId != nil }),
-                   let lineId = entry.contextId {
-                    self.send(id: lineId, .feedback(item: ExecutionFeedback(lineNumber: entry.lineNumber, type: .output)))
+                if let (lineId, line) = ScriptRuns.currentLine(tracer: tracer) {
+                    self.send(id: lineId, .feedback(item: ExecutionFeedback(lineNumber: line, type: .output)))
                 }
                 self.send(id: id, .stdout(text: text))
             }
@@ -153,19 +152,21 @@ public actor LocalInterpreterConnection: InterpreterConnection {
                 send(id: id, .stopped)
                 return
             }
-            if let error = error as? PythonError, let traceback = error.traceback {
+            let traceback = (error as? PythonError)?.traceback
+            if let traceback {
                 send(id: id, .stderr(text: traceback))
             }
-            // Flag the last line executed in this context as the one that raised.
-            if let line = tracer.lastLine(forContext: id) {
+            // The run's last line in the traceback raised, or called what did.
+            if let line = traceback.flatMap({ ScriptRuns.raisingLine(in: $0, run: id) })
+                ?? tracer.lastLine(forContext: id) {
                 send(id: id, .feedback(item: ExecutionFeedback(lineNumber: line, type: .error)))
             }
             send(id: id, .attachment(items: [.image(name: "exclamationmark.triangle"), .text(text: executionTime())]))
         }
     }
     
-    private func sourceLocation(for id: UInt64) -> String {
-        "<script>/\(id)"
+    private func sourceLocation(for id: UInt64, name: String?) -> String {
+        name ?? "<script>/\(id)"
     }
 
     private func complete(lastComponent: String, token: UUID) async {
@@ -174,7 +175,7 @@ public actor LocalInterpreterConnection: InterpreterConnection {
         send(id: 0, .completions(suggestions: completions, token: token))
     }
 
-    func compile(id: UInt64, source: String) async {
+    func compile(id: UInt64, source: String, name: String? = nil) async {
         log.trace("compile: \(id)")
         guard id > latestCompileId else { return }
         latestCompileId = id
@@ -182,11 +183,12 @@ public actor LocalInterpreterConnection: InterpreterConnection {
         do {
             let code = try await Interpreter.shared.compile(
                 source,
-                filename: sourceLocation(for: id),
+                filename: sourceLocation(for: id, name: name),
                 mode: .single
             )
 
             guard latestCompileId == id else { return }
+            if let name { ScriptRuns.record(name, run: id) }
             compiled = CompileResult(id: id, code: code)
         } catch {
             guard latestCompileId == id else { return }

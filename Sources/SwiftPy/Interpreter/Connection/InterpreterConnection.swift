@@ -29,7 +29,8 @@ public enum ConsoleCommand: Codable, Sendable {
     case complete(token: UUID, lastComponent: String)
     /// Compiles and runs a source in one step, assigning it a fresh context id.
     /// `token` correlates the request with the caller's input card via `started`.
-    case execute(token: UUID, source: String)
+    /// `name` is the filename tracebacks show, `<script>/<id>` without one.
+    case execute(token: UUID, source: String, name: String? = nil)
     /// Cooperatively cancels the awaited work of a running execution.
     case stop(id: UInt64)
 }

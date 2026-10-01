@@ -123,6 +123,73 @@ struct LocalInterpreterConnectionTests {
         #expect(result == nil)
     }
 
+    // MARK: - script names
+
+    /// Runs `source` as `name` and returns the events up to the run's end.
+    private func execute(
+        _ source: String,
+        name: String? = nil,
+        on connection: LocalInterpreterConnection
+    ) async -> (id: UInt64, events: [InterpreterEvent]) {
+        var iterator = await connection.events.makeAsyncIterator()
+        await connection.perform(.execute(token: UUID(), source: source, name: name))
+        var id: UInt64 = 0
+        var events: [InterpreterEvent] = []
+        while let event = await iterator.next() {
+            events.append(event)
+            if case .started = event.payload { id = event.id }
+            if case .attachment = event.payload, event.id == id { break }
+        }
+        return (id, events)
+    }
+
+    private func feedback(in events: [InterpreterEvent], for id: UInt64) -> [ExecutionFeedback] {
+        events.compactMap { event in
+            if case let .feedback(item) = event.payload, event.id == id { item } else { nil }
+        }
+    }
+
+    @Test func aNamedRunsTracebackShowsItsName() async {
+        let connection = LocalInterpreterConnection()
+
+        let run = await execute("x = 1\n1 / 0", name: "<script:2>", on: connection)
+
+        let stderr = run.events.compactMap { if case let .stderr(text) = $0.payload { text.replacing(/\u{1B}\[[0-9;]*m/, with: "") } else { nil } }
+        #expect(stderr.contains { $0.contains(#"File "<script:2>", line 2"#) })
+        #expect(feedback(in: run.events, for: run.id).contains(ExecutionFeedback(lineNumber: 2, type: .error)))
+    }
+
+    @Test func anUnnamedRunIsNamedByItsId() async {
+        let connection = LocalInterpreterConnection()
+
+        let run = await execute("1 / 0", on: connection)
+
+        let stderr = run.events.compactMap { if case let .stderr(text) = $0.payload { text.replacing(/\u{1B}\[[0-9;]*m/, with: "") } else { nil } }
+        #expect(stderr.contains { $0.contains(#"File "<script>/\#(run.id)""#) })
+    }
+
+    // Without line tracing: the line is read off the stack as it prints.
+    @Test func outputFlashesTheScriptThatPrinted() async {
+        let connection = LocalInterpreterConnection()
+
+        let definition = await execute(
+            "def _test_named_print():\n    print('hi')",
+            name: "<script:1>", on: connection
+        )
+        let call = await execute("_test_named_print()", name: "<script:3>", on: connection)
+
+        #expect(feedback(in: call.events, for: definition.id).contains(ExecutionFeedback(lineNumber: 2, type: .output)))
+    }
+
+    @Test func anErrorInAnotherScriptFlagsTheCallingLine() async {
+        let connection = LocalInterpreterConnection()
+
+        _ = await execute("def _test_named_fail():\n    1 / 0", name: "<script:1>", on: connection)
+        let call = await execute("y = 0\n_test_named_fail()", name: "<script:4>", on: connection)
+
+        #expect(feedback(in: call.events, for: call.id).contains(ExecutionFeedback(lineNumber: 2, type: .error)))
+    }
+
     // MARK: - stop
 
     @Test func stopCancelsRunningExecutionAndEmitsStopped() async {
