@@ -151,7 +151,8 @@ extension String {
         }
 
         if trimmed.hasSuffix("?") {
-            return String(trimmed.dropLast()).pyType + " | None"
+            let wrapped = String(trimmed.dropLast()).pyType
+            return wrapped == "Any" ? wrapped : wrapped + " | None"
         }
 
         return switch trimmed {
@@ -163,6 +164,8 @@ extension String {
             "str"
         case "Bool":
             "bool"
+        case "Data":
+            "bytes"
         case "PyObject":
             "Any"
         default:
