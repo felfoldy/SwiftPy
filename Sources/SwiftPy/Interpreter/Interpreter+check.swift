@@ -9,7 +9,7 @@ extension Interpreter {
     /// mypy's diagnostics for `source`, read as the code that follows
     /// `prelude`. Empty without the `mypy` trait, or when mypy failed.
     static func check(_ source: String, after prelude: String) async -> [Diagnostic] {
-        #if mypy
+        #if mypy && cpython
         // Started first: PythonActor's thread needs a running interpreter.
         _ = await MainActor.run { Interpreter.shared }
         return await checkWithMypy(source, after: prelude)
@@ -27,7 +27,7 @@ extension Interpreter {
     }
 }
 
-#if mypy
+#if mypy && cpython
 import mypy
 
 extension Interpreter {

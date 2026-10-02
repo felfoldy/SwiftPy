@@ -28,8 +28,8 @@ let package = Package(
         ),
         .trait(
             name: "mypy",
-            description: "Type-check scripts with mypy, in about 7 MB more of the app.",
-            enabledTraits: ["cpython"]
+            // Not enabling cpython itself: Xcode would then link mypy for cpython alone.
+            description: "Type-check scripts with mypy, in about 7 MB more of the app. Needs cpython."
         ),
         .default(enabledTraits: ["cpython"]),
     ],
