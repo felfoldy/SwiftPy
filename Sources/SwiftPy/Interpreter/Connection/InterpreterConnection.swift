@@ -33,9 +33,6 @@ public enum ConsoleCommand: Codable, Sendable {
     case execute(token: UUID, source: String, name: String? = nil)
     /// Cooperatively cancels the awaited work of a running execution.
     case stop(id: UInt64)
-    /// Type-checks `source` as the code that follows `prelude`; answered by
-    /// `diagnostics` with the same `token`.
-    case check(token: UUID, source: String, prelude: String)
 }
 
 public struct InterpreterEvent: Codable, Sendable {
@@ -49,8 +46,6 @@ public struct InterpreterEvent: Codable, Sendable {
         /// Echoes the `token` from the originating `complete` command so only the
         /// requesting console applies the result.
         case completions(suggestions: [String], token: UUID)
-        /// What a `check` found in its source, echoing its `token`.
-        case diagnostics(items: [Diagnostic], token: UUID)
 
         /// Reports the context id assigned to an `execute`, echoing its `token` so
         /// the caller can bind the id to the input card it already created.
@@ -76,7 +71,7 @@ public struct Diagnostic: Codable, Sendable, Hashable {
     public let endColumn: Int
     public let severity: Severity
     public let message: String
-    /// mypy's error code, such as `assignment`.
+    /// The checker's rule, such as `reportAssignmentType`.
     public let code: String?
 
     public init(line: Int, column: Int, endLine: Int, endColumn: Int, severity: Severity, message: String, code: String?) {

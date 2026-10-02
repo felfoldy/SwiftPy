@@ -22,66 +22,6 @@ def _completions(text: str) -> list[str]:
     return completion_list
 
 
-def _check(source: str, prelude: str, cache: str, typeshed: str) -> str:
-    # Called from Swift: mypy's diagnostics for `source`, read after `prelude`,
-    # as JSON in source's own lines; "[]" where mypy isn't shipped.
-    try:
-        from mypy import api
-    except ImportError:
-        return "[]"
-
-    import contextlib, io, warnings
-
-    offset = prelude.count("\n") + 1 if prelude else 0
-    # Quiet: a check runs between cards, so anything it printed would land
-    # in the notebook (platform warns that ctypes is missing, for one).
-    with warnings.catch_warnings(), contextlib.redirect_stderr(io.StringIO()):
-        warnings.simplefilter("ignore")
-        out, _, _ = _run_mypy(api, prelude, source, cache, typeshed)
-    return _diagnostics(out, offset)
-
-
-def _run_mypy(api, prelude: str, source: str, cache: str, typeshed: str):
-    return api.run([
-        "-c", f"{prelude}\n{source}" if prelude else source,
-        "--output", "json",
-        "--cache-dir", cache,
-        # Not beside mypy, which is zipped.
-        "--custom-typeshed-dir", typeshed,
-        # The Rust parser isn't shipped.
-        "--no-native-parser",
-        # Cards reuse names, await at the top and import Swift modules.
-        "--allow-redefinition",
-        "--disable-error-code", "top-level-await",
-        "--ignore-missing-imports",
-    ])
-
-
-def _diagnostics(out: str, offset: int) -> str:
-    import json
-    items = []
-    for line in out.splitlines():
-        try:
-            found = json.loads(line)
-        except ValueError:
-            continue
-        if found["line"] <= offset:
-            continue
-        message = found["message"]
-        if found.get("hint"):
-            message += "\n" + found["hint"]
-        items.append({
-            "line": found["line"] - offset,
-            "column": found["column"] + 1,
-            "end_line": found["end_line"] - offset,
-            "end_column": found["end_column"] + 1,
-            "severity": found["severity"] if found["severity"] in ("error", "note") else "warning",
-            "message": message,
-            "code": found.get("code"),
-        })
-    return json.dumps(items)
-
-
 def _stubs() -> str:
     # Called from Swift: the registered modules as a type checker's files, JSON.
     import json

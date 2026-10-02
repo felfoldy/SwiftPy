@@ -190,40 +190,6 @@ struct LocalInterpreterConnectionTests {
         #expect(feedback(in: call.events, for: call.id).contains(ExecutionFeedback(lineNumber: 2, type: .error)))
     }
 
-    // MARK: - check
-
-#if mypy && cpython
-    private func check(_ source: String, after prelude: String = "") async -> [Diagnostic] {
-        let connection = LocalInterpreterConnection()
-        var iterator = await connection.events.makeAsyncIterator()
-        let token = UUID()
-        await connection.perform(.check(token: token, source: source, prelude: prelude))
-        while let event = await iterator.next() {
-            if case let .diagnostics(items, eventToken) = event.payload, eventToken == token { return items }
-        }
-        return []
-    }
-
-    @Test func checkReportsATypeErrorWhereItIs() async {
-        let items = await check("x: str = 1")
-        #expect(items == [Diagnostic(
-            line: 1, column: 10, endLine: 1, endColumn: 11, severity: .error,
-            message: #"Incompatible types in assignment (expression has type "int", variable has type "str")"#,
-            code: "assignment"
-        )])
-    }
-
-    @Test func checkKnowsThePreludeButReportsOnlyTheSource() async {
-        let items = await check("y = known + 1\nbad: int = 'a'", after: "known = 1\nwrong: str = 2")
-        #expect(items.map(\.line) == [2])
-    }
-
-    @Test func checkAllowsWhatCardsDo() async {
-        let items = await check("import asyncio\nimport some_swift_module\nawait asyncio.sleep(0)\nn = 'a'", after: "n = 1")
-        #expect(items.isEmpty)
-    }
-#endif
-
     // MARK: - stop
 
     @Test func stopCancelsRunningExecutionAndEmitsStopped() async {
