@@ -44,13 +44,25 @@ def _callable_signature(obj, fallback_name=None):
     return name + "(...)"
 
 
-def _callable_definition(obj, fallback_name=None):
+def _declared_async(owner, name):
+    # A bound method's own signature drops `async`; its class's interface keeps it.
+    marker = "async def " + name + "("
+    for cls in getattr(owner, '__mro__', ()):
+        interface = getattr(cls, '_interface', None) or ""
+        if any(line.strip().startswith(marker) for line in interface.split("\n")):
+            return True
+    return False
+
+
+def _callable_definition(obj, fallback_name=None, owner=None):
     signature = _callable_signature(obj, fallback_name)
     try:
         is_coroutine = inspect.iscoroutinefunction(obj)
     except:
         is_coroutine = False
-    prefix = "async " if getattr(obj, '_is_async', False) or is_coroutine else ""
+    is_async = (getattr(obj, '_is_async', False) or is_coroutine
+                or (owner is not None and _declared_async(owner, fallback_name)))
+    prefix = "async " if is_async else ""
     if signature.startswith("def "):
         signature = signature[len("def "):]
     if not signature.endswith(":"):
@@ -58,11 +70,11 @@ def _callable_definition(obj, fallback_name=None):
     return prefix + "def " + signature
 
 
-def _callable_definitions(obj, fallback_name=None):
+def _callable_definitions(obj, fallback_name=None, owner=None):
     overloads = getattr(obj, '_overloads', None)
     if not overloads:
-        return [_callable_definition(obj, fallback_name)]
-    return [_callable_definition(overload, fallback_name) for overload in overloads]
+        return [_callable_definition(obj, fallback_name, owner)]
+    return [_callable_definition(overload, fallback_name, owner) for overload in overloads]
 
 
 def _callable_doc(obj):
@@ -110,8 +122,8 @@ def _docstring_lines(doc, indent="    "):
     return body
 
 
-def _callable_lines(obj, fallback_name=None, indent=""):
-    definition = indent + _callable_definition(obj, fallback_name)
+def _callable_lines(obj, fallback_name=None, indent="", owner=None):
+    definition = indent + _callable_definition(obj, fallback_name, owner)
 
     doc = getattr(obj, '__doc__', None)
     if not doc:
@@ -151,7 +163,7 @@ def _class_lines(cls):
         # A blank line separates members, but not the first one from its class.
         if len(lines) > 1:
             lines.append("")
-        lines += _callable_lines(attr, fallback_name=attr_name, indent="    ")
+        lines += _callable_lines(attr, fallback_name=attr_name, indent="    ", owner=cls)
 
     # An empty class body still needs one, as in a stub file.
     if len(lines) == 1:
@@ -282,6 +294,17 @@ def _resolve_name(name):
     return obj
 
 
+def _owner_of(path):
+    # The class a dotted path's last name is a member of, if it is one.
+    if "." not in path:
+        return None
+    try:
+        parent = _resolve_name(path.rsplit(".", 1)[0])
+    except (ImportError, AttributeError):
+        return None
+    return parent if isinstance(parent, type) else None
+
+
 # Topics help documents without resolving a name for them. Hosts can add
 # complete markdown documents to `_documents` without binding fake Python
 # objects for them.
@@ -365,6 +388,210 @@ def _module_lines(module):
     return lines
 
 
+def _stub_lines(module):
+    # Readable, not yet resolvable: `_typed_stub` adds the imports.
+    lines = []
+    doc = getattr(module, '__doc__', None)
+    if doc:
+        lines = _docstring_lines(doc, indent="") + [""]
+
+    classes, functions = _module_members(module)
+    for _, cls in classes:
+        lines += _class_lines(cls) + [""]
+
+    for name, function in functions:
+        overloads = getattr(function, '_overloads', None)
+        for entry in overloads or [function]:
+            if overloads:
+                lines.append("@overload")
+            lines.append(_without_trailing_colon(_callable_definition(entry, name)) + ": ...")
+        lines.append("")
+
+    # What `__all__` leaves out still resolves: classes as classes, the rest
+    # declared by the type it holds now.
+    listed = [n for n, _ in classes + functions]
+    for name in dir(module):
+        if name.startswith('_') or name in listed:
+            continue
+        try:
+            value = getattr(module, name)
+        except Exception:
+            continue
+        if isinstance(value, type(module)):
+            continue
+        # An import, `Any` or `Callable`, is declared by the module it is from.
+        origin = getattr(value, '__module__', None)
+        if origin not in (None, module.__name__) and not getattr(value, '_interface', None):
+            continue
+        if isinstance(value, type):
+            lines += _class_lines(value) + [""]
+            continue
+        kind = type(value).__name__
+        plain = ('bool', 'int', 'float', 'str', 'bytes', 'list', 'dict', 'tuple', 'set')
+        lines.append(name + ": " + (kind if kind in plain else "Any"))
+    return lines
+
+
+def _without_swift_syntax(text):
+    # Interfaces are written for reading: `any P` is Swift's, not Python's.
+    import io, tokenize
+    tokens = list(tokenize.generate_tokens(io.StringIO(text).readline))
+    kept = [
+        token for index, token in enumerate(tokens)
+        if not (token.type == tokenize.NAME and token.string == 'any'
+                and index + 1 < len(tokens) and tokens[index + 1].type == tokenize.NAME)
+    ]
+    return tokenize.untokenize([(token.type, token.string) for token in kept])
+
+
+def _typed_stub(tree, module_name, classes, swift_builtins=()):
+    """Makes a stub's names resolve: `typing`'s and other stubs' are imported,
+    and what only Swift knows, a `UInt64` or a `View`, becomes `Any`."""
+    import ast, builtins, typing
+
+    defined = {node.name for node in tree.body if isinstance(node, (ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef))}
+    defined |= {node.target.id for node in tree.body
+                if isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name)}
+    imports = {}
+
+    def resolves(name):
+        if name in defined:
+            return True
+        if name in swift_builtins:
+            imports.setdefault('_swiftpy_builtins', set()).add(name)
+            return True
+        if hasattr(builtins, name):
+            return True
+        if name in typing.__all__:
+            imports.setdefault('typing', set()).add(name)
+            return True
+        owner = classes.get(name)
+        if owner and owner != module_name:
+            imports.setdefault(owner, set()).add(name)
+            return True
+        return False
+
+    class Annotation(ast.NodeTransformer):
+        def visit_Name(self, node):
+            return node if resolves(node.id) else ast.copy_location(ast.Name('Any'), node)
+
+        def visit_Attribute(self, node):
+            root = node
+            while isinstance(root, ast.Attribute):
+                root = root.value
+            if isinstance(root, ast.Name) and resolves(root.id):
+                return node
+            return ast.copy_location(ast.Name('Any'), node)
+
+    def typed(annotation):
+        return Annotation().visit(annotation) if annotation is not None else None
+
+    def visit(body):
+        counts = {}
+        for node in body:
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                counts[node.name] = counts.get(node.name, 0) + 1
+        for node in body:
+            if isinstance(node, ast.ClassDef):
+                node.bases = [base for base in node.bases
+                              if not isinstance(base, ast.Name) or resolves(base.id)]
+                visit(node.body)
+            elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                # An overload stands for one of several; alone, it's the function.
+                if counts[node.name] == 1:
+                    node.decorator_list = [d for d in node.decorator_list
+                                           if not (isinstance(d, ast.Name) and d.id == 'overload')]
+                arguments = node.args
+                for argument in arguments.posonlyargs + arguments.args + arguments.kwonlyargs + [arguments.vararg, arguments.kwarg]:
+                    if argument is not None:
+                        argument.annotation = typed(argument.annotation)
+                node.returns = typed(node.returns)
+            elif isinstance(node, ast.AnnAssign):
+                node.annotation = typed(node.annotation)
+
+    tree.body = [node for node in tree.body if not isinstance(node, (ast.Import, ast.ImportFrom))]
+    visit(tree.body)
+    resolves('Any')
+    header = [
+        ast.ImportFrom(module=module, names=[ast.alias(name) for name in sorted(names)], level=0)
+        for module, names in sorted(imports.items())
+    ]
+    docstring = tree.body[:1] if tree.body and isinstance(tree.body[0], ast.Expr) else []
+    tree.body = docstring + header + tree.body[len(docstring):]
+    return ast.unparse(ast.fix_missing_locations(tree)) + "\n"
+
+
+def _stubs():
+    """Stub files for the modules Swift registers, which have no source for a
+    type checker to read: `{path: text}`, a package where one has submodules."""
+    import ast
+    sources, drafts = _stub_drafts()
+    # What SwiftPy adds to builtins, `View` for one; a type checker reads
+    # extra builtins from this file.
+    import builtins
+    # CPython's own are static types, but for exceptions it makes at start;
+    # one made at runtime is a heap type.
+    heap_type = 1 << 9
+    bound = {name: obj for name, obj in vars(builtins).items()
+             if isinstance(obj, type) and not name.startswith('_')
+             and getattr(obj, '__flags__', 0) & heap_type
+             and not issubclass(obj, BaseException)}
+    # In a module of their own, which stubs can import: the builtins file
+    # only reaches the code being checked.
+    if bound:
+        lines = sum([_class_lines(cls) + [""] for cls in bound.values()], [])
+        drafts["_swiftpy_builtins.pyi"] = ("_swiftpy_builtins", "\n".join(lines))
+    trees = {}
+    for path, (module_name, text) in drafts.items():
+        try:
+            trees[path] = (module_name, ast.parse(_without_swift_syntax(text)))
+        except (SyntaxError, ValueError):
+            continue
+    # Which module a class can be imported from.
+    classes = {}
+    for path, (module_name, tree) in sorted(trees.items()):
+        for node in tree.body:
+            if isinstance(node, ast.ClassDef):
+                classes.setdefault(node.name, module_name)
+    stubs = {path: _typed_stub(tree, module_name, classes, set(bound))
+             for path, (module_name, tree) in trees.items()}
+    if bound:
+        names = ", ".join(name + " as " + name for name in sorted(bound))
+        stubs["__builtins__.pyi"] = "from _swiftpy_builtins import " + names + "\n"
+    stubs.update(sources)
+    return stubs
+
+
+def _stub_drafts():
+    # Source as it is, `{path: text}`; stubs as drafts, `{path: (module, text)}`.
+    import importlib
+    names = sorted(_registered_modules())
+    sources, stubs = {}, {}
+    for name in names:
+        if name.startswith('_'):
+            continue
+        try:
+            module = importlib.import_module(name)
+        except Exception:
+            continue
+        # Python source reads better than anything rebuilt from it.
+        path = getattr(module, '__file__', None) or ""
+        is_package = any(other.startswith(name + ".") for other in names)
+        stem = name.replace(".", "/") + ("/__init__" if is_package else "")
+        if path.endswith(".py"):
+            try:
+                with open(path) as file:
+                    sources[stem + ".py"] = file.read()
+                continue
+            except OSError:
+                pass
+        try:
+            stubs[stem + ".pyi"] = (name, "\n".join(_stub_lines(module)) + "\n")
+        except Exception:
+            continue
+    return sources, stubs
+
+
 _help_text = None
 
 
@@ -402,7 +629,7 @@ def _help_lines(obj):
         if callable(resolved):
             # A native function carries no `__name__`, so without the name it
             # was looked up by it prints as its repr.
-            return _callable_lines(resolved, fallback_name=obj.split('.')[-1])
+            return _callable_lines(resolved, fallback_name=obj.split('.')[-1], owner=_owner_of(obj))
         return _class_lines(type(resolved))
 
     if isinstance(obj, module_type):
@@ -661,8 +888,8 @@ def _overload_sections(overloads, definitions):
     return lines
 
 
-def _function_markdown(obj, fallback_name=None, parent_path=None):
-    definitions = _callable_definitions(obj, fallback_name)
+def _function_markdown(obj, fallback_name=None, parent_path=None, owner=None):
+    definitions = _callable_definitions(obj, fallback_name, owner)
 
     lines = []
     if parent_path:
@@ -799,14 +1026,14 @@ def _class_entries(module_name, classes):
     return lines
 
 
-def _function_entries(owner_path, functions):
+def _function_entries(owner_path, functions, owner=None):
     lines = []
     for member_name, function in functions:
         overloads = getattr(function, '_overloads', None)
         entries = overloads if overloads else [function]
 
         for entry in entries:
-            definition = _callable_definition(entry, member_name)
+            definition = _callable_definition(entry, member_name, owner)
             summary, _, _ = _doc_sections(getattr(entry, '__doc__', None), [])
             signature = _without_trailing_colon(definition)
             declaration = []
@@ -980,11 +1207,11 @@ def _class_markdown(cls, path=None):
 
     initializers = _class_initializers(cls)
     if initializers:
-        lines += ["## Initializers", ""] + _function_entries(path, initializers)
+        lines += ["## Initializers", ""] + _function_entries(path, initializers, cls)
 
     methods = _class_methods(cls)
     if methods:
-        lines += ["## Functions", ""] + _function_entries(path, methods)
+        lines += ["## Functions", ""] + _function_entries(path, methods, cls)
 
     return lines
 
@@ -1015,7 +1242,8 @@ def _markdown_lines(obj):
             return _function_markdown(
                 resolved,
                 fallback_name=obj.split('.')[-1],
-                parent_path=_parent_reference_path(obj)
+                parent_path=_parent_reference_path(obj),
+                owner=_owner_of(obj)
             )
         # A property documents itself; the class it is reached through is what
         # declares it.

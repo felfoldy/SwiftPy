@@ -888,6 +888,36 @@ struct HelpTests {
             #expect(output == "class BoundClass(value: int):")
             #expect(!output.contains("method"))
         }
+
+        @Test("documents a method as async when its class interface does")
+        func documentsAsyncMethodsFromTheClassInterface() async throws {
+            await Interpreter.run("""
+            from interpreter.help import _class_methods, _function_entries
+            class _Bound:
+                _interface = 'class Bound:\\n    async def go(self, x: int) -> str: ...\\n    def stop(self) -> None: ...'
+                def go(self, x): pass
+                def stop(self): pass
+            _entries = "\\n".join(_function_entries("m.Bound", _class_methods(_Bound), _Bound))
+
+            import sys, types
+            from interpreter.help import _markdown_lines
+            _module = types.ModuleType("_asyncdoc")
+            _module.Bound = _Bound
+            sys.modules["_asyncdoc"] = _module
+            _page = "\\n".join(_markdown_lines("_asyncdoc.Bound.go"))
+            _text = "\\n".join(_markdown_lines("_asyncdoc.Bound.stop"))
+            """)
+
+            let entries: String = try #require(Interpreter.evaluate("_entries"))
+            #expect(entries.contains("async def go("))
+            #expect(!entries.contains("async def stop("))
+
+            // The member's own page, not only the class's listing of it.
+            let page: String = try #require(Interpreter.evaluate("_page"))
+            #expect(page.contains("async def go("))
+            let stop: String = try #require(Interpreter.evaluate("_text"))
+            #expect(!stop.contains("async def"))
+        }
     }
 
     @Suite("instance", .serialized) @MainActor
@@ -1071,6 +1101,91 @@ struct HelpTests {
             await Interpreter.run("help('_no_such_module_xyz')")
         }
     }
+
+    #if cpython
+    @Suite("stubs") @MainActor
+    struct Stubs {
+        init() async {
+            await Interpreter.run("""
+            import ast, json, interpreter
+            _stubs = json.loads(interpreter._stubs())
+            """)
+        }
+
+        @Test("are written for registered modules, not private ones")
+        func coverRegisteredModules() {
+            #expect(Interpreter.evaluate("'keychain.pyi' in _stubs") == true)
+            #expect(Interpreter.evaluate("'_swiftpy_asyncio.pyi' in _stubs") == false)
+        }
+
+        @Test("parse as Python")
+        func parse() async {
+            await Interpreter.run("""
+            _unparsed = []
+            for _path, _text in _stubs.items():
+                try:
+                    ast.parse(_text)
+                except SyntaxError:
+                    _unparsed.append(_path)
+            """)
+            #expect(Interpreter.evaluate("_unparsed") == [String]())
+        }
+
+        @Test("keep the bound signatures and classes")
+        func keepSignatures() async {
+            await Interpreter.run("""
+            _keychain = ast.parse(_stubs['keychain.pyi'])
+            _secret = next(n for n in _keychain.body if isinstance(n, ast.FunctionDef) and n.name == 'secret')
+            _signature = [ast.unparse(_secret.args.args[0].annotation), ast.unparse(_secret.returns)]
+            """)
+            #expect(Interpreter.evaluate("_signature") == ["str", "Secret"])
+            #expect(Interpreter.evaluate("'class Secret:' in _stubs['keychain.pyi']") == true)
+        }
+
+        @Test("add what SwiftPy puts in builtins, and only that")
+        func builtins() {
+            #expect(Interpreter.evaluate("_stubs['__builtins__.pyi']") == "from _swiftpy_builtins import View as View\n")
+        }
+
+        @Test("leave out what a module imports")
+        func withoutImports() async throws {
+            await Interpreter.run("""
+            import sys, types
+            from typing import Any, Callable
+            from os import getcwd
+            from interpreter.help import _stub_lines
+            _module = types.ModuleType("_imports")
+            _module.__all__ = []
+            _module.Any, _module.Callable, _module.getcwd = Any, Callable, getcwd
+            class _Local: pass
+            _Local.__name__ = "Local"
+            _Local.__module__ = "_imports"
+            _module.Local = _Local
+            _module.limit = 3
+            _imported = "\\n".join(_stub_lines(_module))
+            """)
+            let text: String = try #require(Interpreter.evaluate("_imported"))
+            #expect(text.contains("class Local"))
+            #expect(text.contains("limit: int"))
+            #expect(!text.contains("Any:") && !text.contains("class Any"))
+            #expect(!text.contains("Callable") && !text.contains("getcwd"))
+        }
+
+        @Test("leave out what only Swift knows")
+        func withoutSwiftNames() async {
+            await Interpreter.run("""
+            from interpreter.help import _typed_stub, _without_swift_syntax
+            _typed = _typed_stub(ast.parse(_without_swift_syntax(
+                "class A(Unknown):\\n    x: UInt64\\n    y: list[any P]\\n    @overload\\n    def f(self) -> Data: ..."
+            )), "m", {}, {"View"})
+            """)
+            #expect(Interpreter.evaluate("'class A:' in _typed") == true)
+            #expect(Interpreter.evaluate("'x: Any' in _typed and 'y: list[Any]' in _typed") == true)
+            #expect(Interpreter.evaluate("'-> Any' in _typed and 'overload' not in _typed") == true)
+            #expect(Interpreter.evaluate("'from typing import Any' in _typed") == true)
+        }
+    }
+    #endif
 }
 
 /// An overloaded method whose overloads document different parameters. Bound
