@@ -181,6 +181,49 @@ struct LocalInterpreterConnectionTests {
         #expect(feedback(in: call.events, for: definition.id).contains(ExecutionFeedback(lineNumber: 2, type: .output)))
     }
 
+    #if cpython
+    // As `input()` waits: a blocking call marks its line until it returns.
+    @Test func aBlockingCallMarksItsLineWhileItWaits() async {
+        let host = py.newmodule("feedback_blocking_host")!
+        host.def("ask() -> int") { argc, argv in
+            PyBind.blocking(argc, argv) { () async throws -> Int in
+                try await Task.sleep(for: .milliseconds(20))
+                return 1
+            }
+        }
+        let run = await execute(
+            "import feedback_blocking_host\nanswer = feedback_blocking_host.ask()",
+            name: "<script:11>", on: Interpreter.shared.connection
+        )
+
+        let lines = feedback(in: run.events, for: run.id)
+        #expect(lines.contains(ExecutionFeedback(lineNumber: 2, type: .task(progress: nil))), "\(lines)")
+        #expect(lines.contains(ExecutionFeedback(lineNumber: 2, type: nil)), "\(lines)")
+    }
+    #endif
+
+    // Read off the stack too, though the task starts on main, across the hop
+    // from Python's thread. The shared connection: tasks report to it.
+    @Test func awaitedSwiftWorkMarksItsLineWhileItRuns() async {
+        let host = py.newmodule("feedback_task_host")!
+        host.asyncDef("wait() -> int") { argc, argv in
+            PyBind.function(argc, argv) { () -> AsyncTask in
+                AsyncTask { () async throws -> Int in
+                    try await Task.sleep(for: .milliseconds(20))
+                    return 1
+                }
+            }
+        }
+        let run = await execute(
+            "import feedback_task_host\nx = 1\nawait feedback_task_host.wait()",
+            name: "<script:9>", on: Interpreter.shared.connection
+        )
+
+        let lines = feedback(in: run.events, for: run.id)
+        #expect(lines.contains(ExecutionFeedback(lineNumber: 3, type: .task(progress: nil))), "\(lines)")
+        #expect(lines.contains(ExecutionFeedback(lineNumber: 3, type: nil)), "\(lines)")
+    }
+
     @Test func anErrorInAnotherScriptFlagsTheCallingLine() async {
         let connection = LocalInterpreterConnection()
 
