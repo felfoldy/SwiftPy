@@ -555,9 +555,12 @@ def _stubs():
                 classes.setdefault(node.name, module_name)
     stubs = {path: _typed_stub(tree, module_name, classes, set(bound))
              for path, (module_name, tree) in trees.items()}
+    # SwiftPy's own `help`, a function, rather than typeshed's `_Helper` instance.
+    builtins_stub = "def help(obj: object = None) -> object:\n    " + repr(help.__doc__) + "\n"
     if bound:
         names = ", ".join(name + " as " + name for name in sorted(bound))
-        stubs["__builtins__.pyi"] = "from _swiftpy_builtins import " + names + "\n"
+        builtins_stub = "from _swiftpy_builtins import " + names + "\n" + builtins_stub
+    stubs["__builtins__.pyi"] = builtins_stub
     stubs.update(sources)
     return stubs
 

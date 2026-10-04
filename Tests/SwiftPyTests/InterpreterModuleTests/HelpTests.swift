@@ -1143,8 +1143,12 @@ struct HelpTests {
         }
 
         @Test("add what SwiftPy puts in builtins, and only that")
-        func builtins() {
-            #expect(Interpreter.evaluate("_stubs['__builtins__.pyi']") == "from _swiftpy_builtins import View as View\n")
+        func builtins() async {
+            await Interpreter.run("""
+            _builtins_stub = ast.parse(_stubs['__builtins__.pyi'])
+            _names = [ast.unparse(n) if isinstance(n, ast.ImportFrom) else n.name for n in _builtins_stub.body]
+            """)
+            #expect(Interpreter.evaluate("_names") == ["from _swiftpy_builtins import View as View", "help"])
         }
 
         @Test("leave out what a module imports")
