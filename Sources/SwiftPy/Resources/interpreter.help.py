@@ -571,7 +571,9 @@ def _stub_drafts():
     names = sorted(_registered_modules())
     sources, stubs = {}, {}
     for name in names:
-        if name.startswith('_'):
+        # Private, unless it backs the public module of its name, as `_json`
+        # does `json`: that one imports from it.
+        if name.startswith('_') and name[1:] not in names:
             continue
         try:
             module = importlib.import_module(name)

@@ -1118,6 +1118,14 @@ struct HelpTests {
             #expect(Interpreter.evaluate("'_swiftpy_asyncio.pyi' in _stubs") == false)
         }
 
+        @Test("are written for a private module backing a public one")
+        func coverBackingModules() async {
+            PyBind.module("_backed") { _ in }
+            PyBind.module("backed") { _ in }
+            await Interpreter.run("_stubs = json.loads(interpreter._stubs())")
+            #expect(Interpreter.evaluate("'_backed.pyi' in _stubs") == true)
+        }
+
         @Test("parse as Python")
         func parse() async {
             await Interpreter.run("""
