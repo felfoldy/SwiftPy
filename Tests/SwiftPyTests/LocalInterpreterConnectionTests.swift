@@ -182,6 +182,20 @@ struct LocalInterpreterConnectionTests {
     }
 
     #if cpython
+    @Test func aThreadPrintsToTheRunThatStartedIt() async {
+        let run = await execute("""
+        import threading
+        worker = threading.Thread(target=print, args=("from a thread",))
+        worker.start()
+        worker.join()
+        """, name: "<script:12>", on: Interpreter.shared.connection)
+
+        let stdout = run.events.compactMap { event -> String? in
+            if case let .stdout(text) = event.payload, event.id == run.id { text } else { nil }
+        }
+        #expect(stdout.joined().contains("from a thread"), "\(run.events)")
+    }
+
     // As `input()` waits: a blocking call marks its line until it returns.
     @Test func aBlockingCallMarksItsLineWhileItWaits() async {
         let host = py.newmodule("feedback_blocking_host")!

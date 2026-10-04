@@ -15,6 +15,10 @@ extension Interpreter {
     /// the one to die.
     nonisolated static let executing = Mutex<UInt64?>(nil)
 
+    /// Where the running code's output goes, for a thread it started: Python's
+    /// threads don't carry the task-local sink.
+    nonisolated static let executingOutput = Mutex<InterpreterExecutionContext.Output?>(nil)
+
     /// Raises `KeyboardInterrupt` in the execution `contextId`, if it is the
     /// one running. It lands at the next bytecode; a blocking C call
     /// returns first.
@@ -58,6 +62,7 @@ extension Interpreter {
         locals: PyObject? = nil
     ) async throws(PythonError) -> PyObject {
         Self.executing.withLock { $0 = InterpreterExecutionContext.current.contextId }
+        Self.executingOutput.withLock { $0 = InterpreterExecutionContext.current.output }
         defer {
             // Under the lock, so an interrupt can't land after the code ended
             // and wait for the next cell.
@@ -65,6 +70,7 @@ extension Interpreter {
                 $0 = nil
                 PyRuntime.clearInterrupt()
             }
+            Self.executingOutput.withLock { $0 = nil }
         }
         do {
             return try await PyRuntime.execute(code, globals: globals, locals: locals)
@@ -79,7 +85,10 @@ extension Interpreter {
     /// is in reach.
     func redirectCPythonOutput() {
         try? PyRuntime.redirectOutput { text in
-            if let output = InterpreterExecutionContext.current.output {
+            // A thread the code started writes to its run while that runs;
+            // one that outlives it writes to the process's stdout.
+            if let output = InterpreterExecutionContext.current.output
+                ?? Self.executingOutput.withLock({ $0 }) {
                 output(text)
             } else {
                 fputs(text, stdout)
