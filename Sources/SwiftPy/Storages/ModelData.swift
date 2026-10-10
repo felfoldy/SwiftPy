@@ -93,6 +93,7 @@ final class ModelHandle: PythonBindable {
             lastJSON = newValue
             if let row = try? store.row(id: id) {
                 row.json = newValue
+                store.recordVersion(id: id, json: newValue)
             } else {
                 store.insertRow(id: id, typeName: typeName, json: newValue)
             }
@@ -128,6 +129,9 @@ final class StoreObservation: PythonBindable {
 ///
 /// Stores are saved between launches by default. Pass `in_memory=True` to create
 /// a temporary store whose contents are discarded when the process exits.
+///
+/// Pass `keep_versions=True` to keep earlier states of each instance on this
+/// device, read with ``versions``.
 @available(macOS 15, iOS 18, *)
 @MainActor
 @Scriptable
@@ -144,11 +148,19 @@ class Store: PythonBindable {
     private var notificationTokens: [any NSObjectProtocol] = []
     private var refresh: Task<Void, Never>?
 
+    /// Device-local, so versions don't use iCloud storage.
+    private let versionContainer: SwiftData.ModelContainer?
+    internal var versionContext: SwiftData.ModelContext? { versionContainer?.mainContext }
+    private var pendingVersions: [String: String] = [:]
+    private var versionFlush: Task<Void, Never>?
+    internal static let versionLimit = 50
+
     /// Creates a store with the given name.
     ///
     /// name: A stable name identifying the store.
     /// in_memory: Whether the store should keep its contents only in memory. Defaults to False.
-    init(name: String, inMemory: Bool = false) throws {
+    /// keep_versions: Whether to keep earlier states of each instance on this device. Defaults to False.
+    init(name: String, inMemory: Bool = false, keepVersions: Bool = false) throws {
         let schema = Schema([ModelData.self,
                              LookupKeyValue.self,
                              ModelMetadata.self],
@@ -170,6 +182,22 @@ class Store: PythonBindable {
         )
 
         context = container.mainContext
+
+        if keepVersions {
+            let versions = ModelConfiguration(
+                "\(name).versions",
+                schema: Schema([ModelVersionData.self]),
+                isStoredInMemoryOnly: inMemory,
+                groupContainer: .automatic,
+                cloudKitDatabase: .none
+            )
+            versionContainer = try SwiftData.ModelContainer(
+                for: ModelVersionData.self,
+                configurations: versions
+            )
+        } else {
+            versionContainer = nil
+        }
 
         Store.containers.append(self)
     }
@@ -216,6 +244,7 @@ class Store: PythonBindable {
         if let row = try row(id: handle.id) {
             context.delete(row)
         }
+        deleteVersions(id: handle.id)
         // Unstored again: a later change must not put it back.
         model._data = Optional<PyObject>.none
     }
@@ -239,6 +268,32 @@ class Store: PythonBindable {
             subscribe()
         }
         return observation
+    }
+
+    /// Earlier states of a stored instance, newest first. The first is the
+    /// state it holds now.
+    ///
+    /// model: The stored model instance.
+    ///
+    /// ```python
+    /// store = Store('notes', keep_versions=True)
+    /// for version in store.versions(note):
+    ///     print(version.date, version.model.text)
+    /// ```
+    func versions(model: PyObject) throws -> [ModelVersion] {
+        guard let versionContext else {
+            throw PythonError.ValueError("This store keeps no versions: create it with keep_versions=True.")
+        }
+        guard let handle = ModelHandle(model._data) else { return [] }
+        flushVersions()
+        let type = py.typeof(model.reference)
+        let typeObject = PyObject(type)
+        return try versionContext.fetch(.versions(of: handle.id)).map { version in
+            guard let copy: PyObject = try typeObject._from_json?(version.json) else {
+                throw PythonError.ValueError("Failed to read a version of \(type.name)")
+            }
+            return ModelVersion(date: version.date.ISO8601Format(), model: copy)
+        }
     }
 
     internal func remove(_ observation: StoreObservation) {
@@ -270,7 +325,48 @@ class Store: PythonBindable {
         let row = ModelData(keys: keys, json: json)
         row.persistentId = (try? context.fetchCount(.models(name: typeName))) ?? 0
         context.insert(row)
+        recordVersion(id: id, json: json)
         return row
+    }
+
+    // MARK: Versions
+
+    /// A model's setters write once per field, each its own hop from the
+    /// interpreter, so the writes within a short window become one version.
+    internal func recordVersion(id: String, json: String) {
+        guard versionContext != nil else { return }
+        pendingVersions[id] = json
+        guard versionFlush == nil else { return }
+        versionFlush = Task { @MainActor [weak self] in
+            try? await Task.sleep(for: .milliseconds(100))
+            guard !Task.isCancelled else { return }
+            self?.flushVersions()
+        }
+    }
+
+    internal func flushVersions() {
+        versionFlush?.cancel()
+        versionFlush = nil
+        guard let versionContext, !pendingVersions.isEmpty else { return }
+        let pending = pendingVersions
+        pendingVersions = [:]
+        for (id, json) in pending {
+            let saved = (try? versionContext.fetch(.versions(of: id))) ?? []
+            if saved.first?.json == json { continue }
+            let order = (saved.first?.order ?? 0) + 1
+            versionContext.insert(ModelVersionData(rowId: id, order: order, json: json))
+            for old in saved.dropFirst(Self.versionLimit - 1) {
+                versionContext.delete(old)
+            }
+        }
+    }
+
+    private func deleteVersions(id: String) {
+        pendingVersions[id] = nil
+        guard let versionContext else { return }
+        for version in (try? versionContext.fetch(.versions(of: id))) ?? [] {
+            versionContext.delete(version)
+        }
     }
 
     /// The row's id, given to rows written before ids existed.

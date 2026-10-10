@@ -188,6 +188,68 @@ struct StoreTests {
         #expect(seenAfterCancel == [1])
     }
 
+    @available(macOS 15, *)
+    @Test func versionsAreOffByDefault() async throws {
+        try await run("""
+        container = Store('versions_off_testing', in_memory=True)
+        sword = Item(name='Sword')
+        container.insert(sword)
+        try:
+            container.versions(sword)
+            raised = False
+        except ValueError:
+            raised = True
+        """)
+        #expect(try await evaluate("raised") == true)
+    }
+
+    @available(macOS 15, *)
+    @Test func versionsKeepEarlierStates() async throws {
+        try await run("""
+        container = Store('versions_testing', in_memory=True, keep_versions=True)
+        sword = Item(name='Sword')
+        container.insert(sword)
+        # Reading flushes, ending the turn's version.
+        container.versions(sword)
+        """)
+        // One version for writes made together, the way `set_inputs` makes them.
+        try await run("""
+        def sharpen():
+            sword.quantity = 1
+            sword.description = 'Sharp'
+        sharpen()
+        versions = container.versions(sword)
+        """)
+        #expect(try await evaluate("len(versions)") == 2)
+        #expect(try await evaluate("[v.model.quantity for v in versions]") == [1, 0])
+        #expect(try await evaluate("versions[1].model.description is None") == true)
+        #expect(try await evaluate("all(getattr(v.model, '_data', None) is None for v in versions)") == true)
+        #expect(try await evaluate("bool(versions[0].date)") == true)
+
+        // The same state again adds nothing.
+        try await run("sword.name = 'Sword'")
+        #expect(try await evaluate("len(container.versions(sword))") == 2)
+    }
+
+    @available(macOS 15, *)
+    @Test func versionsAreLimitedAndDeletedWithTheModel() async throws {
+        try await run("""
+        container = Store('versions_limit_testing', in_memory=True, keep_versions=True)
+        sword = Item(name='Sword')
+        container.insert(sword)
+        for quantity in range(1, 60):
+            sword.quantity = quantity
+            container.versions(sword)
+        """)
+        #expect(try await evaluate("len(container.versions(sword))") == SwiftPy.Store.versionLimit)
+        #expect(try await evaluate("container.versions(sword)[-1].model.quantity") == 59 - SwiftPy.Store.versionLimit + 1)
+
+        try await run("container.delete(sword)")
+        let container: SwiftPy.Store = try #require(try await evaluate("container"))
+        let context = try #require(container.versionContext)
+        #expect(try context.fetchCount(FetchDescriptor<ModelVersionData>()) == 0)
+    }
+
     /// `seen` once the debounced refresh has called back, or as it stands
     /// after a wait long enough to call the callback missing.
     private func callbacks() async throws -> [Int] {
