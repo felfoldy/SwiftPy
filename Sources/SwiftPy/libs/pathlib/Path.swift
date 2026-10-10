@@ -191,7 +191,7 @@ public final class Path {
 
     /// Documents directory.
     public static func home() -> Path {
-        Path(url: .documentsDirectory)
+        Path(url: Interpreter.homeDirectory)
     }
 
     /// The path to the program's current directory.

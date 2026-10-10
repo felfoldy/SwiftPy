@@ -6,6 +6,7 @@
 //
 
 #if cpython
+import Foundation
 import Testing
 @testable import SwiftPy
 
@@ -25,6 +26,13 @@ struct PathlibCPythonTests {
         f.write_text('hi'); ok = f.read_text() == 'hi'; f.unlink()
         assert ok
         """))
+    }
+
+    // Outside the sandbox Documents is the user's, and reading it can wait on
+    // a privacy prompt that never comes, so tests get a folder of their own.
+    @Test func testsKeepOutOfTheUsersDocuments() {
+        #expect(Interpreter.homeDirectory != URL.documentsDirectory)
+        #expect(Path.home().url.standardizedFileURL.path == Interpreter.homeDirectory.standardizedFileURL.path)
     }
 
     @Test func bindingsTakePathOrStr() async throws {
