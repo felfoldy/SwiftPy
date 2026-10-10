@@ -13,6 +13,7 @@ protocol SecretStorage {
     func value(for key: String) -> String?
     func set(_ value: String, for key: String) throws(PythonError)
     func remove(_ key: String) throws(PythonError)
+    func names() -> [String]
 }
 
 @MainActor
@@ -32,6 +33,16 @@ public enum Keychain {
             return expression.value
         }
         return nil
+    }
+
+    /// The names secrets are stored under, sorted.
+    public static var names: [String] {
+        storage.names()
+    }
+
+    /// Removes the secret stored under a name; a missing one is left alone.
+    public static func delete(_ name: String) throws(PythonError) {
+        try storage.remove(name)
     }
 }
 
@@ -85,6 +96,24 @@ final class KeychainStorage: SecretStorage {
         try check(status)
     }
 
+    func names() -> [String] {
+        let query: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: service,
+            // Both kinds: an App Clip's items are device-local.
+            kSecAttrSynchronizable as String: kSecAttrSynchronizableAny,
+            kSecMatchLimit as String: kSecMatchLimitAll,
+            kSecReturnAttributes as String: true,
+        ]
+        var result: CFTypeRef?
+        guard SecItemCopyMatching(query as CFDictionary, &result) == errSecSuccess,
+              let items = result as? [[String: Any]] else {
+            return []
+        }
+        let names = Set(items.compactMap { $0[kSecAttrAccount as String] as? String })
+        return names.sorted { $0.localizedStandardCompare($1) == .orderedAscending }
+    }
+
     /// Runs a keychain operation, repeating it device-locally the one time
     /// iCloud Keychain turns out to be unavailable.
     private func perform(
@@ -133,6 +162,7 @@ extension Interpreter {
         key = keychain.secret("OPENAI_API_KEY")
         print(key)  # <Secret name="OPENAI_API_KEY">
         response = requests.get(url, headers={"Authorization": key.bearer()})
+        print(keychain.secrets())  # [<Secret name="OPENAI_API_KEY">]
         keychain.delete(key)
         ```
         """) { module in
@@ -174,6 +204,15 @@ extension Interpreter {
             ) { argc, argv in
                 PyBind.function(argc, argv) { (key: String, value: String) in
                     try Keychain.storage.set(value, for: key)
+                }
+            }
+
+            module.def(
+                "secrets() -> list[Secret]",
+                docstring: "The secrets stored in the keychain, by name. Their values stay in the keychain."
+            ) { argc, argv in
+                PyBind.function(argc, argv) { () -> [Secret] in
+                    Keychain.names.map(Secret.init(name:))
                 }
             }
 

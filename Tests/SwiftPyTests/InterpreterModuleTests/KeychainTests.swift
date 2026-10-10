@@ -23,6 +23,10 @@ final class InMemorySecretStorage: SecretStorage {
     func remove(_ key: String) throws(PythonError) {
         values[key] = nil
     }
+
+    func names() -> [String] {
+        values.keys.sorted()
+    }
 }
 
 @Suite("Keychain", .serialized)
@@ -114,6 +118,31 @@ struct KeychainTests {
         """)
 
         #expect(main.unhandled == true)
+    }
+
+    @Test func secretsListsTheStoredNames() async {
+        defer { restore() }
+        storage.values = ["B_KEY": "b", "A_KEY": "a"]
+
+        await Interpreter.run("""
+        listed = [secret.name for secret in keychain.secrets()]
+        keychain.delete(keychain.Secret("A_KEY"))
+        remaining = [secret.name for secret in keychain.secrets()]
+        """)
+
+        #expect(main.listed == ["A_KEY", "B_KEY"])
+        #expect(main.remaining == ["B_KEY"])
+    }
+
+    @Test func swiftListsAndDeletes() throws {
+        defer { restore() }
+        storage.values = ["SWIFT_KEY": "value"]
+
+        #expect(Keychain.names == ["SWIFT_KEY"])
+        try Keychain.delete("SWIFT_KEY")
+        #expect(Keychain.names.isEmpty)
+        // A missing one is left alone.
+        try Keychain.delete("SWIFT_KEY")
     }
 
     @Test func setThenDeleteRoundTrips() async {
