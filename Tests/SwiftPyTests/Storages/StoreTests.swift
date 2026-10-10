@@ -250,6 +250,66 @@ struct StoreTests {
         #expect(try context.fetchCount(FetchDescriptor<ModelVersionData>()) == 0)
     }
 
+    @available(macOS 15, *)
+    @Test func versionsFromAnotherDeviceSortByDate() async throws {
+        try await run("""
+        container = Store('versions_sync_testing', in_memory=True, keep_versions=True)
+        sword = Item(name='Sword')
+        container.insert(sword)
+        sword.quantity = 1
+        container.versions(sword)
+        """)
+        let container: SwiftPy.Store = try #require(try await evaluate("container"))
+        // In the store itself, which syncs.
+        let context = try #require(container.versionContext)
+        #expect(context === container.context)
+
+        // Another device numbered its newer version the same as this one's.
+        let latest = try #require(try context.fetch(FetchDescriptor<ModelVersionData>(
+            sortBy: [SortDescriptor(\.order, order: .reverse)]
+        )).first)
+        let synced = ModelVersionData(
+            rowId: latest.rowId,
+            order: latest.order,
+            json: latest.json.replacingOccurrences(of: "\"quantity\": 1", with: "\"quantity\": 7")
+        )
+        synced.date = latest.date.addingTimeInterval(1)
+        context.insert(synced)
+
+        // The insert and the change were written together: one version.
+        #expect(try await evaluate("[v.model.quantity for v in container.versions(sword)]") == [7, 1])
+    }
+
+    @available(macOS 15, *)
+    @Test func versionsNewerThanOneAreDeleted() async throws {
+        try await run("""
+        container = Store('versions_delete_testing', in_memory=True, keep_versions=True)
+        sword = Item(name='Sword')
+        container.insert(sword)
+        container.versions(sword)
+        for quantity in (1, 2, 3):
+            sword.quantity = quantity
+            container.versions(sword)
+        kept = container.versions(sword)[2]
+        container.delete_versions(sword, newer_than=kept.id)
+        """)
+        #expect(try await evaluate("[v.model.quantity for v in container.versions(sword)]") == [1, 0])
+        #expect(try await evaluate("container.versions(sword)[0].id == kept.id") == true)
+
+        // The next change goes on from the kept one.
+        try await run("sword.quantity = 9")
+        #expect(try await evaluate("[v.model.quantity for v in container.versions(sword)]") == [9, 1, 0])
+
+        try await run("""
+        try:
+            container.delete_versions(sword, newer_than='missing')
+            raised = False
+        except ValueError:
+            raised = True
+        """)
+        #expect(try await evaluate("raised") == true)
+    }
+
     /// `seen` once the debounced refresh has called back, or as it stands
     /// after a wait long enough to call the callback missing.
     private func callbacks() async throws -> [Int] {

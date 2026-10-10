@@ -130,8 +130,8 @@ final class StoreObservation: PythonBindable {
 /// Stores are saved between launches by default. Pass `in_memory=True` to create
 /// a temporary store whose contents are discarded when the process exits.
 ///
-/// Pass `keep_versions=True` to keep earlier states of each instance on this
-/// device, read with ``versions``.
+/// Pass `keep_versions=True` to keep earlier states of each instance, read
+/// with ``versions``. They're stored, and synced, with the instances.
 @available(macOS 15, iOS 18, *)
 @MainActor
 @Scriptable
@@ -148,9 +148,9 @@ class Store: PythonBindable {
     private var notificationTokens: [any NSObjectProtocol] = []
     private var refresh: Task<Void, Never>?
 
-    /// Device-local, so versions don't use iCloud storage.
-    private let versionContainer: SwiftData.ModelContainer?
-    internal var versionContext: SwiftData.ModelContext? { versionContainer?.mainContext }
+    /// Versions live in the store itself, so they sync with its models.
+    private let keepsVersions: Bool
+    internal var versionContext: SwiftData.ModelContext? { keepsVersions ? context : nil }
     private var pendingVersions: [String: String] = [:]
     private var versionFlush: Task<Void, Never>?
     internal static let versionLimit = 50
@@ -159,11 +159,14 @@ class Store: PythonBindable {
     ///
     /// name: A stable name identifying the store.
     /// in_memory: Whether the store should keep its contents only in memory. Defaults to False.
-    /// keep_versions: Whether to keep earlier states of each instance on this device. Defaults to False.
+    /// keep_versions: Whether to keep earlier states of each instance, synced like the instances. Defaults to False.
     init(name: String, inMemory: Bool = false, keepVersions: Bool = false) throws {
+        // Versions are in every store's schema, so opening a store with or
+        // without them doesn't migrate it.
         let schema = Schema([ModelData.self,
                              LookupKeyValue.self,
-                             ModelMetadata.self],
+                             ModelMetadata.self,
+                             ModelVersionData.self],
                             version: Schema.Version(0, 1, 0))
 
         let configuration = ModelConfiguration(
@@ -178,26 +181,12 @@ class Store: PythonBindable {
             for: ModelData.self,
             LookupKeyValue.self,
             ModelMetadata.self,
+            ModelVersionData.self,
             configurations: configuration
         )
 
         context = container.mainContext
-
-        if keepVersions {
-            let versions = ModelConfiguration(
-                "\(name).versions",
-                schema: Schema([ModelVersionData.self]),
-                isStoredInMemoryOnly: inMemory,
-                groupContainer: .automatic,
-                cloudKitDatabase: .none
-            )
-            versionContainer = try SwiftData.ModelContainer(
-                for: ModelVersionData.self,
-                configurations: versions
-            )
-        } else {
-            versionContainer = nil
-        }
+        keepsVersions = keepVersions
 
         Store.containers.append(self)
     }
@@ -244,7 +233,7 @@ class Store: PythonBindable {
         if let row = try row(id: handle.id) {
             context.delete(row)
         }
-        deleteVersions(id: handle.id)
+        deleteAllVersions(id: handle.id)
         // Unstored again: a later change must not put it back.
         model._data = Optional<PyObject>.none
     }
@@ -292,8 +281,29 @@ class Store: PythonBindable {
             guard let copy: PyObject = try typeObject._from_json?(version.json) else {
                 throw PythonError.ValueError("Failed to read a version of \(type.name)")
             }
-            return ModelVersion(date: version.date.ISO8601Format(), model: copy)
+            return ModelVersion(id: version.versionId, date: version.date.ISO8601Format(), model: copy)
         }
+    }
+
+    /// Deletes the versions of a stored instance newer than the given one,
+    /// as when going on from an earlier state discards the ones after it.
+    ///
+    /// model: The stored model instance.
+    /// newer_than: The `id` of the version to keep, with the ones before it.
+    func deleteVersions(model: PyObject, newerThan: String) throws {
+        guard let versionContext else {
+            throw PythonError.ValueError("This store keeps no versions: create it with keep_versions=True.")
+        }
+        guard let handle = ModelHandle(model._data) else { return }
+        flushVersions()
+        let versions = try versionContext.fetch(.versions(of: handle.id))
+        guard let index = versions.firstIndex(where: { $0.versionId == newerThan }) else {
+            throw PythonError.ValueError("No version \(newerThan) of this model.")
+        }
+        for version in versions[..<index] {
+            versionContext.delete(version)
+        }
+        try? versionContext.save()
     }
 
     internal func remove(_ observation: StoreObservation) {
@@ -353,15 +363,19 @@ class Store: PythonBindable {
         for (id, json) in pending {
             let saved = (try? versionContext.fetch(.versions(of: id))) ?? []
             if saved.first?.json == json { continue }
+            // Another device can number one the same; dates order them.
             let order = (saved.first?.order ?? 0) + 1
             versionContext.insert(ModelVersionData(rowId: id, order: order, json: json))
             for old in saved.dropFirst(Self.versionLimit - 1) {
                 versionContext.delete(old)
             }
         }
+        // Written a moment after the change, so autosave may not get to them
+        // before the app quits.
+        try? versionContext.save()
     }
 
-    private func deleteVersions(id: String) {
+    private func deleteAllVersions(id: String) {
         pendingVersions[id] = nil
         guard let versionContext else { return }
         for version in (try? versionContext.fetch(.versions(of: id))) ?? [] {
