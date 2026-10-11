@@ -1183,6 +1183,34 @@ struct HelpTests {
             #expect(!text.contains("Callable") && !text.contains("getcwd"))
         }
 
+        @Test("keep an enum's members and a class's constants")
+        func membersAndConstants() async throws {
+            await Interpreter.run("""
+            import types, enum
+            from interpreter.help import _stub_lines, _typed_stub
+            _module = types.ModuleType("_options")
+            class _Edge(enum.StrEnum):
+                TOP = "top"
+                TOP_LEADING = "top-leading"
+                def flipped(self): return self
+            class _Limits:
+                LOW = 1
+                NAME = "limits"
+            for _cls in (_Edge, _Limits):
+                _cls.__name__ = _cls.__name__[1:]
+                _cls.__module__ = "_options"
+                setattr(_module, _cls.__name__, _cls)
+            _options = _typed_stub(ast.parse("\\n".join(_stub_lines(_module))), "_options", {}, set())
+            """)
+            let text: String = try #require(Interpreter.evaluate("_options"))
+            #expect(text.contains("from enum import StrEnum"))
+            #expect(text.contains("class Edge(StrEnum):"))
+            #expect(text.contains("TOP = 'top'") && text.contains("TOP_LEADING = 'top-leading'"))
+            #expect(text.contains("def flipped(self)"))
+            #expect(!text.contains("def capitalize"))
+            #expect(text.contains("LOW: int") && text.contains("NAME: str"))
+        }
+
         @Test("leave out what only Swift knows")
         func withoutSwiftNames() async {
             await Interpreter.run("""

@@ -150,14 +150,25 @@ def _class_lines(cls):
     if doc:
         lines += _docstring_lines(doc)
 
-    for attr_name in dir(cls):
+    import enum
+    is_enum = isinstance(cls, enum.EnumType)
+    if is_enum:
+        # Members as a stub spells them, in their order.
+        lines += ["    " + name + " = " + repr(member.value) for name, member in cls.__members__.items()]
+    else:
+        # Constants, which are read as they are.
+        lines += ["    " + name + ": " + type(value).__name__ for name, value in vars(cls).items()
+                  if not name.startswith('_') and type(value) in (bool, int, float, str)]
+
+    # An enum's own methods only: a StrEnum would list all of str's.
+    for attr_name in (list(vars(cls)) if is_enum else dir(cls)):
         if attr_name.startswith('_'):
             continue
         try:
             attr = getattr(cls, attr_name)
         except:
             continue
-        if not callable(attr):
+        if not callable(attr) or (is_enum and isinstance(attr, cls)):
             continue
 
         # A blank line separates members, but not the first one from its class.
@@ -397,6 +408,10 @@ def _stub_lines(module):
 
     classes, functions = _module_members(module)
     for _, cls in classes:
+        # A builtin SwiftPy adds is re-exported from its own stub, not copied:
+        # a copy would be a second class of the same name.
+        if cls.__module__ == 'builtins':
+            continue
         lines += _class_lines(cls) + [""]
 
     for name, function in functions:
@@ -447,7 +462,7 @@ def _without_swift_syntax(text):
 def _typed_stub(tree, module_name, classes, swift_builtins=()):
     """Makes a stub's names resolve: `typing`'s and other stubs' are imported,
     and what only Swift knows, a `UInt64` or a `View`, becomes `Any`."""
-    import ast, builtins, typing
+    import ast, builtins, enum, typing
 
     defined = {node.name for node in tree.body if isinstance(node, (ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef))}
     defined |= {node.target.id for node in tree.body
@@ -464,6 +479,9 @@ def _typed_stub(tree, module_name, classes, swift_builtins=()):
             return True
         if name in typing.__all__:
             imports.setdefault('typing', set()).add(name)
+            return True
+        if name in enum.__all__:
+            imports.setdefault('enum', set()).add(name)
             return True
         owner = classes.get(name)
         if owner and owner != module_name:
@@ -512,8 +530,11 @@ def _typed_stub(tree, module_name, classes, swift_builtins=()):
     tree.body = [node for node in tree.body if not isinstance(node, (ast.Import, ast.ImportFrom))]
     visit(tree.body)
     resolves('Any')
+    # SwiftPy's builtins as re-exports, for a module that lists one.
     header = [
-        ast.ImportFrom(module=module, names=[ast.alias(name) for name in sorted(names)], level=0)
+        ast.ImportFrom(module=module, names=[
+            ast.alias(name, name if module == '_swiftpy_builtins' else None) for name in sorted(names)
+        ], level=0)
         for module, names in sorted(imports.items())
     ]
     docstring = tree.body[:1] if tree.body and isinstance(tree.body[0], ast.Expr) else []
