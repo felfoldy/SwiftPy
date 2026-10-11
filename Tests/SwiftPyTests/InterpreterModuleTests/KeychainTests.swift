@@ -120,20 +120,6 @@ struct KeychainTests {
         #expect(main.unhandled == true)
     }
 
-    @Test func secretsListsTheStoredNames() async {
-        defer { restore() }
-        storage.values = ["B_KEY": "b", "A_KEY": "a"]
-
-        await Interpreter.run("""
-        listed = [secret.name for secret in keychain.secrets()]
-        keychain.delete(keychain.Secret("A_KEY"))
-        remaining = [secret.name for secret in keychain.secrets()]
-        """)
-
-        #expect(main.listed == ["A_KEY", "B_KEY"])
-        #expect(main.remaining == ["B_KEY"])
-    }
-
     @Test func swiftListsAndDeletes() throws {
         defer { restore() }
         storage.values = ["SWIFT_KEY": "value"]

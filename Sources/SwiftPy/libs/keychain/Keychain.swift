@@ -162,7 +162,6 @@ extension Interpreter {
         key = keychain.secret("OPENAI_API_KEY")
         print(key)  # <Secret name="OPENAI_API_KEY">
         response = requests.get(url, headers={"Authorization": key.bearer()})
-        print(keychain.secrets())  # [<Secret name="OPENAI_API_KEY">]
         keychain.delete(key)
         ```
         """) { module in
@@ -204,15 +203,6 @@ extension Interpreter {
             ) { argc, argv in
                 PyBind.function(argc, argv) { (key: String, value: String) in
                     try Keychain.storage.set(value, for: key)
-                }
-            }
-
-            module.def(
-                "secrets() -> list[Secret]",
-                docstring: "The secrets stored in the keychain, by name. Their values stay in the keychain."
-            ) { argc, argv in
-                PyBind.function(argc, argv) { () -> [Secret] in
-                    Keychain.names.map(Secret.init(name:))
                 }
             }
 
