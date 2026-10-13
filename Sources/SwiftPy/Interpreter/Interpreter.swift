@@ -168,6 +168,7 @@ public final class Interpreter {
 
         bindP2P()
         bindKeychain()
+        bindClipboard()
         bindEmbeddings()
 
         // Bundled source-only modules.
