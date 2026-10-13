@@ -25,7 +25,8 @@ extension Interpreter {
                 PyBind.function(argc, argv) { try Path.sitePackages().description }
             }
         }
-        // Runs in __main__, so everything stays inside one function's scope.
+        // Its own namespace, not __main__: the methods keep the namespace they
+        // were made in, which would hold on to the first notebook's names.
         let patch = """
         def _swiftpy_extend_pathlib():
             import _swiftpy_paths as paths
@@ -46,7 +47,12 @@ extension Interpreter {
         _swiftpy_extend_pathlib()
         del _swiftpy_extend_pathlib
         """
-        do { try py.run(patch) } catch { log.error("pathlib extras failed: \(error)") }
+        do {
+            let code = try PythonCompiler.compile(patch, filename: "<swiftpy pathlib>")
+            try PyRuntime.execute(code, globals: PyRuntime.namespace())
+        } catch {
+            log.error("pathlib extras failed: \(error)")
+        }
         #else
         bindModule("pathlib", docs: "Object-oriented filesystem paths.") { module in
             module.class(Path.self)
