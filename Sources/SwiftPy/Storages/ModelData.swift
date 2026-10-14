@@ -217,8 +217,10 @@ class Store: PythonBindable {
         let typeName = py.totype(type.reference).name
         try py.module("storage")?._extend?(type)
         let rows = try context.fetch(.models(name: typeName))
+        let ids = try rowIds()
         let handles = rows.map { row in
-            ModelHandle(store: self, id: identify(row), typeName: typeName, json: row.json)
+            let id = ids[row.persistentModelID] ?? identify(row)
+            return ModelHandle(store: self, id: id, typeName: typeName, json: row.json)
         }
         return try type._makemodels?(handles)
     }
@@ -383,11 +385,21 @@ class Store: PythonBindable {
         }
     }
 
-    /// The row's id, given to rows written before ids existed.
+    /// Each row's id, from the keys the store still has. Read through a row's
+    /// `keys`, a key a merge from another device removed traps.
+    private func rowIds() throws -> [PersistentIdentifier: String] {
+        let key = Self.idKey
+        let keys = try context.fetch(FetchDescriptor<LookupKeyValue>(
+            predicate: #Predicate { $0.key == key }
+        ))
+        return Dictionary(
+            keys.compactMap { lookup in lookup.model.map { ($0.persistentModelID, lookup.value) } },
+            uniquingKeysWith: { first, _ in first }
+        )
+    }
+
+    /// An id for a row without one, written before ids existed.
     private func identify(_ row: ModelData) -> String {
-        if let id = row.keys?[Self.idKey] {
-            return id
-        }
         let id = UUID().uuidString
         row.keys = (row.keys ?? []) + [LookupKeyValue(key: Self.idKey, value: id)]
         return id
