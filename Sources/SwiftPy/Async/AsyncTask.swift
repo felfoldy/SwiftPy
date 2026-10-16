@@ -147,6 +147,10 @@ public class AsyncTask: PythonBindable {
                 outcome = .success(result)
             } catch let error as PythonError {
                 outcome = .failure(error)
+            } catch is CancellationError {
+                // A BaseException either way, so `except Exception` doesn't
+                // swallow a stop.
+                outcome = .failure(PythonError(type: cancellation?.raising ?? "asyncio.CancelledError", value: ""))
             } catch {
                 outcome = .failure(.RuntimeError(error.localizedDescription))
             }

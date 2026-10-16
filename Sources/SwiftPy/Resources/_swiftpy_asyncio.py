@@ -7,6 +7,7 @@ does. The loop is therefore always "running", the way it is in a notebook.
 
 import builtins
 import sys
+import threading
 import time
 import traceback
 import warnings
@@ -161,7 +162,24 @@ def fail(future, type_name, message):
 def _install_on_this_thread():
     """The running loop is kept per thread; this one runs on every thread
     Python runs on, so each of them is told."""
+    global _cell_thread
+    _cell_thread = threading.get_ident()
     events._set_running_loop(loop)
+
+
+_cell_thread = None
+_blocking_sleep = time.sleep
+
+
+def _sleep(seconds):
+    """Suspends the calling thread for the given number of seconds."""
+    # A C sleep can't be interrupted; on the cell's thread it waits in Swift
+    # instead, where a stop ends it. Elsewhere, as on main, it can't wait so.
+    if threading.get_ident() != _cell_thread:
+        return _blocking_sleep(seconds)
+    if seconds < 0:
+        raise ValueError("sleep length must be non-negative")
+    _native.sleep(seconds)
 
 
 def _run(main, **kwargs):
@@ -174,4 +192,6 @@ def _run(main, **kwargs):
 loop = SwiftEventLoop()
 events._set_running_loop(loop)
 asyncio.run = _run
+_sleep.__name__ = _sleep.__qualname__ = "sleep"
+time.sleep = _sleep
 asyncio.AsyncTask = _native.AsyncTask

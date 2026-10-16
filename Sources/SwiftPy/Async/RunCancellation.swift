@@ -24,8 +24,13 @@ import Foundation
 final class RunCancellation {
     private var handlers: [() -> Void] = []
     private(set) var isCancelled = false
+    /// What a wait it ends raises: a stop is Python's interrupt, as it is for
+    /// code that isn't waiting; a scope's own cancel is asyncio's.
+    private(set) var raising: String
 
-    nonisolated init() {}
+    nonisolated init(raising: String = "KeyboardInterrupt") {
+        self.raising = raising
+    }
 
     /// Registers work to tear down when the run is stopped. A handler that
     /// registers after cancellation runs immediately.
@@ -38,9 +43,10 @@ final class RunCancellation {
     }
 
     /// Marks the run as cancelled and runs every registered handler.
-    func cancel() {
+    func cancel(raising type: String? = nil) {
         guard !isCancelled else { return }
         isCancelled = true
+        if let type { raising = type }
 
         let pending = handlers
         handlers.removeAll()

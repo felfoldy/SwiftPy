@@ -1,0 +1,81 @@
+//
+//  CancellationScopeTests.swift
+//  SwiftPy
+//
+
+#if cpython
+import Foundation
+import Testing
+@testable import SwiftPy
+
+// On the cell's thread, where `time.sleep` waits in Swift.
+@PythonActor
+private func call(_ function: PyObject) throws -> PyObject {
+    try PyRuntime.call(function)
+}
+
+@MainActor
+@Suite(.serialized)
+struct CancellationScopeTests {
+    init() async {
+        await Interpreter.run("""
+        import time
+
+        def _nap():
+            try:
+                time.sleep(30)
+                return "slept"
+            except BaseException as error:
+                return type(error).__name__
+        """)
+    }
+
+    private var nap: PyObject { py.main._nap! }
+
+    @Test func cancellingAScopeEndsASleepInsideIt() async throws {
+        let started = ContinuousClock.now
+        let result = try await Interpreter.withCancellationScope { scope in
+            Task { @MainActor in
+                try await Task.sleep(for: .milliseconds(100))
+                scope.cancel()
+            }
+            return String(try await call(nap))
+        }
+        #expect(result == "CancelledError")
+        #expect(ContinuousClock.now - started < .seconds(5))
+    }
+
+    @Test func stoppingTheRunEndsTheScope() async throws {
+        let run = RunCancellation()
+        let started = ContinuousClock.now
+        let result = try await InterpreterExecutionContext.withOutput(cancellation: run, operation: { @MainActor in
+            try await Interpreter.withCancellationScope { scope in
+                Task { @MainActor in
+                    try await Task.sleep(for: .milliseconds(100))
+                    run.cancel()
+                }
+                let result = String(try await call(nap))
+                #expect(scope.isCancelled)
+                return result
+            }
+        }, stdout: { _ in })
+        // A stop, as it is for code that isn't waiting.
+        #expect(result == "KeyboardInterrupt")
+        #expect(ContinuousClock.now - started < .seconds(5))
+    }
+
+    @Test func aScopeLeavesTheRestOfTheRunAlone() async throws {
+        let run = RunCancellation()
+        try await InterpreterExecutionContext.withOutput(cancellation: run, operation: { @MainActor in
+            try await Interpreter.withCancellationScope { scope in scope.cancel() }
+        }, stdout: { _ in })
+        #expect(!run.isCancelled)
+    }
+
+    @Test func sleepOffTheCellsThreadStillSleeps() throws {
+        // Main can't wait in Swift, so there it's the C sleep.
+        try PyRuntime.run("import time\ntime.sleep(0.01)\n_slept_on_main = True")
+        #expect(Interpreter.evaluate("_slept_on_main") == true)
+    }
+}
+#endif

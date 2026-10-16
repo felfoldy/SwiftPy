@@ -354,6 +354,29 @@ struct LocalInterpreterConnectionTests {
     }
 #endif
 
+#if cpython
+    @Test func stopEndsATimeSleep() async {
+        let connection = LocalInterpreterConnection()
+        await connection.compile(id: 1, source: """
+        import time
+        _test_sleep_flag = 'running'
+        time.sleep(30)
+        _test_sleep_flag = 'slept'
+        """)
+
+        let started = ContinuousClock.now
+        let runTask = Task { await connection.run(id: 1) }
+        for _ in 0..<200 where (Interpreter.evaluate("_test_sleep_flag") as String?) != "running" {
+            try? await Task.sleep(for: .milliseconds(10))
+        }
+        await connection.perform(.stop(id: 1))
+        await runTask.value
+
+        #expect(ContinuousClock.now - started < .seconds(5))
+        #expect(Interpreter.evaluate("_test_sleep_flag") == "running")
+    }
+#endif
+
     @Test func stopWithUnknownIdDoesNotEmitStopped() async {
         let connection = LocalInterpreterConnection()
         let stream = await connection.events

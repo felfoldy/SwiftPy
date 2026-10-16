@@ -16,6 +16,13 @@ extension Interpreter {
                     SwiftEventLoop.resolve(token, future)
                 }
             }
+
+            // `time.sleep` on the cell's thread: a wait a stop can end.
+            module.def("sleep(seconds: float) -> None") { argc, argv in
+                PyBind.blocking(argc, argv) { (seconds: Double) in
+                    try await Task.sleep(for: .seconds(seconds))
+                }
+            }
         }
         bindModule("_swiftpy_asyncio", in: .module)
         #else
