@@ -235,6 +235,28 @@ struct HelpTests {
             #expect(!output.contains("## Initializers"))
         }
 
+        /// A subclass links to what it inherits rather than repeating it: every
+        /// view would otherwise list all of `View`'s modifiers.
+        @Test("links inherited functions instead of listing them")
+        func inheritedFunctions() async throws {
+            await Interpreter.run("""
+            class _HelpBase:
+                def shared(self):
+                    "Shared by subclasses."
+
+            class _HelpChild(_HelpBase):
+                def own(self):
+                    "Only the child's."
+
+            _inherited = "\\n".join(_help_module._markdown_lines(_HelpChild))
+            """)
+            let output: String = try #require(Interpreter.evaluate("_inherited"))
+
+            #expect(output.contains("own()"))
+            #expect(!output.contains("shared()"))
+            #expect(output.contains("Inherits the functions of ``__main__/_HelpBase``."))
+        }
+
         @Test("takes the method signature from the binding")
         func methodSignature() async throws {
             let output = try await markdown(of: "p2p.Peer")
@@ -1181,6 +1203,44 @@ struct HelpTests {
             #expect(text.contains("limit: int"))
             #expect(!text.contains("Any:") && !text.contains("class Any"))
             #expect(!text.contains("Callable") && !text.contains("getcwd"))
+        }
+
+        /// A `type` alias is written as one, so annotations elsewhere can use
+        /// it, rather than as a variable of type `TypeAliasType`.
+        @Test("write a type alias as one, which other stubs import")
+        func typeAliases() async throws {
+            await Interpreter.run("""
+            import ast, types
+            from interpreter.help import _stub_lines, _typed_stub
+            _module = types.ModuleType("_lengths")
+            exec("class Amount: pass\\ntype Size = float | Amount", _module.__dict__)
+            _module.Amount.__module__ = "_lengths"
+            _module.Size.__module__ = "_lengths"
+            _lengths = _typed_stub(ast.parse("\\n".join(_stub_lines(_module))), "_lengths", {}, set())
+            _user = _typed_stub(ast.parse("def grow(by: Size) -> None: ..."), "_user", {"Size": "_lengths"}, set())
+            """)
+            let lengths: String = try #require(Interpreter.evaluate("_lengths"))
+            let user: String = try #require(Interpreter.evaluate("_user"))
+            #expect(lengths.contains("type Size = float | Amount"), "\(lengths)")
+            #expect(user.contains("from _lengths import Size"), "\(user)")
+            #expect(user.contains("by: Size"), "\(user)")
+        }
+
+        @Test("import a class the module took from the standard library")
+        func standardLibraryImports() async throws {
+            await Interpreter.run("""
+            import ast, sys, types
+            from interpreter.help import _stub_lines, _typed_stub
+            _module = types.ModuleType("_sources")
+            exec("__all__ = ['Source']\\nfrom os import PathLike\\ntype Source = str | PathLike[str] | bytes", _module.__dict__)
+            _module.Source.__module__ = "_sources"
+            sys.modules["_sources"] = _module
+            _sources = _typed_stub(ast.parse("\\n".join(_stub_lines(_module))), "_sources", {}, set())
+            del sys.modules["_sources"]
+            """)
+            let text: String = try #require(Interpreter.evaluate("_sources"))
+            #expect(text.contains("from os import PathLike"), "\(text)")
+            #expect(text.contains("type Source = str | PathLike[str] | bytes"), "\(text)")
         }
 
         @Test("keep an enum's members and a class's constants")

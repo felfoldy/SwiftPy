@@ -441,10 +441,23 @@ def _stub_lines(module):
         if isinstance(value, type):
             lines += _class_lines(value) + [""]
             continue
+        # A `type` alias, such as `views.Length`, is usable in annotations.
+        if type(value).__name__ == 'TypeAliasType':
+            lines += ["type " + name + " = " + _alias_value(value), ""]
+            continue
         kind = type(value).__name__
         plain = ('bool', 'int', 'float', 'str', 'bytes', 'list', 'dict', 'tuple', 'set')
         lines.append(name + ": " + (kind if kind in plain else "Any"))
     return lines
+
+
+def _alias_value(alias):
+    # As written, `float | LengthExpression`, rather than its evaluated repr.
+    try:
+        import annotationlib
+        return annotationlib.call_evaluate_function(alias.evaluate_value, annotationlib.Format.STRING)
+    except Exception:
+        return "Any"
 
 
 def _without_swift_syntax(text):
@@ -462,9 +475,11 @@ def _without_swift_syntax(text):
 def _typed_stub(tree, module_name, classes, swift_builtins=()):
     """Makes a stub's names resolve: `typing`'s and other stubs' are imported,
     and what only Swift knows, a `UInt64` or a `View`, becomes `Any`."""
-    import ast, builtins, enum, typing
+    import ast, builtins, enum, sys, typing
 
+    module = sys.modules.get(module_name)
     defined = {node.name for node in tree.body if isinstance(node, (ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef))}
+    defined |= {node.name.id for node in tree.body if isinstance(node, ast.TypeAlias)}
     defined |= {node.target.id for node in tree.body
                 if isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name)}
     imports = {}
@@ -486,6 +501,13 @@ def _typed_stub(tree, module_name, classes, swift_builtins=()):
         owner = classes.get(name)
         if owner and owner != module_name:
             imports.setdefault(owner, set()).add(name)
+            return True
+        # A class the module imported from the standard library, `os.PathLike`
+        # for one, which a type checker has stubs for.
+        value = getattr(module, name, None)
+        origin = getattr(value, '__module__', None)
+        if isinstance(value, type) and origin and origin.split('.')[0] in sys.stdlib_module_names:
+            imports.setdefault(origin, set()).add(name)
             return True
         return False
 
@@ -526,6 +548,8 @@ def _typed_stub(tree, module_name, classes, swift_builtins=()):
                 node.returns = typed(node.returns)
             elif isinstance(node, ast.AnnAssign):
                 node.annotation = typed(node.annotation)
+            elif isinstance(node, ast.TypeAlias):
+                node.value = typed(node.value)
 
     tree.body = [node for node in tree.body if not isinstance(node, (ast.Import, ast.ImportFrom))]
     visit(tree.body)
@@ -574,6 +598,8 @@ def _stubs():
         for node in tree.body:
             if isinstance(node, ast.ClassDef):
                 classes.setdefault(node.name, module_name)
+            elif isinstance(node, ast.TypeAlias):
+                classes.setdefault(node.name.id, module_name)
     stubs = {path: _typed_stub(tree, module_name, classes, set(bound))
              for path, (module_name, tree) in trees.items()}
     # SwiftPy's own `help`, a function, rather than typeshed's `_Helper` instance.
@@ -1235,11 +1261,43 @@ def _class_markdown(cls, path=None):
     if initializers:
         lines += ["## Initializers", ""] + _function_entries(path, initializers, cls)
 
+    # Inherited ones are linked to where they're documented, rather than
+    # repeated: every view would list all of `View`'s modifiers.
     methods = _class_methods(cls)
-    if methods:
-        lines += ["## Functions", ""] + _function_entries(path, methods, cls)
+    owners = []
+    for name, _ in methods:
+        owner = _defining_class(cls, name)
+        if owner is not cls and owner not in owners:
+            owners.append(owner)
+    own = [(name, method) for name, method in methods if _defining_class(cls, name) is cls]
+    if own or owners:
+        lines += ["## Functions", ""] + _function_entries(path, own, cls)
+    if owners:
+        links = [_reference_markdown(_class_reference_path(owner)) for owner in owners]
+        joined = links[0] if len(links) == 1 else ", ".join(links[:-1]) + " and " + links[-1]
+        lines += ["Inherits the functions of " + joined + ".", ""]
 
     return lines
+
+
+def _defining_class(cls, name):
+    # The nearest class in the MRO that declares `name` itself.
+    for klass in getattr(cls, '__mro__', (cls,)):
+        try:
+            if name in vars(klass):
+                return klass
+        except TypeError:
+            continue
+    return cls
+
+
+def _class_reference_path(cls):
+    builtin = _builtin_class_path(cls)
+    if builtin:
+        return builtin
+    module = getattr(cls, '__module__', None)
+    name = getattr(cls, '__qualname__', None) or cls.__name__
+    return module + "/" + name if module else name
 
 
 def _markdown_lines(obj):
