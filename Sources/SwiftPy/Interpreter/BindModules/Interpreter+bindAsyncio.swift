@@ -17,10 +17,16 @@ extension Interpreter {
                 }
             }
 
-            // `time.sleep` on the cell's thread: a wait a stop can end.
-            module.def("sleep(seconds: float) -> None") { argc, argv in
-                PyBind.blocking(argc, argv) { (seconds: Double) in
-                    try await Task.sleep(for: .seconds(seconds))
+            // `interpreter.stoppable`: a worker finishes the token the cell waits on.
+            module.def("finish(token: int) -> None") { argc, argv in
+                PyBind.function(argc, argv) { (token: Int) in
+                    StoppableCalls.finish(token)
+                }
+            }
+
+            module.def("wait(token: int) -> None") { argc, argv in
+                PyBind.blocking(argc, argv) { (token: Int) in
+                    try await StoppableCalls.wait(token)
                 }
             }
         }

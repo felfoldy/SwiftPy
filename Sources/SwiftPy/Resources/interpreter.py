@@ -1,8 +1,17 @@
 __doc__ = "Utilities for interacting with the PyPrompt interpreter."
-__all__ = ["display", "ainput", "source", "set_timeout", "enable_trace", "disable_trace"]
+__all__ = ["display", "ainput", "stoppable", "source", "set_timeout", "enable_trace", "disable_trace"]
 
 from rlcompleter import Completer as _Completer
 from interpreter.native import host, display, ainput, source, set_timeout, enable_trace, disable_trace
+
+try:
+    from _swiftpy_asyncio import stoppable
+    stoppable.__module__ = __name__
+except ImportError:
+    # pocketpy runs no threads, and its stop reaches every call.
+    def stoppable(function):
+        """Makes a blocking call stoppable."""
+        return function
 
 
 def _completions(text: str) -> list[str]:
