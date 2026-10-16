@@ -377,6 +377,34 @@ struct LocalInterpreterConnectionTests {
     }
 #endif
 
+#if cpython
+    @Test func stopEndsAnAwaitedInput() async {
+        // A host that never answers, as the input bar while nobody types.
+        Interpreter.interface.requestInput = { _ in
+            try await withCheckedThrowingContinuation { (_: CheckedContinuation<String, any Error>) in }
+        }
+        defer { Interpreter.interface.requestInput = InterpreterInterface().requestInput }
+        let connection = LocalInterpreterConnection()
+        await connection.compile(id: 1, source: """
+        from interpreter import ainput
+        _test_ainput_flag = 'asking'
+        _test_ainput_flag = await ainput('Name?')
+        """)
+
+        let started = ContinuousClock.now
+        let runTask = Task { await connection.run(id: 1) }
+        for _ in 0..<200 where (Interpreter.evaluate("_test_ainput_flag") as String?) != "asking" {
+            try? await Task.sleep(for: .milliseconds(10))
+        }
+        try? await Task.sleep(for: .milliseconds(50))
+        await connection.perform(.stop(id: 1))
+        await runTask.value
+
+        #expect(ContinuousClock.now - started < .seconds(5))
+        #expect(Interpreter.evaluate("_test_ainput_flag") == "asking")
+    }
+#endif
+
     @Test func stopWithUnknownIdDoesNotEmitStopped() async {
         let connection = LocalInterpreterConnection()
         let stream = await connection.events

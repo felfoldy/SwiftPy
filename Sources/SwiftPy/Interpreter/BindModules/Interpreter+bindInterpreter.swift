@@ -39,6 +39,37 @@ extension Interpreter {
                 }
             }
 
+            module.asyncDef(
+                "ainput(prompt: str = '') -> str",
+                docstring: """
+                Asks the user for a line of text, as `input` does, but to await: \
+                the rest of the program, such as a button's action, keeps \
+                running while it waits.
+
+                prompt: What to ask.
+
+                ```python
+                from interpreter import ainput
+
+                name = await ainput("What's your name?")
+                ```
+                """
+            ) { argc, argv in
+                PyBind.function(argc, argv) { (prompt: String) in
+                    try await Interpreter.interface.requestInput(prompt)
+                }
+            }
+
+            // The builtin `input`: what `ainput` asks, waited for as Python's is.
+            module.def(
+                "input(prompt: str = '') -> str",
+                docstring: "Asks the user for a line of text, and waits for it.\n\nprompt: What to ask."
+            ) { argc, argv in
+                PyBind.blocking(argc, argv) { (prompt: String) in
+                    try await Interpreter.interface.requestInput(prompt)
+                }
+            }
+
             module.def("set_timeout(milliseconds: int | None) -> None",
                        docstring: "Sets the execution timeout, or None to disable it.") { argc, argv in
                 PyBind.function(argc, argv) { (milliseconds: Int?) in
@@ -68,6 +99,8 @@ extension Interpreter {
                     Interpreter.shared.connection.display(viewObject: value.reference)
                 }
             }
+
+            py.module("builtins")?.input = module.input
 
             let appVersion = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? ""
             module.app_version = appVersion
