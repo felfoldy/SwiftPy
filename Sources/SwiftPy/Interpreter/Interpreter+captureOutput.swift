@@ -58,6 +58,23 @@ public extension Interpreter {
         }
     }
 
+    /// Runs `operation` with what Python prints in it, its awaits included,
+    /// sent to `stdout` rather than the run's output. The rest of the run's
+    /// context stays, so a stop still reaches it.
+    ///
+    /// stdout: Called on whichever thread Python prints from.
+    @MainActor
+    static func withOutput<T>(
+        to stdout: @escaping @Sendable (String) -> Void,
+        operation: () async throws -> T
+    ) async rethrows -> T {
+        var context = InterpreterExecutionContext.current
+        context.output = stdout
+        return try await InterpreterExecutionContext.$current.withValue(context) {
+            try await operation()
+        }
+    }
+
     /// Invokes the input handler installed for the current execution, if any.
     static func prepareForInput(prompt: String) async throws {
         try await InterpreterExecutionContext.current.inputHandler?(prompt)

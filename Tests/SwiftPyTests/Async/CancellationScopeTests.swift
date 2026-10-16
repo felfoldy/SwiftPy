@@ -5,6 +5,7 @@
 
 #if cpython
 import Foundation
+import Synchronization
 import Testing
 @testable import SwiftPy
 
@@ -70,6 +71,37 @@ struct CancellationScopeTests {
             try await Interpreter.withCancellationScope { scope in scope.cancel() }
         }, stdout: { _ in })
         #expect(!run.isCancelled)
+    }
+
+    @Test func outputCanBeTakenWithoutLosingTheStop() async throws {
+        await Interpreter.run("""
+        import asyncio
+
+        def _say():
+            print("sync")
+            return _nap()
+
+        async def _later():
+            await asyncio.sleep(0)
+            print("async")
+        """)
+        let run = RunCancellation()
+        let taken = Mutex("")
+        let runOutput = Mutex("")
+        let result = try await InterpreterExecutionContext.withOutput(cancellation: run, operation: { @MainActor in
+            try await Interpreter.withOutput(to: { text in taken.withLock { $0 += text } }) {
+                try await AsyncTask.from(try PyRuntime.call(py.main._later!)).untilCompletes()
+                Task { @MainActor in
+                    try await Task.sleep(for: .milliseconds(100))
+                    run.cancel()
+                }
+                return String(try await call(py.main._say!))
+            }
+        }, stdout: { text in runOutput.withLock { $0 += text } })
+
+        #expect(result == "KeyboardInterrupt")
+        #expect(taken.withLock { $0 } == "async\nsync\n")
+        #expect(runOutput.withLock { $0 }.isEmpty)
     }
 
     @Test func sleepOffTheCellsThreadStillSleeps() throws {
