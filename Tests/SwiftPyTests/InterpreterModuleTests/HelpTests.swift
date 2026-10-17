@@ -1226,6 +1226,72 @@ struct HelpTests {
             #expect(user.contains("by: Size"), "\(user)")
         }
 
+        /// A decorator's overloads, so `@tool` and `@tool(...)` both type as a
+        /// `Tool`, which `inspect` writes by its private module.
+        @Test("keep a Python function's overloads, and its classes by name")
+        func pythonOverloads() async throws {
+            await Interpreter.run("""
+            import ast, sys, types
+            from interpreter.help import _stub_lines, _typed_stub
+            _private = types.ModuleType("_tools")
+            exec("class Tool: pass", _private.__dict__)
+            _private.Tool.__module__ = "_tools"
+            _module = types.ModuleType("_decorators")
+            _module.Tool = _private.Tool
+            exec('''
+            from typing import Callable, overload
+            __all__ = ["tool"]
+
+            @overload
+            def tool(fn: Callable) -> Tool: ...
+            @overload
+            def tool(fn: None = None, *, name: str = "") -> Callable[[Callable], Tool]: ...
+            def tool(fn=None, *, name=""):
+                "Makes a tool."
+            ''', _module.__dict__)
+            sys.modules["_decorators"] = _module
+            _decorators = _typed_stub(ast.parse("\\n".join(_stub_lines(_module))), "_decorators", {"Tool": "_tools"}, set())
+            del sys.modules["_decorators"]
+            """)
+            let text: String = try #require(Interpreter.evaluate("_decorators"))
+            #expect(text.components(separatedBy: "@overload").count == 3, "\(text)")
+            #expect(text.contains("from _tools import Tool"), "\(text)")
+            #expect(text.contains("from typing import Any, Callable, overload"), "\(text)")
+            #expect(text.contains("-> Tool"), "\(text)")
+            #expect(text.contains("-> Callable[[Callable], Tool]"), "\(text)")
+        }
+
+        @Test("write a subclass of str with its own members only")
+        func builtinSubclass() async throws {
+            await Interpreter.run("""
+            import ast
+            from interpreter import InputResult
+            from interpreter.help import _class_lines
+            _result_stub = "\\n".join(_class_lines(InputResult))
+            _parses = bool(ast.parse(_result_stub))
+            """)
+            let text: String = try #require(Interpreter.evaluate("_result_stub"))
+            #expect(text.contains("class InputResult(str):"), "\(text)")
+            #expect(!text.contains("def count"), "\(text)")
+            #expect(text.contains("    images: list"), "\(text)")
+            #expect(Interpreter.evaluate("_parses") == true)
+        }
+
+        @Test("import a class from the public module that re-exports it")
+        func publicOwners() async throws {
+            await Interpreter.run("""
+            import ast
+            from interpreter.help import _class_owners
+            _owners = _class_owners({
+                "_models.pyi": ("_models", ast.parse("class Model: pass\\nclass Hidden: pass")),
+                "models.pyi": ("models", ast.parse("class Model: pass")),
+                "other.pyi": ("other", ast.parse("class Model: pass")),
+            })
+            """)
+            #expect(Interpreter.evaluate("_owners['Model']") == "models")
+            #expect(Interpreter.evaluate("_owners['Hidden']") == "_models")
+        }
+
         @Test("import a class the module took from the standard library")
         func standardLibraryImports() async throws {
             await Interpreter.run("""

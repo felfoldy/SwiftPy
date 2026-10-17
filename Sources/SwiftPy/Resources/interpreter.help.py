@@ -70,8 +70,20 @@ def _callable_definition(obj, fallback_name=None, owner=None):
     return prefix + "def " + signature
 
 
-def _callable_definitions(obj, fallback_name=None, owner=None):
+def _overloads_of(obj):
+    # Swift's, or a Python function's own `@overload`s.
     overloads = getattr(obj, '_overloads', None)
+    if overloads:
+        return overloads
+    try:
+        import typing
+        return typing.get_overloads(obj)
+    except Exception:
+        return []
+
+
+def _callable_definitions(obj, fallback_name=None, owner=None):
+    overloads = _overloads_of(obj)
     if not overloads:
         return [_callable_definition(obj, fallback_name, owner)]
     return [_callable_definition(overload, fallback_name, owner) for overload in overloads]
@@ -81,7 +93,7 @@ def _callable_doc(obj):
     doc = getattr(obj, '__doc__', None)
     if doc:
         return doc
-    for overload in getattr(obj, '_overloads', None) or []:
+    for overload in _overloads_of(obj):
         doc = getattr(overload, '__doc__', None)
         if doc:
             return doc
@@ -99,7 +111,7 @@ def _signature_card(entry, definition, overload=False):
 
 
 def _signature_cards(obj, definitions):
-    overloads = getattr(obj, '_overloads', None)
+    overloads = _overloads_of(obj)
     entries = overloads if overloads else [obj]
     lines = []
     for index in range(len(definitions)):
@@ -157,12 +169,20 @@ def _class_lines(cls):
         lines += ["    " + name + " = " + repr(member.value) for name, member in cls.__members__.items()]
     else:
         # Constants, which are read as they are.
-        lines += ["    " + name + ": " + type(value).__name__ for name, value in vars(cls).items()
-                  if not name.startswith('_') and type(value) in (bool, int, float, str)]
+        constants = [name for name, value in vars(cls).items()
+                     if not name.startswith('_') and type(value) in (bool, int, float, str)]
+        lines += ["    " + name + ": " + type(vars(cls)[name]).__name__ for name in constants]
+        # Attributes the class declares, `step: int`, as written.
+        lines += ["    " + name + ": " + text for name, text in _own_annotations(cls).items()
+                  if not name.startswith('_') and name not in constants]
 
     # An enum's own methods only: a StrEnum would list all of str's.
     for attr_name in (list(vars(cls)) if is_enum else dir(cls)):
         if attr_name.startswith('_'):
+            continue
+        # Likewise what a subclass of `str` inherits: a type checker knows
+        # `str`'s, and some of it has no signature to write.
+        if _is_core_builtin(_defining_class(cls, attr_name)) and not _is_core_builtin(cls):
             continue
         try:
             attr = getattr(cls, attr_name)
@@ -415,7 +435,7 @@ def _stub_lines(module):
         lines += _class_lines(cls) + [""]
 
     for name, function in functions:
-        overloads = getattr(function, '_overloads', None)
+        overloads = _overloads_of(function)
         for entry in overloads or [function]:
             if overloads:
                 lines.append("@overload")
@@ -516,6 +536,12 @@ def _typed_stub(tree, module_name, classes, swift_builtins=()):
             return node if resolves(node.id) else ast.copy_location(ast.Name('Any'), node)
 
         def visit_Attribute(self, node):
+            # `_agents.Tool`, as inspect writes a class by its module: by its
+            # name, where that resolves.
+            if isinstance(node.ctx, ast.Load) and _dotted(node.value) and (
+                    node.attr in defined or node.attr in classes):
+                if resolves(node.attr):
+                    return ast.copy_location(ast.Name(node.attr), node)
             root = node
             while isinstance(root, ast.Attribute):
                 root = root.value
@@ -525,6 +551,11 @@ def _typed_stub(tree, module_name, classes, swift_builtins=()):
 
     def typed(annotation):
         return Annotation().visit(annotation) if annotation is not None else None
+
+    def _dotted(node):
+        while isinstance(node, ast.Attribute):
+            node = node.value
+        return isinstance(node, ast.Name)
 
     def visit(body):
         counts = {}
@@ -541,6 +572,8 @@ def _typed_stub(tree, module_name, classes, swift_builtins=()):
                 if counts[node.name] == 1:
                     node.decorator_list = [d for d in node.decorator_list
                                            if not (isinstance(d, ast.Name) and d.id == 'overload')]
+                else:
+                    resolves('overload')
                 arguments = node.args
                 for argument in arguments.posonlyargs + arguments.args + arguments.kwonlyargs + [arguments.vararg, arguments.kwarg]:
                     if argument is not None:
@@ -592,14 +625,7 @@ def _stubs():
             trees[path] = (module_name, ast.parse(_without_swift_syntax(text)))
         except (SyntaxError, ValueError):
             continue
-    # Which module a class can be imported from.
-    classes = {}
-    for path, (module_name, tree) in sorted(trees.items()):
-        for node in tree.body:
-            if isinstance(node, ast.ClassDef):
-                classes.setdefault(node.name, module_name)
-            elif isinstance(node, ast.TypeAlias):
-                classes.setdefault(node.name.id, module_name)
+    classes = _class_owners(trees)
     stubs = {path: _typed_stub(tree, module_name, classes, set(bound))
              for path, (module_name, tree) in trees.items()}
     # SwiftPy's own `help`, a function, rather than typeshed's `_Helper` instance.
@@ -610,6 +636,26 @@ def _stubs():
     stubs["__builtins__.pyi"] = builtins_stub
     stubs.update(sources)
     return stubs
+
+
+def _class_owners(trees):
+    # Which module a class can be imported from: the public one, where a
+    # module such as `agents` re-exports its private `_agents`' classes, so a
+    # subclass elsewhere and the public module's annotations name the same one.
+    import ast
+    classes = {}
+    for path, (module_name, tree) in sorted(trees.items()):
+        for node in tree.body:
+            if isinstance(node, ast.ClassDef):
+                name = node.name
+            elif isinstance(node, ast.TypeAlias):
+                name = node.name.id
+            else:
+                continue
+            owner = classes.get(name)
+            if owner is None or (owner.startswith('_') and owner[1:] == module_name):
+                classes[name] = module_name
+    return classes
 
 
 def _stub_drafts():
@@ -1125,6 +1171,10 @@ def _class_methods(cls):
             attr = getattr(cls, attr_name)
         except:
             continue
+        # What a subclass of `str` inherits is `str`'s, which a type checker
+        # knows, and some of it has no signature to write.
+        if _is_core_builtin(_defining_class(cls, attr_name)) and not _is_core_builtin(cls):
+            continue
         if callable(attr):
             methods.append((attr_name, attr))
     methods.sort()
@@ -1278,6 +1328,23 @@ def _class_markdown(cls, path=None):
         lines += ["Inherits the functions of " + joined + ".", ""]
 
     return lines
+
+
+def _own_annotations(cls):
+    # The class's own, not its bases', as strings: `list[Diagnostic]`.
+    try:
+        import annotationlib
+        return dict(annotationlib.get_annotations(cls, format=annotationlib.Format.STRING))
+    except Exception:
+        return {}
+
+
+def _is_core_builtin(cls):
+    # CPython's own, `str` or `object`: static types, where what SwiftPy adds
+    # to builtins, `View` for one, is made at runtime.
+    heap_type = 1 << 9
+    return (getattr(cls, '__module__', None) == 'builtins'
+            and not getattr(cls, '__flags__', heap_type) & heap_type)
 
 
 def _defining_class(cls, name):
