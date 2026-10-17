@@ -7,6 +7,7 @@
 import Foundation
 import Synchronization
 import Testing
+import SwiftUI
 @testable import SwiftPy
 
 // On the cell's thread, where `time.sleep` waits in Swift.
@@ -71,6 +72,31 @@ struct CancellationScopeTests {
             try await Interpreter.withCancellationScope { scope in scope.cancel() }
         }, stdout: { _ in })
         #expect(!run.isCancelled)
+    }
+
+    @Test func displayedViewsCanBeTakenToo() async throws {
+        _ = AnyView.pyType
+        _ = CustomView.pyType
+        py.main._shown_view = CustomView()
+        await Interpreter.run("""
+        import asyncio
+        from interpreter import display
+
+        async def _show():
+            display(_shown_view)
+            await asyncio.sleep(0)
+            display(_shown_view)
+        """)
+        var shown = 0
+        var interfaceShown = 0
+        Interpreter.interface.display = { _ in interfaceShown += 1 }
+        defer { Interpreter.interface.display = InterpreterInterface().display }
+
+        try await Interpreter.withOutput(to: { _ in }, display: { _ in shown += 1 }) {
+            _ = try await AsyncTask.from(try PyRuntime.call(py.main._show!)).untilCompletes()
+        }
+        #expect(shown == 2)
+        #expect(interfaceShown == 0)
     }
 
     @Test func outputCanBeTakenWithoutLosingTheStop() async throws {

@@ -5,7 +5,7 @@
 //  Created by Tibor Felföldy on 2026-07-24.
 //
 
-import Foundation
+import SwiftUI
 import Synchronization
 
 enum InterpreterExecutionContext {
@@ -13,9 +13,12 @@ enum InterpreterExecutionContext {
     /// main or the Python actor's for CPython.
     typealias Output = @Sendable (String) -> Void
     typealias InputHandler = @MainActor @Sendable (String) async throws -> Void
+    typealias Display = @MainActor @Sendable (AnyView) -> Void
 
     struct Context {
         var output: Output?
+        /// Where `display` presents, in place of the interface's.
+        var display: Display?
         var inputHandler: InputHandler?
         var traceRecorder: LineTracer?
         var cancellation: RunCancellation?
@@ -72,6 +75,33 @@ public extension Interpreter {
         context.output = stdout
         return try await InterpreterExecutionContext.$current.withValue(context) {
             try await operation()
+        }
+    }
+
+    /// Runs `operation` with what Python prints sent to `stdout`, and what it
+    /// displays sent to `display`, rather than to the console.
+    @MainActor
+    static func withOutput<T>(
+        to stdout: @escaping @Sendable (String) -> Void,
+        display: @escaping @MainActor @Sendable (AnyView) -> Void,
+        operation: () async throws -> T
+    ) async rethrows -> T {
+        var context = InterpreterExecutionContext.current
+        context.output = stdout
+        context.display = display
+        return try await InterpreterExecutionContext.$current.withValue(context) {
+            try await operation()
+        }
+    }
+
+    /// Presents a view where the current execution displays: its own place,
+    /// or the console.
+    @MainActor
+    static func display(_ view: AnyView) {
+        if let display = InterpreterExecutionContext.current.display {
+            display(view)
+        } else {
+            interface.display(view)
         }
     }
 
