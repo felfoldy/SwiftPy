@@ -223,7 +223,10 @@ extension Interpreter {
     }
 }
 
-private extension Keychain {
+public extension Keychain {
+    /// The secret stored under `key`, asking for its value when there is none,
+    /// as ``keychain.secret`` does.
+    @MainActor
     static func secret(named key: String) async throws -> Secret {
         if storage.value(for: key) != nil {
             return Secret(name: key)
