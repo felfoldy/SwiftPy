@@ -381,7 +381,7 @@ struct LocalInterpreterConnectionTests {
     @Test func stopEndsAnAwaitedInput() async {
         // A host that never answers, as the input bar while nobody types.
         Interpreter.interface.requestInput = { _ in
-            try await withCheckedThrowingContinuation { (_: CheckedContinuation<String, any Error>) in }
+            try await withCheckedThrowingContinuation { (_: CheckedContinuation<InputResponse, any Error>) in }
         }
         defer { Interpreter.interface.requestInput = InterpreterInterface().requestInput }
         let connection = LocalInterpreterConnection()

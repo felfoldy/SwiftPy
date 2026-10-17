@@ -1,5 +1,5 @@
 __doc__ = "Utilities for interacting with the PyPrompt interpreter."
-__all__ = ["display", "ainput", "stoppable", "source", "set_timeout", "enable_trace", "disable_trace"]
+__all__ = ["display", "ainput", "InputResult", "stoppable", "source", "set_timeout", "enable_trace", "disable_trace"]
 
 from rlcompleter import Completer as _Completer
 from interpreter.native import host, display, ainput, source, set_timeout, enable_trace, disable_trace
@@ -12,6 +12,31 @@ except ImportError:
     def stoppable(function):
         """Makes a blocking call stoppable."""
         return function
+
+
+class InputResult(str):
+    """What the user answered `input` or ``interpreter.ainput`` with: the text,
+    as a str, with the images they attached.
+
+    Attributes:
+        images: The attached images, as ``views.Image``; empty unless asked for with `images=True`.
+    """
+
+    images: list
+
+    def __new__(cls, text: str = "", images: list | None = None):
+        result = super().__new__(cls, text)
+        result.images = list(images or [])
+        return result
+
+
+def _input_result(text: str, data: list[bytes]) -> InputResult:
+    # Called from Swift with the answer; only a host with views attaches images.
+    images = []
+    if data:
+        from views import Image
+        images = [Image(item) for item in data]
+    return InputResult(text, images)
 
 
 def _completions(text: str) -> list[str]:

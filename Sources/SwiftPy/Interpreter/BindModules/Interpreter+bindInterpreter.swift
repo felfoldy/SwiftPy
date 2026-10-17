@@ -40,33 +40,48 @@ extension Interpreter {
             }
 
             module.asyncDef(
-                "ainput(prompt: str = '') -> str",
+                "ainput(prompt: str = '', images: bool = False, multiline: bool = False) -> InputResult",
                 docstring: """
-                Asks the user for a line of text, as `input` does, but to await: \
+                Asks the user for an answer, as `input` does, but to await: \
                 the rest of the program, such as a button's action, keeps \
                 running while it waits.
 
                 prompt: What to ask.
+                images: Whether the user can attach images, which the answer's `images` holds.
+                multiline: Whether the answer can run to several lines. Otherwise it's one, which Return sends.
+
+                Returns an ``interpreter.InputResult``: the text, as a str, with the images attached.
 
                 ```python
                 from interpreter import ainput
 
                 name = await ainput("What's your name?")
+
+                answer = await ainput("What should change?", images=True)
+                await agent.respond(answer, images=answer.images)
                 ```
                 """
             ) { argc, argv in
-                PyBind.function(argc, argv) { (prompt: String) in
-                    try await Interpreter.interface.requestInput(prompt)
+                PyBind.function(argc, argv) { (prompt: String, images: Bool, multiline: Bool) in
+                    try await Interpreter.answer(InputRequest(prompt: prompt, acceptsImages: images, isMultiline: multiline))
                 }
             }
 
             // The builtin `input`: what `ainput` asks, waited for as Python's is.
             module.def(
-                "input(prompt: str = '') -> str",
-                docstring: "Asks the user for a line of text, and waits for it.\n\nprompt: What to ask."
+                "input(prompt: str = '', images: bool = False, multiline: bool = False) -> InputResult",
+                docstring: """
+                Asks the user for an answer, and waits for it.
+
+                prompt: What to ask.
+                images: Whether the user can attach images, which the answer's `images` holds.
+                multiline: Whether the answer can run to several lines. Otherwise it's one, which Return sends.
+
+                Returns an ``interpreter.InputResult``: the text, as a str, with the images attached.
+                """
             ) { argc, argv in
-                PyBind.blocking(argc, argv) { (prompt: String) in
-                    try await Interpreter.interface.requestInput(prompt)
+                PyBind.blocking(argc, argv) { (prompt: String, images: Bool, multiline: Bool) in
+                    try await Interpreter.answer(InputRequest(prompt: prompt, acceptsImages: images, isMultiline: multiline))
                 }
             }
 
@@ -117,5 +132,17 @@ extension Interpreter {
         }
 
         bindModule("interpreter", in: .module)
+    }
+}
+
+extension Interpreter {
+    /// The host's answer, as `interpreter.InputResult`.
+    @MainActor
+    static func answer(_ request: InputRequest) async throws -> PyObject {
+        let response = try await interface.requestInput(request)
+        guard let make = py.module("interpreter")?._input_result else {
+            throw PythonError.RuntimeError("interpreter.InputResult is missing")
+        }
+        return try make(response.text, response.images)
     }
 }
