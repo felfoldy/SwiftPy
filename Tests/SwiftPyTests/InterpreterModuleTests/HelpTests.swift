@@ -1061,6 +1061,21 @@ struct HelpTests {
             await Interpreter.run("help('math')")
         }
 
+        @Test("resolves a reference as its pages write it")
+        func resolvesReferenceForm() async throws {
+            await Interpreter.run("""
+            import interpreter.help as _help_module
+            _ref_dotted = "\\n".join(_help_module._markdown_lines('pathlib.Path.read_text'))
+            _ref_slashed = "\\n".join(_help_module._markdown_lines('pathlib.Path/read_text(encoding, errors, newline)'))
+            _ref_lines = _help_module._help_lines('pathlib/Path')
+            """)
+
+            let dotted: String = try #require(Interpreter.evaluate("_ref_dotted"))
+            #expect(dotted.contains("def read_text("))
+            #expect(Interpreter.evaluate("_ref_slashed") == dotted)
+            #expect(Interpreter.evaluate("_ref_lines[0].startswith('No help')") == false)
+        }
+
         @Test("resolves a member inside a module")
         func resolvesModuleMember() async throws {
             await Interpreter.run("""

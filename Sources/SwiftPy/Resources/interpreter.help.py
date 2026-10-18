@@ -314,6 +314,14 @@ def _modules_lines():
     return lines
 
 
+def _reference_name(name):
+    # The name a ``reference`` its pages write stands for: ``views.Text/align(alignment)``
+    # is views.Text.align.
+    if name.endswith(")") and "(" in name:
+        name = name[:name.index("(")]
+    return name.replace("/", ".")
+
+
 def _resolve_name(name):
     parts = name.split('.')
     try:
@@ -715,6 +723,7 @@ def _help_lines(obj):
             return [document]
         if obj == "modules":
             return _modules_lines()
+        obj = _reference_name(obj)
 
         try:
             resolved = _resolve_name(obj)
@@ -1380,6 +1389,7 @@ def _markdown_lines(obj):
             return [document]
         if obj == "modules":
             return _modules_markdown()
+        obj = _reference_name(obj)
 
         try:
             resolved = _resolve_name(obj)
