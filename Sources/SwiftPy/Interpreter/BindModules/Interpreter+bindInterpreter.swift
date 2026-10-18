@@ -85,13 +85,6 @@ extension Interpreter {
                 }
             }
 
-            module.def("set_timeout(milliseconds: int | None) -> None",
-                       docstring: "Sets the execution timeout, or None to disable it.") { argc, argv in
-                PyBind.function(argc, argv) { (milliseconds: Int?) in
-                    Interpreter.timeout = milliseconds
-                }
-            }
-
             module.def("enable_trace() -> None",
                        docstring: "Enables Python line tracing for the current interpreter.") { argc, argv in
                 PyBind.function(argc, argv) {

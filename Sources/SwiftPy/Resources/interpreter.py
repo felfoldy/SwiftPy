@@ -1,8 +1,8 @@
 __doc__ = "Utilities for interacting with the PyPrompt interpreter."
-__all__ = ["display", "ainput", "InputResult", "stoppable", "source", "set_timeout", "enable_trace", "disable_trace"]
+__all__ = ["display", "ainput", "InputResult", "stoppable", "source", "enable_trace", "disable_trace"]
 
 from rlcompleter import Completer as _Completer
-from interpreter.native import host, display, ainput, source, set_timeout, enable_trace, disable_trace
+from interpreter.native import host, display, ainput, source, enable_trace, disable_trace
 
 try:
     from _swiftpy_asyncio import stoppable
