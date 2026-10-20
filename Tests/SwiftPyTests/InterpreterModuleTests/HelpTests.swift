@@ -318,6 +318,42 @@ struct HelpTests {
         }
         #endif
 
+        /// A native class's properties are getset descriptors, typed only in its stub.
+        @Test("lists a native class's properties")
+        func nativeProperties() async throws {
+            let output = try await markdown(of: "p2p.Peer")
+
+            #expect(output.contains("## Properties"))
+            #expect(output.contains("- `on_message: "))
+            #expect(output.contains("Callback handler."))
+
+            let page = try await markdown(of: "p2p.Peer.on_message")
+            #expect(page.hasPrefix("# on_message"))
+            #expect(page.contains("Callback handler."))
+        }
+
+        @Test("lists an enum's cases")
+        func enumCases() async throws {
+            await Interpreter.run("""
+            import enum
+            class _Edge(enum.StrEnum):
+                '''Where it sits.'''
+                TOP = "top"
+                BOTTOM = "bottom"
+
+            _enum_out = "\\n".join(_help_module._markdown_lines(_Edge))
+            """)
+            let output: String = try #require(Interpreter.evaluate("_enum_out"))
+
+            #expect(output.contains("""
+            ## Cases
+
+            - `_Edge.TOP`: `'top'`
+            - `_Edge.BOTTOM`: `'bottom'`
+            """))
+            #expect(!output.contains("## Properties"))
+        }
+
         /// Reached by its path, a property documents itself rather than the
         /// `property` it is an instance of.
         // pathlib is CPython's own on that backend.

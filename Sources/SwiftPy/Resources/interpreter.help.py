@@ -1190,17 +1190,25 @@ def _class_methods(cls):
     return methods
 
 
+def _is_property(attr):
+    # A native class's are getset descriptors. `property` isn't a name to
+    # compare against here.
+    return type(attr).__name__ in ('property', 'getset_descriptor')
+
+
 def _class_property_names(cls):
     names = []
     for attr_name in dir(cls):
         if attr_name.startswith('_'):
             continue
+        # What an exception or a `str` subclass inherits, `args` for one.
+        if _is_core_builtin(_defining_class(cls, attr_name)) and not _is_core_builtin(cls):
+            continue
         try:
             attr = getattr(cls, attr_name)
         except:
             continue
-        # `property` isn't a name to compare against here.
-        if type(attr).__name__ == 'property':
+        if _is_property(attr):
             names.append(attr_name)
 
     for attr_name in _class_annotations(cls):
@@ -1217,11 +1225,26 @@ def _class_annotations(cls):
     try:
         import annotationlib
     except ImportError:
-        return getattr(cls, '__annotations__', None) or {}
+        return getattr(cls, '__annotations__', None) or _interface_annotations(cls)
     try:
-        return annotationlib.get_annotations(cls, format=annotationlib.Format.STRING)
+        return annotationlib.get_annotations(cls, format=annotationlib.Format.STRING) or _interface_annotations(cls)
     except Exception:
+        return _interface_annotations(cls)
+
+
+def _interface_annotations(cls):
+    # A native class declares its properties only in its stub, `    value: float`.
+    interface = getattr(cls, '_interface', None)
+    if not isinstance(interface, str):
         return {}
+    import re
+    annotations = {}
+    for line in interface.splitlines():
+        match = re.fullmatch(r"    ([A-Za-z_]\w*): (.+)", line)
+        # A docstring's `    Note: ...` matches too, but isn't a property.
+        if match and match.group(1) not in annotations and _is_property(getattr(cls, match.group(1), None)):
+            annotations[match.group(1)] = match.group(2)
+    return annotations
 
 
 def _property_declaration(cls, name):
@@ -1230,7 +1253,9 @@ def _property_declaration(cls, name):
 
 
 def _property_summary(cls, name):
-    getter = getattr(getattr(cls, name, None), 'fget', None)
+    prop = getattr(cls, name, None)
+    # A getset descriptor's docstring is its own; a property's is its getter's.
+    getter = prop if type(prop).__name__ == 'getset_descriptor' else getattr(prop, 'fget', None)
     # An annotation-only name has no getter, and None has a docstring.
     if getter is None:
         return None
@@ -1311,6 +1336,13 @@ def _class_markdown(cls, path=None):
     summary = _class_summary(cls)
     if summary:
         lines += [summary, ""]
+
+    import enum
+    if isinstance(cls, enum.EnumType) and cls.__members__:
+        lines += ["## Cases", ""]
+        lines += ["- `" + cls.__name__ + "." + name + "`: `" + repr(member.value) + "`"
+                  for name, member in cls.__members__.items()]
+        lines.append("")
 
     properties = _class_property_names(cls)
     if properties:
@@ -1408,7 +1440,7 @@ def _markdown_lines(obj):
             )
         # A property documents itself; the class it is reached through is what
         # declares it.
-        if type(resolved).__name__ == 'property' and "." in obj:
+        if _is_property(resolved) and "." in obj:
             return _property_markdown(obj)
         # An instance is documented by the class it is of.
         return _class_markdown(type(resolved))
