@@ -24,6 +24,10 @@ extension SyntaxProtocol {
                 lines.append(String(text.dropFirst(3)).docLineBody)
             case let .docBlockComment(text):
                 lines += text.docBlockLines
+            case .lineComment, .blockComment:
+                // A `// MARK:` above the docs is skipped; docs above one
+                // belong to something else.
+                lines.removeAll()
             default:
                 continue
             }
