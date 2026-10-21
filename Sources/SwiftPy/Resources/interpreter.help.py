@@ -1330,19 +1330,18 @@ def _class_markdown(cls, path=None):
     if parent_path:
         lines += [_reference_markdown(parent_path), ""]
 
-    lines += _fenced([header])
+    import enum
+    if isinstance(cls, enum.EnumType) and cls.__members__:
+        # An enum's definition, with its cases.
+        lines += _fenced([header + ":"] + ["    " + name + " = " + repr(member.value)
+                                           for name, member in cls.__members__.items()])
+    else:
+        lines += _fenced([header])
     lines.append("")
 
     summary = _class_summary(cls)
     if summary:
         lines += [summary, ""]
-
-    import enum
-    if isinstance(cls, enum.EnumType) and cls.__members__:
-        lines += ["## Cases", ""]
-        lines += ["- `" + cls.__name__ + "." + name + "`: `" + repr(member.value) + "`"
-                  for name, member in cls.__members__.items()]
-        lines.append("")
 
     properties = _class_property_names(cls)
     if properties:

@@ -332,7 +332,7 @@ struct HelpTests {
             #expect(page.contains("Callback handler."))
         }
 
-        @Test("lists an enum's cases")
+        @Test("shows an enum's definition with its cases")
         func enumCases() async throws {
             await Interpreter.run("""
             import enum
@@ -346,11 +346,13 @@ struct HelpTests {
             let output: String = try #require(Interpreter.evaluate("_enum_out"))
 
             #expect(output.contains("""
-            ## Cases
-
-            - `_Edge.TOP`: `'top'`
-            - `_Edge.BOTTOM`: `'bottom'`
+            ```python
+            class _Edge(StrEnum):
+                TOP = 'top'
+                BOTTOM = 'bottom'
+            ```
             """))
+            #expect(!output.contains("## Cases"))
             #expect(!output.contains("## Properties"))
         }
 
