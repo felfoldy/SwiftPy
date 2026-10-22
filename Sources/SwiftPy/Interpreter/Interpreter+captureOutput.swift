@@ -48,6 +48,35 @@ enum InterpreterExecutionContext {
 }
 
 public extension Interpreter {
+    /// Where a run sends what it prints, displays and asks, kept so that a
+    /// callback it set up, called later, sends its own there too.
+    struct OutputRoute {
+        fileprivate let context: InterpreterExecutionContext.Context
+
+        /// Writes `text` where the run's output goes.
+        public func write(_ text: String) {
+            context.output?(text)
+        }
+    }
+
+    /// The running execution's route; nil outside one.
+    static var outputRoute: OutputRoute? {
+        var context = InterpreterExecutionContext.current
+        guard context.output != nil || context.display != nil else { return nil }
+        // The run's own stop, which ends with it.
+        context.cancellation = nil
+        return OutputRoute(context: context)
+    }
+
+    /// Runs `operation` with its output, displays and input sent where
+    /// `route` sends them; as it is without one.
+    static func withOutputRoute<T>(_ route: OutputRoute?, operation: () throws -> T) rethrows -> T {
+        guard let route else { return try operation() }
+        return try InterpreterExecutionContext.$current.withValue(route.context) {
+            try operation()
+        }
+    }
+
     /// Runs `operation` with a handler invoked before Python requests input.
     static func withInputHandler<T>(
         _ inputHandler: @MainActor @escaping @Sendable (String) async throws -> Void,
