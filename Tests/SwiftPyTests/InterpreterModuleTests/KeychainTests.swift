@@ -90,6 +90,22 @@ struct KeychainTests {
         #expect(storage.values["OPENAI_API_KEY"] == "sk-entered")
     }
 
+    @Test func aRunWithItsOwnPlaceAsksThere() async {
+        defer { restore() }
+        var askedHere = false
+        Interpreter.interface.requestSecret = { _ in
+            askedHere = true
+            return "console"
+        }
+
+        await Interpreter.withInput({ _ in InputResponse(text: "") }, secret: { _ in "sk-own" }) {
+            await Interpreter.run("own = \(secret("OWN_KEY"))")
+        }
+
+        #expect(!askedHere)
+        #expect(storage.values["OWN_KEY"] == "sk-own")
+    }
+
     @Test func emptyResponseRaisesAndStoresNothing() async {
         defer { restore() }
         Interpreter.interface.requestSecret = { _ in "" }

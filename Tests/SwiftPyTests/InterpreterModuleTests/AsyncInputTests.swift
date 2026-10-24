@@ -108,6 +108,36 @@ struct AsyncInputTests {
         #expect(Interpreter.evaluate("str(_answer.images)") == "[('image', b'\\x01\\x02')]")
     }
 
+    @Test func aRunWithItsOwnPlaceAsksThereAndSoDoItsCallbacks() async throws {
+        defer { restore() }
+        var askedHere = false
+        Interpreter.interface.requestInput = { _ in
+            askedHere = true
+            return InputResponse(text: "console")
+        }
+        var asked: [String] = []
+        var route: Interpreter.OutputRoute?
+
+        await Interpreter.withInput({ request in
+            asked.append(request.prompt)
+            return InputResponse(text: "own")
+        }, secret: { _ in "" }) {
+            await Interpreter.withOutput(to: { _ in }, display: { _ in }) {
+                route = Interpreter.outputRoute
+                await Interpreter.run("_own = input('Here?')")
+            }
+        }
+        #expect(Interpreter.evaluate("_own") == "own")
+
+        // A callback the run set up asks where the run did.
+        await Interpreter.withOutputRoute(route) {
+            Task { await Interpreter.run("_later = input('Later?')") }
+        }.value
+        #expect(Interpreter.evaluate("_later") == "own")
+        #expect(asked == ["Here?", "Later?"])
+        #expect(!askedHere)
+    }
+
     @Test func aHostThatCantAskRaises() async {
         restore()
         await Interpreter.run("""

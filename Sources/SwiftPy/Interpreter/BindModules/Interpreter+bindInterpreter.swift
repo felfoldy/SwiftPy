@@ -132,7 +132,7 @@ extension Interpreter {
     /// The host's answer, as `interpreter.InputResult`.
     @MainActor
     static func answer(_ request: InputRequest) async throws -> PyObject {
-        let response = try await interface.requestInput(request)
+        let response = try await requestInput(request)
         guard let make = py.module("interpreter")?._input_result else {
             throw PythonError.RuntimeError("interpreter.InputResult is missing")
         }

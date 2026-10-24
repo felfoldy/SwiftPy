@@ -232,7 +232,7 @@ public extension Keychain {
             return Secret(name: key)
         }
 
-        let value = try await Interpreter.interface.requestSecret(key)
+        let value = try await Interpreter.requestSecret(key)
         guard !value.isEmpty else {
             throw PythonError.ValueError("No value entered for '\(key)'.")
         }

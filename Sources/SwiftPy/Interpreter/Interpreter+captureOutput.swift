@@ -14,11 +14,17 @@ enum InterpreterExecutionContext {
     typealias Output = @Sendable (String) -> Void
     typealias InputHandler = @MainActor @Sendable (String) async throws -> Void
     typealias Display = @MainActor @Sendable (AnyView) -> Void
+    typealias RequestInput = @MainActor @Sendable (InputRequest) async throws -> InputResponse
+    typealias RequestSecret = @MainActor @Sendable (String) async throws -> String
 
     struct Context {
         var output: Output?
         /// Where `display` presents, in place of the interface's.
         var display: Display?
+        /// Where `input` asks, in place of the interface's.
+        var requestInput: RequestInput?
+        /// Where a missing secret is asked for, in place of the interface's.
+        var requestSecret: RequestSecret?
         var inputHandler: InputHandler?
         var traceRecorder: LineTracer?
         var cancellation: RunCancellation?
@@ -123,6 +129,23 @@ public extension Interpreter {
         }
     }
 
+    /// Runs `operation` with what it asks, `input` and missing secrets
+    /// alike, sent to `requestInput` and `requestSecret` rather than to the
+    /// console. Runs and callbacks started in it ask there too.
+    @MainActor
+    static func withInput<T>(
+        _ requestInput: @escaping @MainActor @Sendable (InputRequest) async throws -> InputResponse,
+        secret requestSecret: @escaping @MainActor @Sendable (String) async throws -> String,
+        operation: () async throws -> T
+    ) async rethrows -> T {
+        var context = InterpreterExecutionContext.current
+        context.requestInput = requestInput
+        context.requestSecret = requestSecret
+        return try await InterpreterExecutionContext.$current.withValue(context) {
+            try await operation()
+        }
+    }
+
     /// Presents a view where the current execution displays: its own place,
     /// or the console.
     @MainActor
@@ -132,6 +155,24 @@ public extension Interpreter {
         } else {
             interface.display(view)
         }
+    }
+
+    /// Asks where the current execution asks: its own place, or the console.
+    @MainActor
+    static func requestInput(_ request: InputRequest) async throws -> InputResponse {
+        if let requestInput = InterpreterExecutionContext.current.requestInput {
+            return try await requestInput(request)
+        }
+        return try await interface.requestInput(request)
+    }
+
+    /// Asks for a secret's value where the current execution asks.
+    @MainActor
+    static func requestSecret(_ key: String) async throws -> String {
+        if let requestSecret = InterpreterExecutionContext.current.requestSecret {
+            return try await requestSecret(key)
+        }
+        return try await interface.requestSecret(key)
     }
 
     /// Invokes the input handler installed for the current execution, if any.
