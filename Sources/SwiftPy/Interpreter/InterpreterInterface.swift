@@ -14,16 +14,16 @@ public struct InterpreterInterface {
     /// Presents a SwiftUI view in the local console, one view at a time.
     public var display: (AnyView) -> Void
 
-    /// Asks for a secret's value by name, for ``Secret``.
-    public var requestSecret: (String) async throws -> String
+    /// Asks for a secret's value, for ``Secret``.
+    public var requestSecret: (SecretRequest) async throws -> String
 
     /// Asks the user for an answer, for `input` and `interpreter.ainput`.
     public var requestInput: (InputRequest) async throws -> InputResponse
 
     public init(
         display: @escaping (AnyView) -> Void = { _ in },
-        requestSecret: @escaping (String) async throws -> String = { key in
-            throw PythonError.KeyError("No secret stored for '\(key)'.")
+        requestSecret: @escaping (SecretRequest) async throws -> String = { request in
+            throw PythonError.KeyError("No secret stored for '\(request.name)'.")
         },
         requestInput: @escaping (InputRequest) async throws -> InputResponse = { _ in
             throw PythonError.RuntimeError("Nothing here can ask for input.")
@@ -32,6 +32,19 @@ public struct InterpreterInterface {
         self.display = display
         self.requestSecret = requestSecret
         self.requestInput = requestInput
+    }
+}
+
+/// What `keychain.secret` asks for when no value is stored.
+public struct SecretRequest: Sendable, Equatable {
+    /// The name the value is stored under.
+    public var name: String
+    /// Markdown to ask with, such as where to get the key; nil for the host's own.
+    public var prompt: String?
+
+    public init(name: String, prompt: String? = nil) {
+        self.name = name
+        self.prompt = prompt
     }
 }
 

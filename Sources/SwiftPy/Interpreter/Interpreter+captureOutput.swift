@@ -15,7 +15,7 @@ enum InterpreterExecutionContext {
     typealias InputHandler = @MainActor @Sendable (String) async throws -> Void
     typealias Display = @MainActor @Sendable (AnyView) -> Void
     typealias RequestInput = @MainActor @Sendable (InputRequest) async throws -> InputResponse
-    typealias RequestSecret = @MainActor @Sendable (String) async throws -> String
+    typealias RequestSecret = @MainActor @Sendable (SecretRequest) async throws -> String
 
     struct Context {
         var output: Output?
@@ -135,7 +135,7 @@ public extension Interpreter {
     @MainActor
     static func withInput<T>(
         _ requestInput: @escaping @MainActor @Sendable (InputRequest) async throws -> InputResponse,
-        secret requestSecret: @escaping @MainActor @Sendable (String) async throws -> String,
+        secret requestSecret: @escaping @MainActor @Sendable (SecretRequest) async throws -> String,
         operation: () async throws -> T
     ) async rethrows -> T {
         var context = InterpreterExecutionContext.current
@@ -168,11 +168,11 @@ public extension Interpreter {
 
     /// Asks for a secret's value where the current execution asks.
     @MainActor
-    static func requestSecret(_ key: String) async throws -> String {
+    static func requestSecret(_ request: SecretRequest) async throws -> String {
         if let requestSecret = InterpreterExecutionContext.current.requestSecret {
-            return try await requestSecret(key)
+            return try await requestSecret(request)
         }
-        return try await interface.requestSecret(key)
+        return try await interface.requestSecret(request)
     }
 
     /// Invokes the input handler installed for the current execution, if any.

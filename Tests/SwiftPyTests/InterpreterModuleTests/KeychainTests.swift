@@ -77,17 +77,35 @@ struct KeychainTests {
     @Test func missingSecretIsAskedForAndStored() async {
         defer { restore() }
 
-        var askedFor: [String] = []
-        Interpreter.interface.requestSecret = { key in
-            askedFor.append(key)
+        var askedFor: [SecretRequest] = []
+        Interpreter.interface.requestSecret = { request in
+            askedFor.append(request)
             return "sk-entered"
         }
 
         await Interpreter.run("entered = \(secret("OPENAI_API_KEY"))")
 
-        #expect(askedFor == ["OPENAI_API_KEY"])
+        #expect(askedFor == [SecretRequest(name: "OPENAI_API_KEY")])
         #expect(main.entered?.name == "OPENAI_API_KEY")
         #expect(storage.values["OPENAI_API_KEY"] == "sk-entered")
+    }
+
+    @Test func asksWithTheGivenPrompt() async {
+        defer { restore() }
+        var asked: SecretRequest?
+        Interpreter.interface.requestSecret = { request in
+            asked = request
+            return "sk-prompted"
+        }
+
+        #if cpython
+        await Interpreter.run("keychain.secret('PROMPTED_KEY', prompt='Get one from [here](https://example.com).')")
+        #else
+        await Interpreter.run("await keychain.secret('PROMPTED_KEY', prompt='Get one from [here](https://example.com).')")
+        #endif
+
+        #expect(asked == SecretRequest(name: "PROMPTED_KEY", prompt: "Get one from [here](https://example.com)."))
+        #expect(storage.values["PROMPTED_KEY"] == "sk-prompted")
     }
 
     @Test func aRunWithItsOwnPlaceAsksThere() async {

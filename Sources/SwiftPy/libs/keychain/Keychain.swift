@@ -168,12 +168,13 @@ extension Interpreter {
             module.class(Secret.self)
 
             module.def(
-                "secret(key: str) -> Secret",
+                "secret(key: str, prompt: str | None = None) -> Secret",
                 docstring: """
                 Returns the secret stored under a name, asking for its value when \
                 the keychain has none.
 
                 key: The name the secret is stored under.
+                prompt: Markdown to ask with, such as where to get the value. Defaults to asking for the key by name.
 
                 The value is written to the keychain and never returned to Python:
                 pass the secret, or its ``keychain.Secret/bearer()``, as a header
@@ -182,13 +183,16 @@ extension Interpreter {
                 ```python
                 import keychain, requests
 
-                key = keychain.secret("GITLAB_TOKEN")
+                key = keychain.secret(
+                    "GITLAB_TOKEN",
+                    prompt="Paste a token from [GitLab](https://gitlab.com/-/user_settings/personal_access_tokens).",
+                )
                 response = requests.get(url, headers={"PRIVATE-TOKEN": key})
                 ```
                 """
             ) { argc, argv in
-                PyBind.blocking(argc, argv) { (key: String) in
-                    try await Keychain.secret(named: key)
+                PyBind.blocking(argc, argv) { (key: String, prompt: String?) in
+                    try await Keychain.secret(named: key, prompt: prompt)
                 }
             }
 
@@ -224,15 +228,15 @@ extension Interpreter {
 }
 
 public extension Keychain {
-    /// The secret stored under `key`, asking for its value when there is none,
-    /// as ``keychain.secret`` does.
+    /// The secret stored under `key`, asking for its value with `prompt` when
+    /// there is none, as ``keychain.secret`` does.
     @MainActor
-    static func secret(named key: String) async throws -> Secret {
+    static func secret(named key: String, prompt: String? = nil) async throws -> Secret {
         if storage.value(for: key) != nil {
             return Secret(name: key)
         }
 
-        let value = try await Interpreter.requestSecret(key)
+        let value = try await Interpreter.requestSecret(SecretRequest(name: key, prompt: prompt))
         guard !value.isEmpty else {
             throw PythonError.ValueError("No value entered for '\(key)'.")
         }
