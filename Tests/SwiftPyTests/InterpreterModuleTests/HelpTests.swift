@@ -521,6 +521,78 @@ struct HelpTests {
         }
     }
 
+    /// A package lists its modules, which are neither classes nor functions.
+    #if cpython
+    @Suite("package module listing", .serialized) @MainActor
+    struct PackageModuleListing {
+        init() async {
+            await Interpreter.run("import interpreter")
+            await Interpreter.run("import interpreter.help as _help_module")
+        }
+
+        private func markdown(of path: String) async throws -> String {
+            await Interpreter.run("""
+            \(path == "modules" ? "" : "import \(path.split(separator: ".")[0])")
+            _pl_out = "\\n".join(_help_module._markdown_lines('\(path)'))
+            """)
+            return try #require(Interpreter.evaluate("_pl_out"))
+        }
+
+        @Test("lists its modules with their summaries")
+        func modules() async throws {
+            let output = try await markdown(of: "json")
+
+            #expect(output.contains("""
+            ## Modules
+
+            ### ``json/decoder``
+
+            ```python
+            import json.decoder
+            ```
+
+            Implementation of JSONDecoder
+            """))
+            #expect(!output.contains("json/__main__"))
+        }
+
+        @Test("lists the app's modules, the bundled ones, then the standard library")
+        func moduleGroups() async throws {
+            let output = try await markdown(of: "modules")
+            let other = try #require(output.range(of: "## Other modules"))
+            let stdlib = try #require(output.range(of: "## Standard library"))
+
+            #expect(output.hasPrefix("## "))
+            #expect(output.range(of: "| ``interpreter`` |")!.lowerBound < other.lowerBound)
+            #expect(output[other.upperBound..<stdlib.lowerBound].contains("| ``PIL`` |"))
+            #expect(output[stdlib.upperBound...].contains("| ``json`` |"))
+        }
+
+        @Test("counts what the app bundles as its own, apart from the standard library")
+        func appModules() async throws {
+            await Interpreter.run("""
+            _pl_app = _help_module._app_modules()
+            _pl_stdlib = _help_module._stdlib_modules()
+            """)
+            let app: [String] = try #require(Interpreter.evaluate("_pl_app"))
+            let stdlib: [String] = try #require(Interpreter.evaluate("_pl_stdlib"))
+
+            #expect(app.contains("PIL"))
+            #expect(app.contains("interpreter"))
+            #expect(!app.contains("json"))
+            #expect(stdlib.contains("json"))
+            #expect(!stdlib.contains("PIL"))
+        }
+
+        @Test("opens a module its package has not imported")
+        func unimportedModule() async throws {
+            let output = try await markdown(of: "profiling.tracing")
+
+            #expect(output.contains("Tracing profiler for Python."))
+        }
+    }
+    #endif
+
     /// The markdown a function's help renders as. The reference for the layout
     /// is `help('requests.get')`, checked against the real module in
     /// swiftpy-requests; these cover the parsing on its own.
@@ -553,6 +625,74 @@ struct HelpTests {
 
             Does a thing.
             """))
+        }
+
+        @Test("reads Google style sections")
+        func googleStyle() async throws {
+            await Interpreter.run("""
+            def _google(map_fn, filter_fn=None):
+                '''Maps the parameters with ``map_fn``.
+
+                Args:
+                    map_fn (Callable): Maps an array to another array
+                    filter_fn (Callable, optional): Filter to select which arrays to
+                        map (default: :meth:`Module.valid_parameter_filter`).
+
+                Returns:
+                    The module instance.
+
+                Raises:
+                    ValueError: When a parameter is missing.
+                '''
+            """)
+
+            let output = try await markdown(of: "_google")
+
+            #expect(output.contains("Maps the parameters with `map_fn`."))
+            #expect(output.contains("""
+            ## Parameters
+
+            - `map_fn`: Maps an array to another array
+            - `filter_fn`: Filter to select which arrays to map (default: `Module.valid_parameter_filter`).
+
+            ## Return Value
+
+            The module instance.
+
+            ## Raises
+
+            - `ValueError`: When a parameter is missing.
+            """))
+            #expect(!output.contains("Args:"))
+        }
+
+        @Test("reads reST fields")
+        func restFields() async throws {
+            await Interpreter.run("""
+            def _rest(mode, dither=None):
+                '''Converts an image.
+
+                :param mode: The requested mode.
+                :param dither: Dithering method, used when converting
+                   to "P".
+                :type dither: int
+                :returns: An :py:class:`~PIL.Image.Image` object.
+                :rtype: Image
+                '''
+            """)
+
+            let output = try await markdown(of: "_rest")
+
+            #expect(output.contains("""
+            - `mode`: The requested mode.
+            - `dither`: Dithering method, used when converting to "P".
+
+            ## Return Value
+
+            An `PIL.Image.Image` object.
+            """))
+            #expect(!output.contains(":type"))
+            #expect(!output.contains(":rtype"))
         }
 
         @Test("documents the model decorator")

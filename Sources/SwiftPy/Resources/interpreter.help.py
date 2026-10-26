@@ -218,6 +218,15 @@ def _available_modules():
     names.update([name for name, module in list(sys.modules.items()) if module is not None])
     names.update(_imp._frozen_module_names())
     names.update([info.name for info in pkgutil.iter_modules()])
+    names.update(_namespace_packages(sys.path))
+    names.update(_user_modules())
+    return sorted([
+        name for name in names
+        if '.' not in name and not name.startswith('_') and name.isidentifier()
+    ])
+
+
+def _user_directories():
     # SwiftPy's source importer also searches these locations outside sys.path.
     import os
     from pathlib import Path
@@ -228,15 +237,59 @@ def _available_modules():
         directories.extend([os.path.join(site, entry) for entry in os.listdir(site) if os.path.isdir(os.path.join(site, entry))])
     except OSError:
         pass
-    for directory in directories:
+    return directories
+
+
+def _user_modules():
+    import os
+    names = set()
+    for directory in _user_directories():
         try:
             names.update([entry[:-3] for entry in os.listdir(directory) if entry.endswith('.py') and os.path.isfile(os.path.join(directory, entry))])
         except OSError:
             pass
-    return sorted([
-        name for name in names
-        if '.' not in name and not name.startswith('_') and name.isidentifier()
-    ])
+    return names
+
+
+def _is_user_module(name, directories):
+    # Imported from the user's folders, as a package in site-packages is.
+    import sys
+    spec = getattr(sys.modules.get(name), '__spec__', None)
+    locations = [getattr(spec, 'origin', None) or ""] + list(getattr(spec, 'submodule_search_locations', None) or [])
+    return any([location.startswith(directory) for location in locations for directory in directories])
+
+
+def _app_modules():
+    # What the app registers and bundles: neither Python's own nor the user's.
+    registered = set(_registered_modules())
+    stdlib = set(_stdlib_modules())
+    user = _user_modules()
+    directories = _user_directories()
+    return [name for name in _available_modules()
+            if name in registered or (name not in stdlib and name not in user and not _is_user_module(name, directories))]
+
+
+def _namespace_packages(paths):
+    # iter_modules skips a package without __init__.py, such as mlx in its zip.
+    try:
+        import os
+        import zipfile
+    except ImportError:
+        return set()
+    names = set()
+    for path in paths:
+        try:
+            if zipfile.is_zipfile(path):
+                with zipfile.ZipFile(path) as archive:
+                    names.update([entry.split('/')[0] for entry in archive.namelist() if '/' in entry])
+            elif os.path.isdir(path):
+                names.update([entry for entry in os.listdir(path)
+                              if os.path.isdir(os.path.join(path, entry))
+                              and not os.path.exists(os.path.join(path, entry, '__init__.py'))
+                              and any(name.endswith('.py') for name in os.listdir(os.path.join(path, entry)))])
+        except OSError:
+            pass
+    return names
 
 
 def _code_docstring(code):
@@ -322,15 +375,32 @@ def _reference_name(name):
     return name.replace("/", ".")
 
 
-def _resolve_name(name):
+def _resolve_name(name, import_submodules=True):
     parts = name.split('.')
     try:
         obj = __import__(parts[0])
     except ImportError:
         obj = getattr(__import__('builtins'), parts[0])
-    for part in parts[1:]:
-        obj = getattr(obj, part)
+    for index, part in enumerate(parts[1:], start=2):
+        try:
+            obj = getattr(obj, part)
+        except AttributeError:
+            # A submodule its package leaves to be imported, as PIL does Image.
+            if not import_submodules or not hasattr(obj, '__path__'):
+                raise
+            import importlib
+            obj = importlib.import_module('.'.join(parts[:index]))
     return obj
+
+
+def _is_submodule(name):
+    # Found without importing it: a link must not run a module's code.
+    parent = name.rpartition('.')[0]
+    try:
+        import importlib.util
+        return hasattr(_resolve_name(parent, False), '__path__') and importlib.util.find_spec(name) is not None
+    except (ImportError, AttributeError, ValueError):
+        return False
 
 
 def _owner_of(path):
@@ -369,10 +439,10 @@ def _is_reference(name):
         return True
 
     try:
-        _resolve_name(name)
+        _resolve_name(name, False)
         return True
     except (ImportError, AttributeError):
-        return False
+        return _is_submodule(name)
 
 
 def _module_members(module):
@@ -866,45 +936,198 @@ def _parameter_description(line, parameter_names):
     return (name, line[cut + 1:].strip())
 
 
-def _doc_sections(doc, parameter_names):
+def _rst_inline(text):
+    # reST's ``literal`` and :meth:`name` roles, as the plain code spans markdown
+    # has. pocketpy has no `re`, so the roles are found by hand.
+    text = text.replace("``", "`")
+    out = ""
+    index = 0
+    while True:
+        tick = text.find(":`", index)
+        if tick == -1:
+            break
+        start = tick
+        while start > index and (text[start - 1].isalpha() or text[start - 1] == ":"):
+            start -= 1
+        if start < tick and text[start] == ":":
+            out += text[index:start] + "`"
+            index = tick + 2
+            # `~a.b` shows as `b` in Sphinx; the full path reads fine here.
+            if text[index:index + 1] == "~":
+                index += 1
+        else:
+            out += text[index:tick + 2]
+            index = tick + 2
+    return out + text[index:]
+
+
+# Google style section headings, by what they hold.
+_parameter_headings = ("Args:", "Arguments:", "Parameters:", "Params:", "Keyword Args:",
+                       "Keyword Arguments:", "Other Parameters:")
+_return_headings = ("Returns:", "Return:", "Yields:", "Yield:")
+_raise_headings = ("Raises:", "Raise:")
+
+
+def _indent_of(line):
+    return len(line) - len(line.lstrip())
+
+
+def _google_item(text):
+    # `name (type): description` or `name: description`, the type dropped:
+    # the signature shows it.
+    cut = text.find(":")
+    if cut <= 0:
+        return None
+    name = text[:cut].strip()
+    paren = name.find("(")
+    if paren != -1:
+        name = name[:paren].strip()
+    if not name.lstrip("*").replace("_", "a").replace(".", "a").isalnum():
+        return None
+    return (name, text[cut + 1:].strip())
+
+
+def _rst_field(text):
+    # `:param name: ...`, `:returns: ...`, `:raises Error: ...`, as
+    # (kind, name, description); `:type` and `:rtype` come back as "skip".
+    if not text.startswith(":"):
+        return None
+    cut = text.find(":", 1)
+    if cut == -1:
+        return None
+    words = text[1:cut].split()
+    if not words:
+        return None
+    description = text[cut + 1:].strip()
+    kind = words[0]
+    if kind in ("param", "parameter", "arg", "argument", "key", "keyword") and len(words) > 1:
+        return ("parameter", words[-1], description)
+    if kind in ("returns", "return", "yields", "yield"):
+        return ("returns", None, description)
+    if kind in ("raises", "raise", "except", "exception"):
+        return ("raises", words[-1] if len(words) > 1 else "", description)
+    if kind in ("type", "rtype", "vartype"):
+        return ("skip", None, None)
+    return None
+
+
+def _doc_parts(doc, parameter_names):
+    """A docstring as its summary, parameters, return value, raised errors and
+    discussion: `name: description` lines, Google style sections and reST
+    fields all read the same."""
     if not doc:
-        return None, [], []
+        return None, [], None, [], []
 
     lines = _dedented(doc)
 
     summary = []
     index = 0
     while index < len(lines) and lines[index].strip():
-        summary.append(lines[index].strip())
+        summary.append(_rst_inline(lines[index].strip()))
         index += 1
 
     parameters = []
+    returns = []
+    raises = []
     discussion = []
-    # A line directly under a parameter carries on its description; a blank
-    # line ends it, so prose after the parameters stays discussion.
-    in_parameter = False
+    # Where a continuation line goes: the last item's description, or nowhere.
+    target = None
+    section = None
+    section_indent = 0
+    item_indent = None
+    in_fence = False
+
+    def append(text):
+        # Carries a description on into the line below it.
+        kind, items = target
+        if kind == "returns":
+            returns.append(text)
+        elif kind != "skip":
+            name, description = items[-1]
+            items[-1] = (name, (description + " " + text).strip())
+
     for line in lines[index:]:
         stripped = line.strip()
-        parameter = _parameter_description(stripped, parameter_names)
+        indent = _indent_of(line)
 
-        if parameter:
-            parameters.append(parameter)
-            in_parameter = True
-        elif not stripped:
-            in_parameter = False
-            discussion.append("")
-        elif in_parameter:
-            name, description = parameters[-1]
-            parameters[-1] = (name, description + " " + stripped)
-        else:
+        if stripped.startswith("```"):
+            in_fence = not in_fence
+        if in_fence or stripped.startswith("```"):
+            section = target = None
             discussion.append(line)
+            continue
+
+        if section is not None:
+            if not stripped:
+                continue
+            if indent > section_indent:
+                if section == "returns":
+                    returns.append(_rst_inline(stripped))
+                    continue
+                if item_indent is None:
+                    item_indent = indent
+                if indent == item_indent:
+                    item = _google_item(stripped)
+                    if item is None and section == "raises":
+                        item = (stripped, "")
+                    if item is not None:
+                        items = parameters if section == "parameters" else raises
+                        items.append((item[0], _rst_inline(item[1])))
+                        target = (section, items)
+                        continue
+                if target is not None:
+                    append(_rst_inline(stripped))
+                    continue
+            section = None
+
+        if stripped in _parameter_headings + _return_headings + _raise_headings:
+            section = ("parameters" if stripped in _parameter_headings
+                       else "returns" if stripped in _return_headings else "raises")
+            section_indent = indent
+            item_indent = None
+            target = ("returns", None) if section == "returns" else None
+            continue
+
+        field = _rst_field(stripped)
+        if field is not None:
+            kind, name, description = field
+            if kind == "parameter":
+                parameters.append((name, _rst_inline(description)))
+                target = ("parameters", parameters)
+            elif kind == "raises":
+                raises.append((name, _rst_inline(description)))
+                target = ("raises", raises)
+            elif kind == "returns":
+                returns.append(_rst_inline(description))
+                target = ("returns", None)
+            else:
+                target = ("skip", None)
+            continue
+
+        parameter = _parameter_description(stripped, parameter_names)
+        if parameter:
+            parameters.append((parameter[0], _rst_inline(parameter[1])))
+            target = ("parameters", parameters)
+        elif not stripped:
+            target = None
+            discussion.append("")
+        elif target is not None:
+            append(_rst_inline(stripped))
+        else:
+            target = None
+            discussion.append(_rst_inline(line))
 
     while discussion and not discussion[0].strip():
         discussion.pop(0)
     while discussion and not discussion[-1].strip():
         discussion.pop()
 
-    return " ".join(summary), parameters, discussion
+    return " ".join(summary), parameters, " ".join(returns) or None, raises, discussion
+
+
+def _doc_sections(doc, parameter_names):
+    summary, parameters, _, _, discussion = _doc_parts(doc, parameter_names)
+    return summary, parameters, discussion
 
 
 def _without_trailing_colon(text):
@@ -961,7 +1184,7 @@ def _owning_module_name(path):
 
 
 def _doc_markdown(doc, definition):
-    summary, parameters, discussion = _doc_sections(
+    summary, parameters, returns, raises, discussion = _doc_parts(
         doc, _parameter_names(definition)
     )
 
@@ -970,6 +1193,14 @@ def _doc_markdown(doc, definition):
         lines += ["", "## Parameters", ""]
         for name, description in parameters:
             lines.append("- `" + name + "`: " + description)
+
+    if returns:
+        lines += ["", "## Return Value", "", returns]
+
+    if raises:
+        lines += ["", "## Raises", ""]
+        for name, description in raises:
+            lines.append("- `" + name + "`" + (": " + description if description else ""))
 
     if discussion:
         lines += ["", "## Discussion", ""] + discussion
@@ -1033,12 +1264,67 @@ def _parent_reference_path(path):
     return parent.rsplit('.', 1)[0] + "/" + parent.rsplit('.', 1)[1] if "." in parent else parent
 
 
-def _modules_markdown():
+def _module_table(names):
     lines = ["| Module | Description |", "| --- | --- |"]
-    for name in _available_modules():
+    for name in names:
         doc = _module_doc(name) or ""
         # A pipe in a summary would end the cell early.
         lines.append("| " + _reference_markdown(name) + " | " + doc.replace("|", "\\|") + " |")
+    return lines
+
+
+def _stdlib_modules():
+    # Python's own, as the interpreter names them; empty where it doesn't.
+    import sys
+    stdlib = getattr(sys, 'stdlib_module_names', frozenset())
+    return [name for name in _available_modules() if name in stdlib]
+
+
+def _module_groups():
+    # The app's own modules, what it bundles besides, and Python's.
+    from interpreter.native import app_name
+    registered = set(_registered_modules())
+    stdlib = set(_stdlib_modules())
+    groups = {app_name(): [], "Other modules": [], "Standard library": []}
+    titles = list(groups)
+    for name in _available_modules():
+        if name in stdlib:
+            groups[titles[2]].append(name)
+        elif name in registered:
+            groups[titles[0]].append(name)
+        else:
+            groups[titles[1]].append(name)
+    return [(title, names) for title, names in groups.items() if names]
+
+
+def _modules_markdown():
+    lines = []
+    for title, names in _module_groups():
+        lines += ["## " + title, ""] + _module_table(names) + [""]
+    return lines
+
+
+def _submodules(module):
+    # A package's public modules, read from where it lives, a zip too.
+    path = getattr(module, '__path__', None)
+    if path is None:
+        return []
+    import pkgutil
+    import sys
+    names = set([info.name for info in pkgutil.iter_modules(path)])
+    # Built into the binary rather than found beside it, as mlx.core is.
+    prefix = module.__name__ + "."
+    names.update([builtin[len(prefix):] for builtin in sys.builtin_module_names
+                  if builtin.startswith(prefix) and "." not in builtin[len(prefix):]])
+    return sorted([name for name in names | _namespace_packages(path) if not name.startswith('_')])
+
+
+def _module_entries(module_name, names):
+    lines = []
+    for name in names:
+        path = module_name + "." + name
+        doc = _module_doc(path)
+        lines += _listing_entry(module_name, name, ["import " + path], _linked_doc_references(doc) if doc else None)
     return lines
 
 
@@ -1049,6 +1335,10 @@ def _module_markdown(module):
     doc = getattr(module, '__doc__', None)
     if doc:
         lines += [doc.strip(), ""]
+
+    submodules = _submodules(module)
+    if submodules:
+        lines += ["## Modules", ""] + _module_entries(name, submodules)
 
     classes, functions = _module_members(module)
 

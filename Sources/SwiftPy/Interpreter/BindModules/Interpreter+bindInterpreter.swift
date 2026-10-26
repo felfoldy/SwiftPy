@@ -24,6 +24,16 @@ extension Interpreter {
                 }
             }
 
+            module.def("app_name() -> str",
+                       docstring: "Return the name of the app the interpreter runs in.") { argc, argv in
+                PyBind.function(argc, argv) {
+                    let info = Bundle.main.infoDictionary
+                    return info?["CFBundleDisplayName"] as? String
+                        ?? info?["CFBundleName"] as? String
+                        ?? ProcessInfo.processInfo.processName
+                }
+            }
+
             module.def("source(name: str) -> str | None",
                        docstring: "Return the Python source of a module, or None when it has none.") { argc, argv in
                 PyBind.function(argc, argv) { (name: String) -> String? in
