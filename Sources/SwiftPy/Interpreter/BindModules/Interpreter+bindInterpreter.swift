@@ -10,13 +10,6 @@ import Foundation
 extension Interpreter {
     func bindInterpreter() {
         bindModule("interpreter.native") { module in
-            module.def("host(name: str) -> None",
-                       docstring: "Hosts the remote Python interpreter on this device.") { argc, argv in
-                PyBind.function(argc, argv) { (name: String) in
-                    Interpreter.host(name: name)
-                }
-            }
-
             module.def("modules() -> list[str]",
                        docstring: "Return the names of registered Python modules.") { argc, argv in
                 PyBind.function(argc, argv) {
