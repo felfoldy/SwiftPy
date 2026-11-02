@@ -57,18 +57,55 @@ class ScriptableMacroTests: XCTestCase {
         macros: testMacros)
     }
     
+    func testDataIsBytes() {
+        assertMacroExpansion(
+        """
+        @Scriptable
+        class TestClass {
+            let payload: Data = Data()
+            func send(data: Data) {}
+        }
+        """,
+        expandedSource:
+        """
+        class TestClass {
+            let payload: Data = Data()
+            func send(data: Data) {}
+
+            var _pythonCache = PythonBindingCache()
+        }
+
+        extension TestClass: PythonBindable {
+            @MainActor static let pyType: PyType = .make("TestClass", base: .object) { type in
+                \(property("payload", python: "payload", setter: false))
+                \(function("send(data:)", "send(self, data: bytes) -> None"))
+                \(newAndRepr)
+                \(interfaceBegin)
+                class TestClass:
+                    payload: bytes
+
+                    def send(self, data: bytes) -> None: ...
+                \(interfaceEnd)
+            }
+        }
+        """,
+        macros: testMacros)
+    }
+
     func testFunctionBinding() {
         assertMacroExpansion("""
         @Scriptable
         public class TestClass {
             func testMethod(arg: Int? = nil, arg2: String = "1") {}
             func testFunction(_ value: String, val2: Int) -> Int { 10 }
+            func testOptionalObject() -> PyObject? { nil }
             func testAsync() async -> Int { 10 }
         }
         """, expandedSource: """
         public class TestClass {
             func testMethod(arg: Int? = nil, arg2: String = "1") {}
             func testFunction(_ value: String, val2: Int) -> Int { 10 }
+            func testOptionalObject() -> PyObject? { nil }
             func testAsync() async -> Int { 10 }
         
             public var _pythonCache = PythonBindingCache()
@@ -78,12 +115,14 @@ class ScriptableMacroTests: XCTestCase {
             @MainActor public static let pyType: PyType = .make("TestClass", base: .object) { type in
                 \(function("testMethod(arg:arg2:)", "test_method(self, arg: int | None = None, arg2: str = '1') -> None"))
                 \(function("testFunction(_:val2:)", "test_function(self, value: str, val2: int) -> int"))
+                \(function("testOptionalObject", "test_optional_object(self) -> Any"))
                 \(function("testAsync", "test_async(self) -> int"))
                 \(newAndRepr)
                 \(interfaceBegin)
                 class TestClass:
                     def test_method(self, arg: int | None = None, arg2: str = '1') -> None: ...
                     def test_function(self, value: str, val2: int) -> int: ...
+                    def test_optional_object(self) -> Any: ...
                     async def test_async(self) -> int: ...
                 \(interfaceEnd)
             }

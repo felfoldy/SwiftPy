@@ -43,6 +43,19 @@ public final class Interpreter {
     /// unbounded execution.
     public static var timeout: Int? = 1000
 
+    /// Where the interpreter starts, and `Path.home()`: the app's Documents.
+    /// A test runner gets a folder of its own, since outside the sandbox
+    /// Documents is the user's, and reading it can wait on a privacy prompt.
+    public static var homeDirectory: URL = {
+        guard Bundle.allBundles.contains(where: { $0.bundlePath.hasSuffix(".xctest") }) else {
+            return .documentsDirectory
+        }
+        let folder = URL.temporaryDirectory
+            .appending(path: "SwiftPyTests-\(ProcessInfo.processInfo.processIdentifier)/Documents")
+        try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        return folder
+    }()
+
     private static var _shared: Interpreter?
 
     @usableFromInline
@@ -129,9 +142,7 @@ public final class Interpreter {
         log.info("pocketpy [\(py.version)] initialized")
         #endif
 
-        // Change default working directory to the applications Documents directory.
-        let documentsPath = URL.documentsDirectory.path
-        FileManager.default.changeCurrentDirectoryPath(documentsPath)
+        FileManager.default.changeCurrentDirectoryPath(Self.homeDirectory.path(percentEncoded: false))
 
         relays = OutputRelays(interpreter: self)
 
@@ -155,6 +166,7 @@ public final class Interpreter {
 
         bindP2P()
         bindKeychain()
+        bindClipboard()
         bindEmbeddings()
 
         // Bundled source-only modules.

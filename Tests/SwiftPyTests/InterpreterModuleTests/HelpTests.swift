@@ -235,6 +235,28 @@ struct HelpTests {
             #expect(!output.contains("## Initializers"))
         }
 
+        /// A subclass links to what it inherits rather than repeating it: every
+        /// view would otherwise list all of `View`'s modifiers.
+        @Test("links inherited functions instead of listing them")
+        func inheritedFunctions() async throws {
+            await Interpreter.run("""
+            class _HelpBase:
+                def shared(self):
+                    "Shared by subclasses."
+
+            class _HelpChild(_HelpBase):
+                def own(self):
+                    "Only the child's."
+
+            _inherited = "\\n".join(_help_module._markdown_lines(_HelpChild))
+            """)
+            let output: String = try #require(Interpreter.evaluate("_inherited"))
+
+            #expect(output.contains("own()"))
+            #expect(!output.contains("shared()"))
+            #expect(output.contains("Inherits the functions of ``__main__/_HelpBase``."))
+        }
+
         @Test("takes the method signature from the binding")
         func methodSignature() async throws {
             let output = try await markdown(of: "p2p.Peer")
@@ -295,6 +317,44 @@ struct HelpTests {
             #expect(properties.lowerBound < initializers.lowerBound)
         }
         #endif
+
+        /// A native class's properties are getset descriptors, typed only in its stub.
+        @Test("lists a native class's properties")
+        func nativeProperties() async throws {
+            let output = try await markdown(of: "p2p.Peer")
+
+            #expect(output.contains("## Properties"))
+            #expect(output.contains("- `on_message: "))
+            #expect(output.contains("Callback handler."))
+
+            let page = try await markdown(of: "p2p.Peer.on_message")
+            #expect(page.hasPrefix("# on_message"))
+            #expect(page.contains("Callback handler."))
+        }
+
+        @Test("shows an enum's definition with its cases")
+        func enumCases() async throws {
+            await Interpreter.run("""
+            import enum
+            class _Edge(enum.StrEnum):
+                '''Where it sits.'''
+                TOP = "top"
+                BOTTOM = "bottom"
+
+            _enum_out = "\\n".join(_help_module._markdown_lines(_Edge))
+            """)
+            let output: String = try #require(Interpreter.evaluate("_enum_out"))
+
+            #expect(output.contains("""
+            ```python
+            class _Edge(StrEnum):
+                TOP = 'top'
+                BOTTOM = 'bottom'
+            ```
+            """))
+            #expect(!output.contains("## Cases"))
+            #expect(!output.contains("## Properties"))
+        }
 
         /// Reached by its path, a property documents itself rather than the
         /// `property` it is an instance of.
@@ -461,6 +521,78 @@ struct HelpTests {
         }
     }
 
+    /// A package lists its modules, which are neither classes nor functions.
+    #if cpython
+    @Suite("package module listing", .serialized) @MainActor
+    struct PackageModuleListing {
+        init() async {
+            await Interpreter.run("import interpreter")
+            await Interpreter.run("import interpreter.help as _help_module")
+        }
+
+        private func markdown(of path: String) async throws -> String {
+            await Interpreter.run("""
+            \(path == "modules" ? "" : "import \(path.split(separator: ".")[0])")
+            _pl_out = "\\n".join(_help_module._markdown_lines('\(path)'))
+            """)
+            return try #require(Interpreter.evaluate("_pl_out"))
+        }
+
+        @Test("lists its modules with their summaries")
+        func modules() async throws {
+            let output = try await markdown(of: "json")
+
+            #expect(output.contains("""
+            ## Modules
+
+            ### ``json/decoder``
+
+            ```python
+            import json.decoder
+            ```
+
+            Implementation of JSONDecoder
+            """))
+            #expect(!output.contains("json/__main__"))
+        }
+
+        @Test("lists the app's modules, the bundled ones, then the standard library")
+        func moduleGroups() async throws {
+            let output = try await markdown(of: "modules")
+            let other = try #require(output.range(of: "## Other modules"))
+            let stdlib = try #require(output.range(of: "## Standard library"))
+
+            #expect(output.hasPrefix("## "))
+            #expect(output.range(of: "| ``interpreter`` |")!.lowerBound < other.lowerBound)
+            #expect(output[other.upperBound..<stdlib.lowerBound].contains("| ``PIL`` |"))
+            #expect(output[stdlib.upperBound...].contains("| ``json`` |"))
+        }
+
+        @Test("counts what the app bundles as its own, apart from the standard library")
+        func appModules() async throws {
+            await Interpreter.run("""
+            _pl_app = _help_module._app_modules()
+            _pl_stdlib = _help_module._stdlib_modules()
+            """)
+            let app: [String] = try #require(Interpreter.evaluate("_pl_app"))
+            let stdlib: [String] = try #require(Interpreter.evaluate("_pl_stdlib"))
+
+            #expect(app.contains("PIL"))
+            #expect(app.contains("interpreter"))
+            #expect(!app.contains("json"))
+            #expect(stdlib.contains("json"))
+            #expect(!stdlib.contains("PIL"))
+        }
+
+        @Test("opens a module its package has not imported")
+        func unimportedModule() async throws {
+            let output = try await markdown(of: "profiling.tracing")
+
+            #expect(output.contains("Tracing profiler for Python."))
+        }
+    }
+    #endif
+
     /// The markdown a function's help renders as. The reference for the layout
     /// is `help('requests.get')`, checked against the real module in
     /// swiftpy-requests; these cover the parsing on its own.
@@ -493,6 +625,74 @@ struct HelpTests {
 
             Does a thing.
             """))
+        }
+
+        @Test("reads Google style sections")
+        func googleStyle() async throws {
+            await Interpreter.run("""
+            def _google(map_fn, filter_fn=None):
+                '''Maps the parameters with ``map_fn``.
+
+                Args:
+                    map_fn (Callable): Maps an array to another array
+                    filter_fn (Callable, optional): Filter to select which arrays to
+                        map (default: :meth:`Module.valid_parameter_filter`).
+
+                Returns:
+                    The module instance.
+
+                Raises:
+                    ValueError: When a parameter is missing.
+                '''
+            """)
+
+            let output = try await markdown(of: "_google")
+
+            #expect(output.contains("Maps the parameters with `map_fn`."))
+            #expect(output.contains("""
+            ## Parameters
+
+            - `map_fn`: Maps an array to another array
+            - `filter_fn`: Filter to select which arrays to map (default: `Module.valid_parameter_filter`).
+
+            ## Return Value
+
+            The module instance.
+
+            ## Raises
+
+            - `ValueError`: When a parameter is missing.
+            """))
+            #expect(!output.contains("Args:"))
+        }
+
+        @Test("reads reST fields")
+        func restFields() async throws {
+            await Interpreter.run("""
+            def _rest(mode, dither=None):
+                '''Converts an image.
+
+                :param mode: The requested mode.
+                :param dither: Dithering method, used when converting
+                   to "P".
+                :type dither: int
+                :returns: An :py:class:`~PIL.Image.Image` object.
+                :rtype: Image
+                '''
+            """)
+
+            let output = try await markdown(of: "_rest")
+
+            #expect(output.contains("""
+            - `mode`: The requested mode.
+            - `dither`: Dithering method, used when converting to "P".
+
+            ## Return Value
+
+            An `PIL.Image.Image` object.
+            """))
+            #expect(!output.contains(":type"))
+            #expect(!output.contains(":rtype"))
         }
 
         @Test("documents the model decorator")
@@ -888,6 +1088,36 @@ struct HelpTests {
             #expect(output == "class BoundClass(value: int):")
             #expect(!output.contains("method"))
         }
+
+        @Test("documents a method as async when its class interface does")
+        func documentsAsyncMethodsFromTheClassInterface() async throws {
+            await Interpreter.run("""
+            from interpreter.help import _class_methods, _function_entries
+            class _Bound:
+                _interface = 'class Bound:\\n    async def go(self, x: int) -> str: ...\\n    def stop(self) -> None: ...'
+                def go(self, x): pass
+                def stop(self): pass
+            _entries = "\\n".join(_function_entries("m.Bound", _class_methods(_Bound), _Bound))
+
+            import sys, types
+            from interpreter.help import _markdown_lines
+            _module = types.ModuleType("_asyncdoc")
+            _module.Bound = _Bound
+            sys.modules["_asyncdoc"] = _module
+            _page = "\\n".join(_markdown_lines("_asyncdoc.Bound.go"))
+            _text = "\\n".join(_markdown_lines("_asyncdoc.Bound.stop"))
+            """)
+
+            let entries: String = try #require(Interpreter.evaluate("_entries"))
+            #expect(entries.contains("async def go("))
+            #expect(!entries.contains("async def stop("))
+
+            // The member's own page, not only the class's listing of it.
+            let page: String = try #require(Interpreter.evaluate("_page"))
+            #expect(page.contains("async def go("))
+            let stop: String = try #require(Interpreter.evaluate("_text"))
+            #expect(!stop.contains("async def"))
+        }
     }
 
     @Suite("instance", .serialized) @MainActor
@@ -1009,6 +1239,21 @@ struct HelpTests {
             await Interpreter.run("help('math')")
         }
 
+        @Test("resolves a reference as its pages write it")
+        func resolvesReferenceForm() async throws {
+            await Interpreter.run("""
+            import interpreter.help as _help_module
+            _ref_dotted = "\\n".join(_help_module._markdown_lines('pathlib.Path.read_text'))
+            _ref_slashed = "\\n".join(_help_module._markdown_lines('pathlib.Path/read_text(encoding, errors, newline)'))
+            _ref_lines = _help_module._help_lines('pathlib/Path')
+            """)
+
+            let dotted: String = try #require(Interpreter.evaluate("_ref_dotted"))
+            #expect(dotted.contains("def read_text("))
+            #expect(Interpreter.evaluate("_ref_slashed") == dotted)
+            #expect(Interpreter.evaluate("_ref_lines[0].startswith('No help')") == false)
+        }
+
         @Test("resolves a member inside a module")
         func resolvesModuleMember() async throws {
             await Interpreter.run("""
@@ -1071,6 +1316,235 @@ struct HelpTests {
             await Interpreter.run("help('_no_such_module_xyz')")
         }
     }
+
+    #if cpython
+    @Suite("stubs") @MainActor
+    struct Stubs {
+        init() async {
+            await Interpreter.run("""
+            import ast, json, interpreter
+            _stubs = json.loads(interpreter._stubs())
+            """)
+        }
+
+        @Test("are written for registered modules, not private ones")
+        func coverRegisteredModules() {
+            #expect(Interpreter.evaluate("'keychain.pyi' in _stubs") == true)
+            #expect(Interpreter.evaluate("'_swiftpy_asyncio.pyi' in _stubs") == false)
+        }
+
+        @Test("are written for a private module backing a public one")
+        func coverBackingModules() async {
+            PyBind.module("_backed") { _ in }
+            PyBind.module("backed") { _ in }
+            await Interpreter.run("_stubs = json.loads(interpreter._stubs())")
+            #expect(Interpreter.evaluate("'_backed.pyi' in _stubs") == true)
+        }
+
+        @Test("parse as Python")
+        func parse() async {
+            await Interpreter.run("""
+            _unparsed = []
+            for _path, _text in _stubs.items():
+                try:
+                    ast.parse(_text)
+                except SyntaxError:
+                    _unparsed.append(_path)
+            """)
+            #expect(Interpreter.evaluate("_unparsed") == [String]())
+        }
+
+        @Test("keep the bound signatures and classes")
+        func keepSignatures() async {
+            await Interpreter.run("""
+            _keychain = ast.parse(_stubs['keychain.pyi'])
+            _secret = next(n for n in _keychain.body if isinstance(n, ast.FunctionDef) and n.name == 'secret')
+            _signature = [ast.unparse(_secret.args.args[0].annotation), ast.unparse(_secret.returns)]
+            """)
+            #expect(Interpreter.evaluate("_signature") == ["str", "Secret"])
+            #expect(Interpreter.evaluate("'class Secret:' in _stubs['keychain.pyi']") == true)
+        }
+
+        @Test("add what SwiftPy puts in builtins, and only that")
+        func builtins() async {
+            await Interpreter.run("""
+            _builtins_stub = ast.parse(_stubs['__builtins__.pyi'])
+            _names = [ast.unparse(n) if isinstance(n, ast.ImportFrom) else n.name for n in _builtins_stub.body]
+            """)
+            #expect(Interpreter.evaluate("_names") == ["from _swiftpy_builtins import View as View", "help"])
+        }
+
+        @Test("leave out what a module imports")
+        func withoutImports() async throws {
+            await Interpreter.run("""
+            import sys, types
+            from typing import Any, Callable
+            from os import getcwd
+            from interpreter.help import _stub_lines
+            _module = types.ModuleType("_imports")
+            _module.__all__ = []
+            _module.Any, _module.Callable, _module.getcwd = Any, Callable, getcwd
+            class _Local: pass
+            _Local.__name__ = "Local"
+            _Local.__module__ = "_imports"
+            _module.Local = _Local
+            _module.limit = 3
+            _imported = "\\n".join(_stub_lines(_module))
+            """)
+            let text: String = try #require(Interpreter.evaluate("_imported"))
+            #expect(text.contains("class Local"))
+            #expect(text.contains("limit: int"))
+            #expect(!text.contains("Any:") && !text.contains("class Any"))
+            #expect(!text.contains("Callable") && !text.contains("getcwd"))
+        }
+
+        /// A `type` alias is written as one, so annotations elsewhere can use
+        /// it, rather than as a variable of type `TypeAliasType`.
+        @Test("write a type alias as one, which other stubs import")
+        func typeAliases() async throws {
+            await Interpreter.run("""
+            import ast, types
+            from interpreter.help import _stub_lines, _typed_stub
+            _module = types.ModuleType("_lengths")
+            exec("class Amount: pass\\ntype Size = float | Amount", _module.__dict__)
+            _module.Amount.__module__ = "_lengths"
+            _module.Size.__module__ = "_lengths"
+            _lengths = _typed_stub(ast.parse("\\n".join(_stub_lines(_module))), "_lengths", {}, set())
+            _user = _typed_stub(ast.parse("def grow(by: Size) -> None: ..."), "_user", {"Size": "_lengths"}, set())
+            """)
+            let lengths: String = try #require(Interpreter.evaluate("_lengths"))
+            let user: String = try #require(Interpreter.evaluate("_user"))
+            #expect(lengths.contains("type Size = float | Amount"), "\(lengths)")
+            #expect(user.contains("from _lengths import Size"), "\(user)")
+            #expect(user.contains("by: Size"), "\(user)")
+        }
+
+        /// A decorator's overloads, so `@tool` and `@tool(...)` both type as a
+        /// `Tool`, which `inspect` writes by its private module.
+        @Test("keep a Python function's overloads, and its classes by name")
+        func pythonOverloads() async throws {
+            await Interpreter.run("""
+            import ast, sys, types
+            from interpreter.help import _stub_lines, _typed_stub
+            _private = types.ModuleType("_tools")
+            exec("class Tool: pass", _private.__dict__)
+            _private.Tool.__module__ = "_tools"
+            _module = types.ModuleType("_decorators")
+            _module.Tool = _private.Tool
+            exec('''
+            from typing import Callable, overload
+            __all__ = ["tool"]
+
+            @overload
+            def tool(fn: Callable) -> Tool: ...
+            @overload
+            def tool(fn: None = None, *, name: str = "") -> Callable[[Callable], Tool]: ...
+            def tool(fn=None, *, name=""):
+                "Makes a tool."
+            ''', _module.__dict__)
+            sys.modules["_decorators"] = _module
+            _decorators = _typed_stub(ast.parse("\\n".join(_stub_lines(_module))), "_decorators", {"Tool": "_tools"}, set())
+            del sys.modules["_decorators"]
+            """)
+            let text: String = try #require(Interpreter.evaluate("_decorators"))
+            #expect(text.components(separatedBy: "@overload").count == 3, "\(text)")
+            #expect(text.contains("from _tools import Tool"), "\(text)")
+            #expect(text.contains("from typing import Any, Callable, overload"), "\(text)")
+            #expect(text.contains("-> Tool"), "\(text)")
+            #expect(text.contains("-> Callable[[Callable], Tool]"), "\(text)")
+        }
+
+        @Test("write a subclass of str with its own members only")
+        func builtinSubclass() async throws {
+            await Interpreter.run("""
+            import ast
+            from interpreter import InputResult
+            from interpreter.help import _class_lines
+            _result_stub = "\\n".join(_class_lines(InputResult))
+            _parses = bool(ast.parse(_result_stub))
+            """)
+            let text: String = try #require(Interpreter.evaluate("_result_stub"))
+            #expect(text.contains("class InputResult(str):"), "\(text)")
+            #expect(!text.contains("def count"), "\(text)")
+            #expect(text.contains("    images: list"), "\(text)")
+            #expect(Interpreter.evaluate("_parses") == true)
+        }
+
+        @Test("import a class from the public module that re-exports it")
+        func publicOwners() async throws {
+            await Interpreter.run("""
+            import ast
+            from interpreter.help import _class_owners
+            _owners = _class_owners({
+                "_models.pyi": ("_models", ast.parse("class Model: pass\\nclass Hidden: pass")),
+                "models.pyi": ("models", ast.parse("class Model: pass")),
+                "other.pyi": ("other", ast.parse("class Model: pass")),
+            })
+            """)
+            #expect(Interpreter.evaluate("_owners['Model']") == "models")
+            #expect(Interpreter.evaluate("_owners['Hidden']") == "_models")
+        }
+
+        @Test("import a class the module took from the standard library")
+        func standardLibraryImports() async throws {
+            await Interpreter.run("""
+            import ast, sys, types
+            from interpreter.help import _stub_lines, _typed_stub
+            _module = types.ModuleType("_sources")
+            exec("__all__ = ['Source']\\nfrom os import PathLike\\ntype Source = str | PathLike[str] | bytes", _module.__dict__)
+            _module.Source.__module__ = "_sources"
+            sys.modules["_sources"] = _module
+            _sources = _typed_stub(ast.parse("\\n".join(_stub_lines(_module))), "_sources", {}, set())
+            del sys.modules["_sources"]
+            """)
+            let text: String = try #require(Interpreter.evaluate("_sources"))
+            #expect(text.contains("from os import PathLike"), "\(text)")
+            #expect(text.contains("type Source = str | PathLike[str] | bytes"), "\(text)")
+        }
+
+        @Test("keep an enum's members and a class's constants")
+        func membersAndConstants() async throws {
+            await Interpreter.run("""
+            import types, enum
+            from interpreter.help import _stub_lines, _typed_stub
+            _module = types.ModuleType("_options")
+            class _Edge(enum.StrEnum):
+                TOP = "top"
+                TOP_LEADING = "top-leading"
+                def flipped(self): return self
+            class _Limits:
+                LOW = 1
+                NAME = "limits"
+            for _cls in (_Edge, _Limits):
+                _cls.__name__ = _cls.__name__[1:]
+                _cls.__module__ = "_options"
+                setattr(_module, _cls.__name__, _cls)
+            _options = _typed_stub(ast.parse("\\n".join(_stub_lines(_module))), "_options", {}, set())
+            """)
+            let text: String = try #require(Interpreter.evaluate("_options"))
+            #expect(text.contains("from enum import StrEnum"))
+            #expect(text.contains("class Edge(StrEnum):"))
+            #expect(text.contains("TOP = 'top'") && text.contains("TOP_LEADING = 'top-leading'"))
+            #expect(text.contains("def flipped(self)"))
+            #expect(!text.contains("def capitalize"))
+            #expect(text.contains("LOW: int") && text.contains("NAME: str"))
+        }
+
+        @Test("leave out what only Swift knows")
+        func withoutSwiftNames() async {
+            await Interpreter.run("""
+            from interpreter.help import _typed_stub, _without_swift_syntax
+            _typed = _typed_stub(ast.parse(_without_swift_syntax(
+                "class A(Unknown):\\n    x: UInt64\\n    y: list[any P]\\n    @overload\\n    def f(self) -> Data: ..."
+            )), "m", {}, {"View"})
+            """)
+            #expect(Interpreter.evaluate("'class A:' in _typed") == true)
+            #expect(Interpreter.evaluate("'x: Any' in _typed and 'y: list[Any]' in _typed") == true)
+            #expect(Interpreter.evaluate("'-> Any' in _typed and 'overload' not in _typed") == true)
+            #expect(Interpreter.evaluate("'from typing import Any' in _typed") == true)
+        }
+    }
+    #endif
 }
 
 /// An overloaded method whose overloads document different parameters. Bound

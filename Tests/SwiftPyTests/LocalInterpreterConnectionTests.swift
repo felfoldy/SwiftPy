@@ -123,6 +123,130 @@ struct LocalInterpreterConnectionTests {
         #expect(result == nil)
     }
 
+    // MARK: - script names
+
+    /// Runs `source` as `name` and returns the events up to the run's end.
+    private func execute(
+        _ source: String,
+        name: String? = nil,
+        on connection: LocalInterpreterConnection
+    ) async -> (id: UInt64, events: [InterpreterEvent]) {
+        var iterator = await connection.events.makeAsyncIterator()
+        await connection.perform(.execute(token: UUID(), source: source, name: name))
+        var id: UInt64 = 0
+        var events: [InterpreterEvent] = []
+        while let event = await iterator.next() {
+            events.append(event)
+            if case .started = event.payload { id = event.id }
+            if case .attachment = event.payload, event.id == id { break }
+        }
+        return (id, events)
+    }
+
+    private func feedback(in events: [InterpreterEvent], for id: UInt64) -> [ExecutionFeedback] {
+        events.compactMap { event in
+            if case let .feedback(item) = event.payload, event.id == id { item } else { nil }
+        }
+    }
+
+    @Test func aNamedRunsTracebackShowsItsName() async {
+        let connection = LocalInterpreterConnection()
+
+        let run = await execute("x = 1\n1 / 0", name: "<script:2>", on: connection)
+
+        let stderr = run.events.compactMap { if case let .stderr(text) = $0.payload { text.replacing(/\u{1B}\[[0-9;]*m/, with: "") } else { nil } }
+        #expect(stderr.contains { $0.contains(#"File "<script:2>", line 2"#) })
+        #expect(feedback(in: run.events, for: run.id).contains(ExecutionFeedback(lineNumber: 2, type: .error)))
+    }
+
+    @Test func anUnnamedRunIsNamedByItsId() async {
+        let connection = LocalInterpreterConnection()
+
+        let run = await execute("1 / 0", on: connection)
+
+        let stderr = run.events.compactMap { if case let .stderr(text) = $0.payload { text.replacing(/\u{1B}\[[0-9;]*m/, with: "") } else { nil } }
+        #expect(stderr.contains { $0.contains(#"File "<script>/\#(run.id)""#) })
+    }
+
+    // Without line tracing: the line is read off the stack as it prints.
+    @Test func outputFlashesTheScriptThatPrinted() async {
+        let connection = LocalInterpreterConnection()
+
+        let definition = await execute(
+            "def _test_named_print():\n    print('hi')",
+            name: "<script:1>", on: connection
+        )
+        let call = await execute("_test_named_print()", name: "<script:3>", on: connection)
+
+        #expect(feedback(in: call.events, for: definition.id).contains(ExecutionFeedback(lineNumber: 2, type: .output)))
+    }
+
+    #if cpython
+    @Test func aThreadPrintsToTheRunThatStartedIt() async {
+        let run = await execute("""
+        import threading
+        worker = threading.Thread(target=print, args=("from a thread",))
+        worker.start()
+        worker.join()
+        """, name: "<script:12>", on: Interpreter.shared.connection)
+
+        let stdout = run.events.compactMap { event -> String? in
+            if case let .stdout(text) = event.payload, event.id == run.id { text } else { nil }
+        }
+        #expect(stdout.joined().contains("from a thread"), "\(run.events)")
+    }
+
+    // As `input()` waits: a blocking call marks its line until it returns.
+    @Test func aBlockingCallMarksItsLineWhileItWaits() async {
+        let host = py.newmodule("feedback_blocking_host")!
+        host.def("ask() -> int") { argc, argv in
+            PyBind.blocking(argc, argv) { () async throws -> Int in
+                try await Task.sleep(for: .milliseconds(20))
+                return 1
+            }
+        }
+        let run = await execute(
+            "import feedback_blocking_host\nanswer = feedback_blocking_host.ask()",
+            name: "<script:11>", on: Interpreter.shared.connection
+        )
+
+        let lines = feedback(in: run.events, for: run.id)
+        #expect(lines.contains(ExecutionFeedback(lineNumber: 2, type: .task(progress: nil))), "\(lines)")
+        #expect(lines.contains(ExecutionFeedback(lineNumber: 2, type: nil)), "\(lines)")
+    }
+    #endif
+
+    // Read off the stack too, though the task starts on main, across the hop
+    // from Python's thread. The shared connection: tasks report to it.
+    @Test func awaitedSwiftWorkMarksItsLineWhileItRuns() async {
+        let host = py.newmodule("feedback_task_host")!
+        host.asyncDef("wait() -> int") { argc, argv in
+            PyBind.function(argc, argv) { () -> AsyncTask in
+                AsyncTask { () async throws -> Int in
+                    try await Task.sleep(for: .milliseconds(20))
+                    return 1
+                }
+            }
+        }
+        let run = await execute(
+            "import feedback_task_host\nx = 1\nawait feedback_task_host.wait()",
+            name: "<script:9>", on: Interpreter.shared.connection
+        )
+
+        let lines = feedback(in: run.events, for: run.id)
+        #expect(lines.contains(ExecutionFeedback(lineNumber: 3, type: .task(progress: nil))), "\(lines)")
+        #expect(lines.contains(ExecutionFeedback(lineNumber: 3, type: nil)), "\(lines)")
+    }
+
+    @Test func anErrorInAnotherScriptFlagsTheCallingLine() async {
+        let connection = LocalInterpreterConnection()
+
+        _ = await execute("def _test_named_fail():\n    1 / 0", name: "<script:1>", on: connection)
+        let call = await execute("y = 0\n_test_named_fail()", name: "<script:4>", on: connection)
+
+        #expect(feedback(in: call.events, for: call.id).contains(ExecutionFeedback(lineNumber: 2, type: .error)))
+    }
+
     // MARK: - stop
 
     @Test func stopCancelsRunningExecutionAndEmitsStopped() async {
@@ -227,6 +351,57 @@ struct LocalInterpreterConnectionTests {
         }
         #expect(stopped)
         #expect(Interpreter.evaluate("_test_interrupt_flag") == "next")
+    }
+#endif
+
+#if cpython
+    @Test func stopEndsATimeSleep() async {
+        let connection = LocalInterpreterConnection()
+        await connection.compile(id: 1, source: """
+        import time
+        _test_sleep_flag = 'running'
+        time.sleep(30)
+        _test_sleep_flag = 'slept'
+        """)
+
+        let started = ContinuousClock.now
+        let runTask = Task { await connection.run(id: 1) }
+        for _ in 0..<200 where (Interpreter.evaluate("_test_sleep_flag") as String?) != "running" {
+            try? await Task.sleep(for: .milliseconds(10))
+        }
+        await connection.perform(.stop(id: 1))
+        await runTask.value
+
+        #expect(ContinuousClock.now - started < .seconds(5))
+        #expect(Interpreter.evaluate("_test_sleep_flag") == "running")
+    }
+#endif
+
+#if cpython
+    @Test func stopEndsAnAwaitedInput() async {
+        // A host that never answers, as the input bar while nobody types.
+        Interpreter.interface.requestInput = { _ in
+            try await withCheckedThrowingContinuation { (_: CheckedContinuation<InputResponse, any Error>) in }
+        }
+        defer { Interpreter.interface.requestInput = InterpreterInterface().requestInput }
+        let connection = LocalInterpreterConnection()
+        await connection.compile(id: 1, source: """
+        from interpreter import ainput
+        _test_ainput_flag = 'asking'
+        _test_ainput_flag = await ainput('Name?')
+        """)
+
+        let started = ContinuousClock.now
+        let runTask = Task { await connection.run(id: 1) }
+        for _ in 0..<200 where (Interpreter.evaluate("_test_ainput_flag") as String?) != "asking" {
+            try? await Task.sleep(for: .milliseconds(10))
+        }
+        try? await Task.sleep(for: .milliseconds(50))
+        await connection.perform(.stop(id: 1))
+        await runTask.value
+
+        #expect(ContinuousClock.now - started < .seconds(5))
+        #expect(Interpreter.evaluate("_test_ainput_flag") == "asking")
     }
 #endif
 

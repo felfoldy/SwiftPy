@@ -378,6 +378,12 @@ public extension PyAPI {
 // MARK: - Main module
 
 public extension PyAPI {
+    /// CPython's puts a new `__main__` in place; pocketpy's can't be
+    /// swapped, so functions from before lose their names here.
+    func replaceMain() {
+        clearMain()
+    }
+
     /// Removes all non-dunder names from `__main__`'s namespace.
     func clearMain() {
         let mainRef = main.reference

@@ -16,6 +16,19 @@ extension Interpreter {
                     SwiftEventLoop.resolve(token, future)
                 }
             }
+
+            // `interpreter.stoppable`: a worker finishes the token the cell waits on.
+            module.def("finish(token: int) -> None") { argc, argv in
+                PyBind.function(argc, argv) { (token: Int) in
+                    StoppableCalls.finish(token)
+                }
+            }
+
+            module.def("wait(token: int) -> None") { argc, argv in
+                PyBind.blocking(argc, argv) { (token: Int) in
+                    try await StoppableCalls.wait(token)
+                }
+            }
         }
         bindModule("_swiftpy_asyncio", in: .module)
         #else

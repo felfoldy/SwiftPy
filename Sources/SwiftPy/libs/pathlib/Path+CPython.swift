@@ -99,7 +99,7 @@ public final class Path: PythonConvertible {
 
     /// Documents directory.
     public static func home() -> Path {
-        Path(url: .documentsDirectory)
+        Path(url: Interpreter.homeDirectory)
     }
 
     public static func cwd() -> Path {

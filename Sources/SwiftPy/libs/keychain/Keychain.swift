@@ -13,6 +13,7 @@ protocol SecretStorage {
     func value(for key: String) -> String?
     func set(_ value: String, for key: String) throws(PythonError)
     func remove(_ key: String) throws(PythonError)
+    func names() -> [String]
 }
 
 @MainActor
@@ -32,6 +33,16 @@ public enum Keychain {
             return expression.value
         }
         return nil
+    }
+
+    /// The names secrets are stored under, sorted.
+    public static var names: [String] {
+        storage.names()
+    }
+
+    /// Removes the secret stored under a name; a missing one is left alone.
+    public static func delete(_ name: String) throws(PythonError) {
+        try storage.remove(name)
     }
 }
 
@@ -85,6 +96,24 @@ final class KeychainStorage: SecretStorage {
         try check(status)
     }
 
+    func names() -> [String] {
+        let query: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: service,
+            // Both kinds: an App Clip's items are device-local.
+            kSecAttrSynchronizable as String: kSecAttrSynchronizableAny,
+            kSecMatchLimit as String: kSecMatchLimitAll,
+            kSecReturnAttributes as String: true,
+        ]
+        var result: CFTypeRef?
+        guard SecItemCopyMatching(query as CFDictionary, &result) == errSecSuccess,
+              let items = result as? [[String: Any]] else {
+            return []
+        }
+        let names = Set(items.compactMap { $0[kSecAttrAccount as String] as? String })
+        return names.sorted { $0.localizedStandardCompare($1) == .orderedAscending }
+    }
+
     /// Runs a keychain operation, repeating it device-locally the one time
     /// iCloud Keychain turns out to be unavailable.
     private func perform(
@@ -122,7 +151,7 @@ extension Interpreter {
         Named secrets kept in the system keychain.
 
         A secret is referred to by name; its value never reaches Python, so it
-        cannot be printed or saved with a session. Pass the secret itself as a
+        cannot be printed or saved with a notebook. Pass the secret itself as a
         ``requests`` header value, or ``keychain.Secret/bearer()`` for an
         `Authorization` header, and the value is filled in as the request is
         sent. Secrets follow you to your other devices through iCloud Keychain.
@@ -139,12 +168,13 @@ extension Interpreter {
             module.class(Secret.self)
 
             module.def(
-                "secret(key: str) -> Secret",
+                "secret(key: str, prompt: str | None = None) -> Secret",
                 docstring: """
                 Returns the secret stored under a name, asking for its value when \
                 the keychain has none.
 
                 key: The name the secret is stored under.
+                prompt: Markdown to ask with, such as where to get the value. Defaults to asking for the key by name.
 
                 The value is written to the keychain and never returned to Python:
                 pass the secret, or its ``keychain.Secret/bearer()``, as a header
@@ -153,13 +183,16 @@ extension Interpreter {
                 ```python
                 import keychain, requests
 
-                key = keychain.secret("GITLAB_TOKEN")
+                key = keychain.secret(
+                    "GITLAB_TOKEN",
+                    prompt="Paste a token from [GitLab](https://gitlab.com/-/user_settings/personal_access_tokens).",
+                )
                 response = requests.get(url, headers={"PRIVATE-TOKEN": key})
                 ```
                 """
             ) { argc, argv in
-                PyBind.blocking(argc, argv) { (key: String) in
-                    try await Keychain.secret(named: key)
+                PyBind.blocking(argc, argv) { (key: String, prompt: String?) in
+                    try await Keychain.secret(named: key, prompt: prompt)
                 }
             }
 
@@ -194,13 +227,16 @@ extension Interpreter {
     }
 }
 
-private extension Keychain {
-    static func secret(named key: String) async throws -> Secret {
+public extension Keychain {
+    /// The secret stored under `key`, asking for its value with `prompt` when
+    /// there is none, as ``keychain.secret`` does.
+    @MainActor
+    static func secret(named key: String, prompt: String? = nil) async throws -> Secret {
         if storage.value(for: key) != nil {
             return Secret(name: key)
         }
 
-        let value = try await Interpreter.interface.requestSecret(key)
+        let value = try await Interpreter.requestSecret(SecretRequest(name: key, prompt: prompt))
         guard !value.isEmpty else {
             throw PythonError.ValueError("No value entered for '\(key)'.")
         }

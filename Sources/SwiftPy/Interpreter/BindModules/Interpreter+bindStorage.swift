@@ -13,6 +13,7 @@ extension Interpreter {
                     Store.self,
                     ModelHandle.self,
                     StoreObservation.self,
+                    ModelVersion.self,
                 )
             }
         }

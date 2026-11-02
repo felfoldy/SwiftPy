@@ -23,6 +23,10 @@ final class InMemorySecretStorage: SecretStorage {
     func remove(_ key: String) throws(PythonError) {
         values[key] = nil
     }
+
+    func names() -> [String] {
+        values.keys.sorted()
+    }
 }
 
 @Suite("Keychain", .serialized)
@@ -73,17 +77,51 @@ struct KeychainTests {
     @Test func missingSecretIsAskedForAndStored() async {
         defer { restore() }
 
-        var askedFor: [String] = []
-        Interpreter.interface.requestSecret = { key in
-            askedFor.append(key)
+        var askedFor: [SecretRequest] = []
+        Interpreter.interface.requestSecret = { request in
+            askedFor.append(request)
             return "sk-entered"
         }
 
         await Interpreter.run("entered = \(secret("OPENAI_API_KEY"))")
 
-        #expect(askedFor == ["OPENAI_API_KEY"])
+        #expect(askedFor == [SecretRequest(name: "OPENAI_API_KEY")])
         #expect(main.entered?.name == "OPENAI_API_KEY")
         #expect(storage.values["OPENAI_API_KEY"] == "sk-entered")
+    }
+
+    @Test func asksWithTheGivenPrompt() async {
+        defer { restore() }
+        var asked: SecretRequest?
+        Interpreter.interface.requestSecret = { request in
+            asked = request
+            return "sk-prompted"
+        }
+
+        #if cpython
+        await Interpreter.run("keychain.secret('PROMPTED_KEY', prompt='Get one from [here](https://example.com).')")
+        #else
+        await Interpreter.run("await keychain.secret('PROMPTED_KEY', prompt='Get one from [here](https://example.com).')")
+        #endif
+
+        #expect(asked == SecretRequest(name: "PROMPTED_KEY", prompt: "Get one from [here](https://example.com)."))
+        #expect(storage.values["PROMPTED_KEY"] == "sk-prompted")
+    }
+
+    @Test func aRunWithItsOwnPlaceAsksThere() async {
+        defer { restore() }
+        var askedHere = false
+        Interpreter.interface.requestSecret = { _ in
+            askedHere = true
+            return "console"
+        }
+
+        await Interpreter.withInput({ _ in InputResponse(text: "") }, secret: { _ in "sk-own" }) {
+            await Interpreter.run("own = \(secret("OWN_KEY"))")
+        }
+
+        #expect(!askedHere)
+        #expect(storage.values["OWN_KEY"] == "sk-own")
     }
 
     @Test func emptyResponseRaisesAndStoresNothing() async {
@@ -114,6 +152,17 @@ struct KeychainTests {
         """)
 
         #expect(main.unhandled == true)
+    }
+
+    @Test func swiftListsAndDeletes() throws {
+        defer { restore() }
+        storage.values = ["SWIFT_KEY": "value"]
+
+        #expect(Keychain.names == ["SWIFT_KEY"])
+        try Keychain.delete("SWIFT_KEY")
+        #expect(Keychain.names.isEmpty)
+        // A missing one is left alone.
+        try Keychain.delete("SWIFT_KEY")
     }
 
     @Test func setThenDeleteRoundTrips() async {

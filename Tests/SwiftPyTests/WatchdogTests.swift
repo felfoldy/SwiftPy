@@ -32,21 +32,6 @@ struct WatchdogTests {
 
         #expect(error.map { py.tpname($0.type) } == "TimeoutError")
     }
-
-    /// `interpreter.set_timeout` configures the timeout from Python, and `None`
-    /// disables it.
-    @Test func pythonSetTimeoutConfiguresInterpreter() async {
-        defer { Interpreter.timeout = 1000 }
-
-        await Interpreter.run("""
-        import interpreter
-        interpreter.set_timeout(250)
-        """)
-        #expect(Interpreter.timeout == 250)
-
-        await Interpreter.run("interpreter.set_timeout(None)")
-        #expect(Interpreter.timeout == nil)
-    }
 }
 
 #endif

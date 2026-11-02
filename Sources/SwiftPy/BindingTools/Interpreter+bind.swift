@@ -38,8 +38,8 @@ extension Interpreter {
             return
         }
 
-        // Dotted submodules (e.g. "console.session") are requested by the
-        // import machinery as a slashed path ("console/session.py").
+        // Dotted submodules (e.g. "console.notebook") are requested by the
+        // import machinery as a slashed path ("console/notebook.py").
         let key = name.replacingOccurrences(of: ".", with: "/") + ".py"
         Self.registeredSources.register(content, as: key)
     }

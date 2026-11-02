@@ -40,7 +40,7 @@ struct InitializerExtractor: MemberExtractor {
             .format(initializer.signature)
 
             let pySignature = "__init__(\(paramsString)) -> None"
-            let docstring = initializer.description.docstring
+            let docstring = initializer.documentationComment
 
             // Bound to the initializer as well as written into the stub, so
             // that `help()` can read it the way it reads a method's.
@@ -102,7 +102,7 @@ struct VariableExtractor: MemberExtractor {
 
         let pythonIdentifier = metadata.identifier(identifier)
 
-        let docstring = variable.description.docstring
+        let docstring = variable.documentationComment
 
         if let docstring {
             metadata.variableDocs.append("\(pythonIdentifier): \(docstring)")
@@ -190,7 +190,7 @@ struct FunctionExtractor: MemberExtractor {
             ? "async def \(pySignature):"
             : "def \(pySignature):"
 
-        let docstring = function.description.docstring
+        let docstring = function.documentationComment
 
         if let docstring {
             metadata.functionSyntax.append(functionSyntax)

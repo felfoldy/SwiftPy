@@ -44,13 +44,25 @@ def _callable_signature(obj, fallback_name=None):
     return name + "(...)"
 
 
-def _callable_definition(obj, fallback_name=None):
+def _declared_async(owner, name):
+    # A bound method's own signature drops `async`; its class's interface keeps it.
+    marker = "async def " + name + "("
+    for cls in getattr(owner, '__mro__', ()):
+        interface = getattr(cls, '_interface', None) or ""
+        if any(line.strip().startswith(marker) for line in interface.split("\n")):
+            return True
+    return False
+
+
+def _callable_definition(obj, fallback_name=None, owner=None):
     signature = _callable_signature(obj, fallback_name)
     try:
         is_coroutine = inspect.iscoroutinefunction(obj)
     except:
         is_coroutine = False
-    prefix = "async " if getattr(obj, '_is_async', False) or is_coroutine else ""
+    is_async = (getattr(obj, '_is_async', False) or is_coroutine
+                or (owner is not None and _declared_async(owner, fallback_name)))
+    prefix = "async " if is_async else ""
     if signature.startswith("def "):
         signature = signature[len("def "):]
     if not signature.endswith(":"):
@@ -58,18 +70,30 @@ def _callable_definition(obj, fallback_name=None):
     return prefix + "def " + signature
 
 
-def _callable_definitions(obj, fallback_name=None):
+def _overloads_of(obj):
+    # Swift's, or a Python function's own `@overload`s.
     overloads = getattr(obj, '_overloads', None)
+    if overloads:
+        return overloads
+    try:
+        import typing
+        return typing.get_overloads(obj)
+    except Exception:
+        return []
+
+
+def _callable_definitions(obj, fallback_name=None, owner=None):
+    overloads = _overloads_of(obj)
     if not overloads:
-        return [_callable_definition(obj, fallback_name)]
-    return [_callable_definition(overload, fallback_name) for overload in overloads]
+        return [_callable_definition(obj, fallback_name, owner)]
+    return [_callable_definition(overload, fallback_name, owner) for overload in overloads]
 
 
 def _callable_doc(obj):
     doc = getattr(obj, '__doc__', None)
     if doc:
         return doc
-    for overload in getattr(obj, '_overloads', None) or []:
+    for overload in _overloads_of(obj):
         doc = getattr(overload, '__doc__', None)
         if doc:
             return doc
@@ -87,7 +111,7 @@ def _signature_card(entry, definition, overload=False):
 
 
 def _signature_cards(obj, definitions):
-    overloads = getattr(obj, '_overloads', None)
+    overloads = _overloads_of(obj)
     entries = overloads if overloads else [obj]
     lines = []
     for index in range(len(definitions)):
@@ -110,8 +134,8 @@ def _docstring_lines(doc, indent="    "):
     return body
 
 
-def _callable_lines(obj, fallback_name=None, indent=""):
-    definition = indent + _callable_definition(obj, fallback_name)
+def _callable_lines(obj, fallback_name=None, indent="", owner=None):
+    definition = indent + _callable_definition(obj, fallback_name, owner)
 
     doc = getattr(obj, '__doc__', None)
     if not doc:
@@ -138,20 +162,39 @@ def _class_lines(cls):
     if doc:
         lines += _docstring_lines(doc)
 
-    for attr_name in dir(cls):
+    import enum
+    is_enum = isinstance(cls, enum.EnumType)
+    if is_enum:
+        # Members as a stub spells them, in their order.
+        lines += ["    " + name + " = " + repr(member.value) for name, member in cls.__members__.items()]
+    else:
+        # Constants, which are read as they are.
+        constants = [name for name, value in vars(cls).items()
+                     if not name.startswith('_') and type(value) in (bool, int, float, str)]
+        lines += ["    " + name + ": " + type(vars(cls)[name]).__name__ for name in constants]
+        # Attributes the class declares, `step: int`, as written.
+        lines += ["    " + name + ": " + text for name, text in _own_annotations(cls).items()
+                  if not name.startswith('_') and name not in constants]
+
+    # An enum's own methods only: a StrEnum would list all of str's.
+    for attr_name in (list(vars(cls)) if is_enum else dir(cls)):
         if attr_name.startswith('_'):
+            continue
+        # Likewise what a subclass of `str` inherits: a type checker knows
+        # `str`'s, and some of it has no signature to write.
+        if _is_core_builtin(_defining_class(cls, attr_name)) and not _is_core_builtin(cls):
             continue
         try:
             attr = getattr(cls, attr_name)
         except:
             continue
-        if not callable(attr):
+        if not callable(attr) or (is_enum and isinstance(attr, cls)):
             continue
 
         # A blank line separates members, but not the first one from its class.
         if len(lines) > 1:
             lines.append("")
-        lines += _callable_lines(attr, fallback_name=attr_name, indent="    ")
+        lines += _callable_lines(attr, fallback_name=attr_name, indent="    ", owner=cls)
 
     # An empty class body still needs one, as in a stub file.
     if len(lines) == 1:
@@ -175,6 +218,15 @@ def _available_modules():
     names.update([name for name, module in list(sys.modules.items()) if module is not None])
     names.update(_imp._frozen_module_names())
     names.update([info.name for info in pkgutil.iter_modules()])
+    names.update(_namespace_packages(sys.path))
+    names.update(_user_modules())
+    return sorted([
+        name for name in names
+        if '.' not in name and not name.startswith('_') and name.isidentifier()
+    ])
+
+
+def _user_directories():
     # SwiftPy's source importer also searches these locations outside sys.path.
     import os
     from pathlib import Path
@@ -185,15 +237,59 @@ def _available_modules():
         directories.extend([os.path.join(site, entry) for entry in os.listdir(site) if os.path.isdir(os.path.join(site, entry))])
     except OSError:
         pass
-    for directory in directories:
+    return directories
+
+
+def _user_modules():
+    import os
+    names = set()
+    for directory in _user_directories():
         try:
             names.update([entry[:-3] for entry in os.listdir(directory) if entry.endswith('.py') and os.path.isfile(os.path.join(directory, entry))])
         except OSError:
             pass
-    return sorted([
-        name for name in names
-        if '.' not in name and not name.startswith('_') and name.isidentifier()
-    ])
+    return names
+
+
+def _is_user_module(name, directories):
+    # Imported from the user's folders, as a package in site-packages is.
+    import sys
+    spec = getattr(sys.modules.get(name), '__spec__', None)
+    locations = [getattr(spec, 'origin', None) or ""] + list(getattr(spec, 'submodule_search_locations', None) or [])
+    return any([location.startswith(directory) for location in locations for directory in directories])
+
+
+def _app_modules():
+    # What the app registers and bundles: neither Python's own nor the user's.
+    registered = set(_registered_modules())
+    stdlib = set(_stdlib_modules())
+    user = _user_modules()
+    directories = _user_directories()
+    return [name for name in _available_modules()
+            if name in registered or (name not in stdlib and name not in user and not _is_user_module(name, directories))]
+
+
+def _namespace_packages(paths):
+    # iter_modules skips a package without __init__.py, such as mlx in its zip.
+    try:
+        import os
+        import zipfile
+    except ImportError:
+        return set()
+    names = set()
+    for path in paths:
+        try:
+            if zipfile.is_zipfile(path):
+                with zipfile.ZipFile(path) as archive:
+                    names.update([entry.split('/')[0] for entry in archive.namelist() if '/' in entry])
+            elif os.path.isdir(path):
+                names.update([entry for entry in os.listdir(path)
+                              if os.path.isdir(os.path.join(path, entry))
+                              and not os.path.exists(os.path.join(path, entry, '__init__.py'))
+                              and any(name.endswith('.py') for name in os.listdir(os.path.join(path, entry)))])
+        except OSError:
+            pass
+    return names
 
 
 def _code_docstring(code):
@@ -271,15 +367,51 @@ def _modules_lines():
     return lines
 
 
-def _resolve_name(name):
+def _reference_name(name):
+    # The name a ``reference`` its pages write stands for: ``views.Text/align(alignment)``
+    # is views.Text.align.
+    if name.endswith(")") and "(" in name:
+        name = name[:name.index("(")]
+    return name.replace("/", ".")
+
+
+def _resolve_name(name, import_submodules=True):
     parts = name.split('.')
     try:
         obj = __import__(parts[0])
     except ImportError:
         obj = getattr(__import__('builtins'), parts[0])
-    for part in parts[1:]:
-        obj = getattr(obj, part)
+    for index, part in enumerate(parts[1:], start=2):
+        try:
+            obj = getattr(obj, part)
+        except AttributeError:
+            # A submodule its package leaves to be imported, as PIL does Image.
+            if not import_submodules or not hasattr(obj, '__path__'):
+                raise
+            import importlib
+            obj = importlib.import_module('.'.join(parts[:index]))
     return obj
+
+
+def _is_submodule(name):
+    # Found without importing it: a link must not run a module's code.
+    parent = name.rpartition('.')[0]
+    try:
+        import importlib.util
+        return hasattr(_resolve_name(parent, False), '__path__') and importlib.util.find_spec(name) is not None
+    except (ImportError, AttributeError, ValueError):
+        return False
+
+
+def _owner_of(path):
+    # The class a dotted path's last name is a member of, if it is one.
+    if "." not in path:
+        return None
+    try:
+        parent = _resolve_name(path.rsplit(".", 1)[0])
+    except (ImportError, AttributeError):
+        return None
+    return parent if isinstance(parent, type) else None
 
 
 # Topics help documents without resolving a name for them. Hosts can add
@@ -307,10 +439,10 @@ def _is_reference(name):
         return True
 
     try:
-        _resolve_name(name)
+        _resolve_name(name, False)
         return True
     except (ImportError, AttributeError):
-        return False
+        return _is_submodule(name)
 
 
 def _module_members(module):
@@ -365,6 +497,277 @@ def _module_lines(module):
     return lines
 
 
+def _stub_lines(module):
+    # Readable, not yet resolvable: `_typed_stub` adds the imports.
+    lines = []
+    doc = getattr(module, '__doc__', None)
+    if doc:
+        lines = _docstring_lines(doc, indent="") + [""]
+
+    classes, functions = _module_members(module)
+    for _, cls in classes:
+        # A builtin SwiftPy adds is re-exported from its own stub, not copied:
+        # a copy would be a second class of the same name.
+        if cls.__module__ == 'builtins':
+            continue
+        lines += _class_lines(cls) + [""]
+
+    for name, function in functions:
+        overloads = _overloads_of(function)
+        for entry in overloads or [function]:
+            if overloads:
+                lines.append("@overload")
+            lines.append(_without_trailing_colon(_callable_definition(entry, name)) + ": ...")
+        lines.append("")
+
+    # What `__all__` leaves out still resolves: classes as classes, the rest
+    # declared by the type it holds now.
+    listed = [n for n, _ in classes + functions]
+    for name in dir(module):
+        if name.startswith('_') or name in listed:
+            continue
+        try:
+            value = getattr(module, name)
+        except Exception:
+            continue
+        if isinstance(value, type(module)):
+            continue
+        # An import, `Any` or `Callable`, is declared by the module it is from.
+        origin = getattr(value, '__module__', None)
+        if origin not in (None, module.__name__) and not getattr(value, '_interface', None):
+            continue
+        if isinstance(value, type):
+            lines += _class_lines(value) + [""]
+            continue
+        # A `type` alias, such as `views.Length`, is usable in annotations.
+        if type(value).__name__ == 'TypeAliasType':
+            lines += ["type " + name + " = " + _alias_value(value), ""]
+            continue
+        kind = type(value).__name__
+        plain = ('bool', 'int', 'float', 'str', 'bytes', 'list', 'dict', 'tuple', 'set')
+        lines.append(name + ": " + (kind if kind in plain else "Any"))
+    return lines
+
+
+def _alias_value(alias):
+    # As written, `float | LengthExpression`, rather than its evaluated repr.
+    try:
+        import annotationlib
+        return annotationlib.call_evaluate_function(alias.evaluate_value, annotationlib.Format.STRING)
+    except Exception:
+        return "Any"
+
+
+def _without_swift_syntax(text):
+    # Interfaces are written for reading: `any P` is Swift's, not Python's.
+    import io, tokenize
+    tokens = list(tokenize.generate_tokens(io.StringIO(text).readline))
+    kept = [
+        token for index, token in enumerate(tokens)
+        if not (token.type == tokenize.NAME and token.string == 'any'
+                and index + 1 < len(tokens) and tokens[index + 1].type == tokenize.NAME)
+    ]
+    return tokenize.untokenize([(token.type, token.string) for token in kept])
+
+
+def _typed_stub(tree, module_name, classes, swift_builtins=()):
+    """Makes a stub's names resolve: `typing`'s and other stubs' are imported,
+    and what only Swift knows, a `UInt64` or a `View`, becomes `Any`."""
+    import ast, builtins, enum, sys, typing
+
+    module = sys.modules.get(module_name)
+    defined = {node.name for node in tree.body if isinstance(node, (ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef))}
+    defined |= {node.name.id for node in tree.body if isinstance(node, ast.TypeAlias)}
+    defined |= {node.target.id for node in tree.body
+                if isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name)}
+    imports = {}
+
+    def resolves(name):
+        if name in defined:
+            return True
+        if name in swift_builtins:
+            imports.setdefault('_swiftpy_builtins', set()).add(name)
+            return True
+        if hasattr(builtins, name):
+            return True
+        if name in typing.__all__:
+            imports.setdefault('typing', set()).add(name)
+            return True
+        if name in enum.__all__:
+            imports.setdefault('enum', set()).add(name)
+            return True
+        owner = classes.get(name)
+        if owner and owner != module_name:
+            imports.setdefault(owner, set()).add(name)
+            return True
+        # A class the module imported from the standard library, `os.PathLike`
+        # for one, which a type checker has stubs for.
+        value = getattr(module, name, None)
+        origin = getattr(value, '__module__', None)
+        if isinstance(value, type) and origin and origin.split('.')[0] in sys.stdlib_module_names:
+            imports.setdefault(origin, set()).add(name)
+            return True
+        return False
+
+    class Annotation(ast.NodeTransformer):
+        def visit_Name(self, node):
+            return node if resolves(node.id) else ast.copy_location(ast.Name('Any'), node)
+
+        def visit_Attribute(self, node):
+            # `_agents.Tool`, as inspect writes a class by its module: by its
+            # name, where that resolves.
+            if isinstance(node.ctx, ast.Load) and _dotted(node.value) and (
+                    node.attr in defined or node.attr in classes):
+                if resolves(node.attr):
+                    return ast.copy_location(ast.Name(node.attr), node)
+            root = node
+            while isinstance(root, ast.Attribute):
+                root = root.value
+            if isinstance(root, ast.Name) and resolves(root.id):
+                return node
+            return ast.copy_location(ast.Name('Any'), node)
+
+    def typed(annotation):
+        return Annotation().visit(annotation) if annotation is not None else None
+
+    def _dotted(node):
+        while isinstance(node, ast.Attribute):
+            node = node.value
+        return isinstance(node, ast.Name)
+
+    def visit(body):
+        counts = {}
+        for node in body:
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                counts[node.name] = counts.get(node.name, 0) + 1
+        for node in body:
+            if isinstance(node, ast.ClassDef):
+                node.bases = [base for base in node.bases
+                              if not isinstance(base, ast.Name) or resolves(base.id)]
+                visit(node.body)
+            elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                # An overload stands for one of several; alone, it's the function.
+                if counts[node.name] == 1:
+                    node.decorator_list = [d for d in node.decorator_list
+                                           if not (isinstance(d, ast.Name) and d.id == 'overload')]
+                else:
+                    resolves('overload')
+                arguments = node.args
+                for argument in arguments.posonlyargs + arguments.args + arguments.kwonlyargs + [arguments.vararg, arguments.kwarg]:
+                    if argument is not None:
+                        argument.annotation = typed(argument.annotation)
+                node.returns = typed(node.returns)
+            elif isinstance(node, ast.AnnAssign):
+                node.annotation = typed(node.annotation)
+            elif isinstance(node, ast.TypeAlias):
+                node.value = typed(node.value)
+
+    tree.body = [node for node in tree.body if not isinstance(node, (ast.Import, ast.ImportFrom))]
+    visit(tree.body)
+    resolves('Any')
+    # SwiftPy's builtins as re-exports, for a module that lists one.
+    header = [
+        ast.ImportFrom(module=module, names=[
+            ast.alias(name, name if module == '_swiftpy_builtins' else None) for name in sorted(names)
+        ], level=0)
+        for module, names in sorted(imports.items())
+    ]
+    docstring = tree.body[:1] if tree.body and isinstance(tree.body[0], ast.Expr) else []
+    tree.body = docstring + header + tree.body[len(docstring):]
+    return ast.unparse(ast.fix_missing_locations(tree)) + "\n"
+
+
+def _stubs():
+    """Stub files for the modules Swift registers, which have no source for a
+    type checker to read: `{path: text}`, a package where one has submodules."""
+    import ast
+    sources, drafts = _stub_drafts()
+    # What SwiftPy adds to builtins, `View` for one; a type checker reads
+    # extra builtins from this file.
+    import builtins
+    # CPython's own are static types, but for exceptions it makes at start;
+    # one made at runtime is a heap type.
+    heap_type = 1 << 9
+    bound = {name: obj for name, obj in vars(builtins).items()
+             if isinstance(obj, type) and not name.startswith('_')
+             and getattr(obj, '__flags__', 0) & heap_type
+             and not issubclass(obj, BaseException)}
+    # In a module of their own, which stubs can import: the builtins file
+    # only reaches the code being checked.
+    if bound:
+        lines = sum([_class_lines(cls) + [""] for cls in bound.values()], [])
+        drafts["_swiftpy_builtins.pyi"] = ("_swiftpy_builtins", "\n".join(lines))
+    trees = {}
+    for path, (module_name, text) in drafts.items():
+        try:
+            trees[path] = (module_name, ast.parse(_without_swift_syntax(text)))
+        except (SyntaxError, ValueError):
+            continue
+    classes = _class_owners(trees)
+    stubs = {path: _typed_stub(tree, module_name, classes, set(bound))
+             for path, (module_name, tree) in trees.items()}
+    # SwiftPy's own `help`, a function, rather than typeshed's `_Helper` instance.
+    builtins_stub = "def help(obj: object = None) -> object:\n    " + repr(help.__doc__) + "\n"
+    if bound:
+        names = ", ".join(name + " as " + name for name in sorted(bound))
+        builtins_stub = "from _swiftpy_builtins import " + names + "\n" + builtins_stub
+    stubs["__builtins__.pyi"] = builtins_stub
+    stubs.update(sources)
+    return stubs
+
+
+def _class_owners(trees):
+    # Which module a class can be imported from: the public one, where a
+    # module such as `agents` re-exports its private `_agents`' classes, so a
+    # subclass elsewhere and the public module's annotations name the same one.
+    import ast
+    classes = {}
+    for path, (module_name, tree) in sorted(trees.items()):
+        for node in tree.body:
+            if isinstance(node, ast.ClassDef):
+                name = node.name
+            elif isinstance(node, ast.TypeAlias):
+                name = node.name.id
+            else:
+                continue
+            owner = classes.get(name)
+            if owner is None or (owner.startswith('_') and owner[1:] == module_name):
+                classes[name] = module_name
+    return classes
+
+
+def _stub_drafts():
+    # Source as it is, `{path: text}`; stubs as drafts, `{path: (module, text)}`.
+    import importlib
+    names = sorted(_registered_modules())
+    sources, stubs = {}, {}
+    for name in names:
+        # Private, unless it backs the public module of its name, as `_json`
+        # does `json`: that one imports from it.
+        if name.startswith('_') and name[1:] not in names:
+            continue
+        try:
+            module = importlib.import_module(name)
+        except Exception:
+            continue
+        # Python source reads better than anything rebuilt from it.
+        path = getattr(module, '__file__', None) or ""
+        is_package = any(other.startswith(name + ".") for other in names)
+        stem = name.replace(".", "/") + ("/__init__" if is_package else "")
+        if path.endswith(".py"):
+            try:
+                with open(path) as file:
+                    sources[stem + ".py"] = file.read()
+                continue
+            except OSError:
+                pass
+        try:
+            stubs[stem + ".pyi"] = (name, "\n".join(_stub_lines(module)) + "\n")
+        except Exception:
+            continue
+    return sources, stubs
+
+
 _help_text = None
 
 
@@ -390,6 +793,7 @@ def _help_lines(obj):
             return [document]
         if obj == "modules":
             return _modules_lines()
+        obj = _reference_name(obj)
 
         try:
             resolved = _resolve_name(obj)
@@ -402,7 +806,7 @@ def _help_lines(obj):
         if callable(resolved):
             # A native function carries no `__name__`, so without the name it
             # was looked up by it prints as its repr.
-            return _callable_lines(resolved, fallback_name=obj.split('.')[-1])
+            return _callable_lines(resolved, fallback_name=obj.split('.')[-1], owner=_owner_of(obj))
         return _class_lines(type(resolved))
 
     if isinstance(obj, module_type):
@@ -532,45 +936,198 @@ def _parameter_description(line, parameter_names):
     return (name, line[cut + 1:].strip())
 
 
-def _doc_sections(doc, parameter_names):
+def _rst_inline(text):
+    # reST's ``literal`` and :meth:`name` roles, as the plain code spans markdown
+    # has. pocketpy has no `re`, so the roles are found by hand.
+    text = text.replace("``", "`")
+    out = ""
+    index = 0
+    while True:
+        tick = text.find(":`", index)
+        if tick == -1:
+            break
+        start = tick
+        while start > index and (text[start - 1].isalpha() or text[start - 1] == ":"):
+            start -= 1
+        if start < tick and text[start] == ":":
+            out += text[index:start] + "`"
+            index = tick + 2
+            # `~a.b` shows as `b` in Sphinx; the full path reads fine here.
+            if text[index:index + 1] == "~":
+                index += 1
+        else:
+            out += text[index:tick + 2]
+            index = tick + 2
+    return out + text[index:]
+
+
+# Google style section headings, by what they hold.
+_parameter_headings = ("Args:", "Arguments:", "Parameters:", "Params:", "Keyword Args:",
+                       "Keyword Arguments:", "Other Parameters:")
+_return_headings = ("Returns:", "Return:", "Yields:", "Yield:")
+_raise_headings = ("Raises:", "Raise:")
+
+
+def _indent_of(line):
+    return len(line) - len(line.lstrip())
+
+
+def _google_item(text):
+    # `name (type): description` or `name: description`, the type dropped:
+    # the signature shows it.
+    cut = text.find(":")
+    if cut <= 0:
+        return None
+    name = text[:cut].strip()
+    paren = name.find("(")
+    if paren != -1:
+        name = name[:paren].strip()
+    if not name.lstrip("*").replace("_", "a").replace(".", "a").isalnum():
+        return None
+    return (name, text[cut + 1:].strip())
+
+
+def _rst_field(text):
+    # `:param name: ...`, `:returns: ...`, `:raises Error: ...`, as
+    # (kind, name, description); `:type` and `:rtype` come back as "skip".
+    if not text.startswith(":"):
+        return None
+    cut = text.find(":", 1)
+    if cut == -1:
+        return None
+    words = text[1:cut].split()
+    if not words:
+        return None
+    description = text[cut + 1:].strip()
+    kind = words[0]
+    if kind in ("param", "parameter", "arg", "argument", "key", "keyword") and len(words) > 1:
+        return ("parameter", words[-1], description)
+    if kind in ("returns", "return", "yields", "yield"):
+        return ("returns", None, description)
+    if kind in ("raises", "raise", "except", "exception"):
+        return ("raises", words[-1] if len(words) > 1 else "", description)
+    if kind in ("type", "rtype", "vartype"):
+        return ("skip", None, None)
+    return None
+
+
+def _doc_parts(doc, parameter_names):
+    """A docstring as its summary, parameters, return value, raised errors and
+    discussion: `name: description` lines, Google style sections and reST
+    fields all read the same."""
     if not doc:
-        return None, [], []
+        return None, [], None, [], []
 
     lines = _dedented(doc)
 
     summary = []
     index = 0
     while index < len(lines) and lines[index].strip():
-        summary.append(lines[index].strip())
+        summary.append(_rst_inline(lines[index].strip()))
         index += 1
 
     parameters = []
+    returns = []
+    raises = []
     discussion = []
-    # A line directly under a parameter carries on its description; a blank
-    # line ends it, so prose after the parameters stays discussion.
-    in_parameter = False
+    # Where a continuation line goes: the last item's description, or nowhere.
+    target = None
+    section = None
+    section_indent = 0
+    item_indent = None
+    in_fence = False
+
+    def append(text):
+        # Carries a description on into the line below it.
+        kind, items = target
+        if kind == "returns":
+            returns.append(text)
+        elif kind != "skip":
+            name, description = items[-1]
+            items[-1] = (name, (description + " " + text).strip())
+
     for line in lines[index:]:
         stripped = line.strip()
-        parameter = _parameter_description(stripped, parameter_names)
+        indent = _indent_of(line)
 
-        if parameter:
-            parameters.append(parameter)
-            in_parameter = True
-        elif not stripped:
-            in_parameter = False
-            discussion.append("")
-        elif in_parameter:
-            name, description = parameters[-1]
-            parameters[-1] = (name, description + " " + stripped)
-        else:
+        if stripped.startswith("```"):
+            in_fence = not in_fence
+        if in_fence or stripped.startswith("```"):
+            section = target = None
             discussion.append(line)
+            continue
+
+        if section is not None:
+            if not stripped:
+                continue
+            if indent > section_indent:
+                if section == "returns":
+                    returns.append(_rst_inline(stripped))
+                    continue
+                if item_indent is None:
+                    item_indent = indent
+                if indent == item_indent:
+                    item = _google_item(stripped)
+                    if item is None and section == "raises":
+                        item = (stripped, "")
+                    if item is not None:
+                        items = parameters if section == "parameters" else raises
+                        items.append((item[0], _rst_inline(item[1])))
+                        target = (section, items)
+                        continue
+                if target is not None:
+                    append(_rst_inline(stripped))
+                    continue
+            section = None
+
+        if stripped in _parameter_headings + _return_headings + _raise_headings:
+            section = ("parameters" if stripped in _parameter_headings
+                       else "returns" if stripped in _return_headings else "raises")
+            section_indent = indent
+            item_indent = None
+            target = ("returns", None) if section == "returns" else None
+            continue
+
+        field = _rst_field(stripped)
+        if field is not None:
+            kind, name, description = field
+            if kind == "parameter":
+                parameters.append((name, _rst_inline(description)))
+                target = ("parameters", parameters)
+            elif kind == "raises":
+                raises.append((name, _rst_inline(description)))
+                target = ("raises", raises)
+            elif kind == "returns":
+                returns.append(_rst_inline(description))
+                target = ("returns", None)
+            else:
+                target = ("skip", None)
+            continue
+
+        parameter = _parameter_description(stripped, parameter_names)
+        if parameter:
+            parameters.append((parameter[0], _rst_inline(parameter[1])))
+            target = ("parameters", parameters)
+        elif not stripped:
+            target = None
+            discussion.append("")
+        elif target is not None:
+            append(_rst_inline(stripped))
+        else:
+            target = None
+            discussion.append(_rst_inline(line))
 
     while discussion and not discussion[0].strip():
         discussion.pop(0)
     while discussion and not discussion[-1].strip():
         discussion.pop()
 
-    return " ".join(summary), parameters, discussion
+    return " ".join(summary), parameters, " ".join(returns) or None, raises, discussion
+
+
+def _doc_sections(doc, parameter_names):
+    summary, parameters, _, _, discussion = _doc_parts(doc, parameter_names)
+    return summary, parameters, discussion
 
 
 def _without_trailing_colon(text):
@@ -627,7 +1184,7 @@ def _owning_module_name(path):
 
 
 def _doc_markdown(doc, definition):
-    summary, parameters, discussion = _doc_sections(
+    summary, parameters, returns, raises, discussion = _doc_parts(
         doc, _parameter_names(definition)
     )
 
@@ -636,6 +1193,14 @@ def _doc_markdown(doc, definition):
         lines += ["", "## Parameters", ""]
         for name, description in parameters:
             lines.append("- `" + name + "`: " + description)
+
+    if returns:
+        lines += ["", "## Return Value", "", returns]
+
+    if raises:
+        lines += ["", "## Raises", ""]
+        for name, description in raises:
+            lines.append("- `" + name + "`" + (": " + description if description else ""))
 
     if discussion:
         lines += ["", "## Discussion", ""] + discussion
@@ -661,8 +1226,8 @@ def _overload_sections(overloads, definitions):
     return lines
 
 
-def _function_markdown(obj, fallback_name=None, parent_path=None):
-    definitions = _callable_definitions(obj, fallback_name)
+def _function_markdown(obj, fallback_name=None, parent_path=None, owner=None):
+    definitions = _callable_definitions(obj, fallback_name, owner)
 
     lines = []
     if parent_path:
@@ -699,12 +1264,67 @@ def _parent_reference_path(path):
     return parent.rsplit('.', 1)[0] + "/" + parent.rsplit('.', 1)[1] if "." in parent else parent
 
 
-def _modules_markdown():
+def _module_table(names):
     lines = ["| Module | Description |", "| --- | --- |"]
-    for name in _available_modules():
+    for name in names:
         doc = _module_doc(name) or ""
         # A pipe in a summary would end the cell early.
         lines.append("| " + _reference_markdown(name) + " | " + doc.replace("|", "\\|") + " |")
+    return lines
+
+
+def _stdlib_modules():
+    # Python's own, as the interpreter names them; empty where it doesn't.
+    import sys
+    stdlib = getattr(sys, 'stdlib_module_names', frozenset())
+    return [name for name in _available_modules() if name in stdlib]
+
+
+def _module_groups():
+    # The app's own modules, what it bundles besides, and Python's.
+    from interpreter.native import app_name
+    registered = set(_registered_modules())
+    stdlib = set(_stdlib_modules())
+    groups = {app_name(): [], "Other modules": [], "Standard library": []}
+    titles = list(groups)
+    for name in _available_modules():
+        if name in stdlib:
+            groups[titles[2]].append(name)
+        elif name in registered:
+            groups[titles[0]].append(name)
+        else:
+            groups[titles[1]].append(name)
+    return [(title, names) for title, names in groups.items() if names]
+
+
+def _modules_markdown():
+    lines = []
+    for title, names in _module_groups():
+        lines += ["## " + title, ""] + _module_table(names) + [""]
+    return lines
+
+
+def _submodules(module):
+    # A package's public modules, read from where it lives, a zip too.
+    path = getattr(module, '__path__', None)
+    if path is None:
+        return []
+    import pkgutil
+    import sys
+    names = set([info.name for info in pkgutil.iter_modules(path)])
+    # Built into the binary rather than found beside it, as mlx.core is.
+    prefix = module.__name__ + "."
+    names.update([builtin[len(prefix):] for builtin in sys.builtin_module_names
+                  if builtin.startswith(prefix) and "." not in builtin[len(prefix):]])
+    return sorted([name for name in names | _namespace_packages(path) if not name.startswith('_')])
+
+
+def _module_entries(module_name, names):
+    lines = []
+    for name in names:
+        path = module_name + "." + name
+        doc = _module_doc(path)
+        lines += _listing_entry(module_name, name, ["import " + path], _linked_doc_references(doc) if doc else None)
     return lines
 
 
@@ -715,6 +1335,10 @@ def _module_markdown(module):
     doc = getattr(module, '__doc__', None)
     if doc:
         lines += [doc.strip(), ""]
+
+    submodules = _submodules(module)
+    if submodules:
+        lines += ["## Modules", ""] + _module_entries(name, submodules)
 
     classes, functions = _module_members(module)
 
@@ -799,14 +1423,14 @@ def _class_entries(module_name, classes):
     return lines
 
 
-def _function_entries(owner_path, functions):
+def _function_entries(owner_path, functions, owner=None):
     lines = []
     for member_name, function in functions:
         overloads = getattr(function, '_overloads', None)
         entries = overloads if overloads else [function]
 
         for entry in entries:
-            definition = _callable_definition(entry, member_name)
+            definition = _callable_definition(entry, member_name, owner)
             summary, _, _ = _doc_sections(getattr(entry, '__doc__', None), [])
             signature = _without_trailing_colon(definition)
             declaration = []
@@ -846,10 +1470,20 @@ def _class_methods(cls):
             attr = getattr(cls, attr_name)
         except:
             continue
+        # What a subclass of `str` inherits is `str`'s, which a type checker
+        # knows, and some of it has no signature to write.
+        if _is_core_builtin(_defining_class(cls, attr_name)) and not _is_core_builtin(cls):
+            continue
         if callable(attr):
             methods.append((attr_name, attr))
     methods.sort()
     return methods
+
+
+def _is_property(attr):
+    # A native class's are getset descriptors. `property` isn't a name to
+    # compare against here.
+    return type(attr).__name__ in ('property', 'getset_descriptor')
 
 
 def _class_property_names(cls):
@@ -857,12 +1491,14 @@ def _class_property_names(cls):
     for attr_name in dir(cls):
         if attr_name.startswith('_'):
             continue
+        # What an exception or a `str` subclass inherits, `args` for one.
+        if _is_core_builtin(_defining_class(cls, attr_name)) and not _is_core_builtin(cls):
+            continue
         try:
             attr = getattr(cls, attr_name)
         except:
             continue
-        # `property` isn't a name to compare against here.
-        if type(attr).__name__ == 'property':
+        if _is_property(attr):
             names.append(attr_name)
 
     for attr_name in _class_annotations(cls):
@@ -879,11 +1515,26 @@ def _class_annotations(cls):
     try:
         import annotationlib
     except ImportError:
-        return getattr(cls, '__annotations__', None) or {}
+        return getattr(cls, '__annotations__', None) or _interface_annotations(cls)
     try:
-        return annotationlib.get_annotations(cls, format=annotationlib.Format.STRING)
+        return annotationlib.get_annotations(cls, format=annotationlib.Format.STRING) or _interface_annotations(cls)
     except Exception:
+        return _interface_annotations(cls)
+
+
+def _interface_annotations(cls):
+    # A native class declares its properties only in its stub, `    value: float`.
+    interface = getattr(cls, '_interface', None)
+    if not isinstance(interface, str):
         return {}
+    import re
+    annotations = {}
+    for line in interface.splitlines():
+        match = re.fullmatch(r"    ([A-Za-z_]\w*): (.+)", line)
+        # A docstring's `    Note: ...` matches too, but isn't a property.
+        if match and match.group(1) not in annotations and _is_property(getattr(cls, match.group(1), None)):
+            annotations[match.group(1)] = match.group(2)
+    return annotations
 
 
 def _property_declaration(cls, name):
@@ -892,7 +1543,9 @@ def _property_declaration(cls, name):
 
 
 def _property_summary(cls, name):
-    getter = getattr(getattr(cls, name, None), 'fget', None)
+    prop = getattr(cls, name, None)
+    # A getset descriptor's docstring is its own; a property's is its getter's.
+    getter = prop if type(prop).__name__ == 'getset_descriptor' else getattr(prop, 'fget', None)
     # An annotation-only name has no getter, and None has a docstring.
     if getter is None:
         return None
@@ -967,7 +1620,13 @@ def _class_markdown(cls, path=None):
     if parent_path:
         lines += [_reference_markdown(parent_path), ""]
 
-    lines += _fenced([header])
+    import enum
+    if isinstance(cls, enum.EnumType) and cls.__members__:
+        # An enum's definition, with its cases.
+        lines += _fenced([header + ":"] + ["    " + name + " = " + repr(member.value)
+                                           for name, member in cls.__members__.items()])
+    else:
+        lines += _fenced([header])
     lines.append("")
 
     summary = _class_summary(cls)
@@ -980,13 +1639,62 @@ def _class_markdown(cls, path=None):
 
     initializers = _class_initializers(cls)
     if initializers:
-        lines += ["## Initializers", ""] + _function_entries(path, initializers)
+        lines += ["## Initializers", ""] + _function_entries(path, initializers, cls)
 
+    # Inherited ones are linked to where they're documented, rather than
+    # repeated: every view would list all of `View`'s modifiers.
     methods = _class_methods(cls)
-    if methods:
-        lines += ["## Functions", ""] + _function_entries(path, methods)
+    owners = []
+    for name, _ in methods:
+        owner = _defining_class(cls, name)
+        if owner is not cls and owner not in owners:
+            owners.append(owner)
+    own = [(name, method) for name, method in methods if _defining_class(cls, name) is cls]
+    if own or owners:
+        lines += ["## Functions", ""] + _function_entries(path, own, cls)
+    if owners:
+        links = [_reference_markdown(_class_reference_path(owner)) for owner in owners]
+        joined = links[0] if len(links) == 1 else ", ".join(links[:-1]) + " and " + links[-1]
+        lines += ["Inherits the functions of " + joined + ".", ""]
 
     return lines
+
+
+def _own_annotations(cls):
+    # The class's own, not its bases', as strings: `list[Diagnostic]`.
+    try:
+        import annotationlib
+        return dict(annotationlib.get_annotations(cls, format=annotationlib.Format.STRING))
+    except Exception:
+        return {}
+
+
+def _is_core_builtin(cls):
+    # CPython's own, `str` or `object`: static types, where what SwiftPy adds
+    # to builtins, `View` for one, is made at runtime.
+    heap_type = 1 << 9
+    return (getattr(cls, '__module__', None) == 'builtins'
+            and not getattr(cls, '__flags__', heap_type) & heap_type)
+
+
+def _defining_class(cls, name):
+    # The nearest class in the MRO that declares `name` itself.
+    for klass in getattr(cls, '__mro__', (cls,)):
+        try:
+            if name in vars(klass):
+                return klass
+        except TypeError:
+            continue
+    return cls
+
+
+def _class_reference_path(cls):
+    builtin = _builtin_class_path(cls)
+    if builtin:
+        return builtin
+    module = getattr(cls, '__module__', None)
+    name = getattr(cls, '__qualname__', None) or cls.__name__
+    return module + "/" + name if module else name
 
 
 def _markdown_lines(obj):
@@ -1002,6 +1710,7 @@ def _markdown_lines(obj):
             return [document]
         if obj == "modules":
             return _modules_markdown()
+        obj = _reference_name(obj)
 
         try:
             resolved = _resolve_name(obj)
@@ -1015,11 +1724,12 @@ def _markdown_lines(obj):
             return _function_markdown(
                 resolved,
                 fallback_name=obj.split('.')[-1],
-                parent_path=_parent_reference_path(obj)
+                parent_path=_parent_reference_path(obj),
+                owner=_owner_of(obj)
             )
         # A property documents itself; the class it is reached through is what
         # declares it.
-        if type(resolved).__name__ == 'property' and "." in obj:
+        if _is_property(resolved) and "." in obj:
             return _property_markdown(obj)
         # An instance is documented by the class it is of.
         return _class_markdown(type(resolved))

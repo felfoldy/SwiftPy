@@ -6,7 +6,10 @@ does. The loop is therefore always "running", the way it is in a notebook.
 """
 
 import builtins
+import functools
+import itertools
 import sys
+import threading
 import time
 import traceback
 import warnings
@@ -20,7 +23,7 @@ from asyncio import events
 
 import _swiftpy_loop as _native
 
-__all__ = ["SwiftEventLoop", "loop"]
+__all__ = ["SwiftEventLoop", "loop", "stoppable"]
 
 
 class SwiftEventLoop(asyncio.AbstractEventLoop):
@@ -161,7 +164,56 @@ def fail(future, type_name, message):
 def _install_on_this_thread():
     """The running loop is kept per thread; this one runs on every thread
     Python runs on, so each of them is told."""
+    global _cell_thread
+    _cell_thread = threading.get_ident()
     events._set_running_loop(loop)
+
+
+_cell_thread = None
+_tokens = itertools.count()
+
+
+def stoppable(function):
+    """Makes a blocking call stoppable: on the cell's thread, it runs on a
+    worker thread while the cell waits, so a stop ends the wait at once. The
+    call itself carries on until it returns, and its result is dropped.
+
+    For calls that block in C, such as I/O, which a stop otherwise can't
+    reach until they return. The call must be safe to make from another
+    thread and to finish after a stop.
+
+    ```python
+    from interpreter import stoppable
+
+    @stoppable
+    def receive(sock):
+        return sock.recv(4096)
+    ```
+    """
+    @functools.wraps(function)
+    def call(*args, **kwargs):
+        # Only the cell's thread waits in Swift; main can't wait at all.
+        if threading.get_ident() != _cell_thread:
+            return function(*args, **kwargs)
+        token = next(_tokens)
+        outcome = []
+
+        def work():
+            try:
+                outcome.append((True, function(*args, **kwargs)))
+            except BaseException as error:
+                outcome.append((False, error))
+            finally:
+                _native.finish(token)
+
+        threading.Thread(target=work, name=getattr(function, "__name__", "stoppable"), daemon=True).start()
+        _native.wait(token)
+        succeeded, value = outcome[0]
+        if succeeded:
+            return value
+        raise value
+
+    return call
 
 
 def _run(main, **kwargs):
@@ -174,4 +226,6 @@ def _run(main, **kwargs):
 loop = SwiftEventLoop()
 events._set_running_loop(loop)
 asyncio.run = _run
+# A C sleep can't be interrupted; this one ends at a stop.
+time.sleep = stoppable(time.sleep)
 asyncio.AsyncTask = _native.AsyncTask

@@ -74,7 +74,10 @@ public extension PyBind {
     @usableFromInline
     internal static func wait(for task: AsyncTask) throws(PythonError) -> Any? {
         #if cpython
-        try PyWait.result { complete in
+        // Started while the caller's stack can still be read, so it marks the
+        // line that waits, as `input()` does.
+        task.resume()
+        return try PyWait.result { complete in
             Task { @MainActor in
                 do {
                     complete(.success(try await task.untilCompletes()))

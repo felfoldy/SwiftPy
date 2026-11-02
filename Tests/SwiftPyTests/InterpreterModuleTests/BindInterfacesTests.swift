@@ -18,6 +18,24 @@ class TestClass4 {
     func testMethod() {}
 }
 
+@Scriptable
+class MarkedTestClass {
+    // MARK: - State
+
+    /// A marked property.
+    var count: Int = 0
+
+    // MARK: - Lifecycle
+
+    /// A marked init.
+    init() {}
+
+    // MARK: - Actions
+
+    /// A marked method.
+    func act() {}
+}
+
 @MainActor
 @Suite(.serialized)
 struct BindInterfacesTests {
@@ -27,7 +45,8 @@ struct BindInterfacesTests {
         PyBind.module("test") { test in
             test.classes(
                 TestClass3.self,
-                TestClass4.self
+                TestClass4.self,
+                MarkedTestClass.self
             )
         }
 
@@ -36,6 +55,19 @@ struct BindInterfacesTests {
         }
     }
     
+    @Test("keeps the docs a MARK comment is written above")
+    func docsBelowMark() async throws {
+        await Interpreter.run("""
+        import test
+        _marked_docs = [test.MarkedTestClass.act.__doc__, test.MarkedTestClass.count.__doc__, test.MarkedTestClass.__init__.__doc__]
+        """)
+
+        #expect(Interpreter.evaluate("_marked_docs[0]") == "A marked method.")
+        #expect(Interpreter.evaluate("_marked_docs[1]") == "A marked property.")
+        let initializer: String? = Interpreter.evaluate("_marked_docs[2]")
+        #expect(initializer?.contains("A marked init.") == true)
+    }
+
     @Test func helpOnModule() async throws {
         await Interpreter.run("""
         import builtins as _b
@@ -53,6 +85,16 @@ struct BindInterfacesTests {
         let output: String = try #require(Interpreter.evaluate("_test_help_out"))
         #expect(output.contains("TestClass3"))
         #expect(output.contains("TestClass4"))
+    }
+
+    @Test func classReportsTheModuleRegisteringItFirst() async throws {
+        await Interpreter.run("""
+        import test, documented_test
+        _class3_module = documented_test.TestClass3.__module__
+        """)
+
+        let module: String = try #require(Interpreter.evaluate("_class3_module"))
+        #expect(module == "test")
     }
 
     @Test func moduleDocsParameterSetsDocstring() async throws {

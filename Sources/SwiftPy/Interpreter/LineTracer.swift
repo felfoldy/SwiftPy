@@ -16,9 +16,7 @@ public final class LineTracer: Sendable {
         public let time: Duration
 
         public var contextId: UInt64? {
-            let prefix = "<script>/"
-            guard source.hasPrefix(prefix) else { return nil }
-            return UInt64(source.dropFirst(prefix.count))
+            ScriptRuns.runId(for: source)
         }
     }
 

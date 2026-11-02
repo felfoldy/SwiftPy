@@ -29,7 +29,8 @@ public enum ConsoleCommand: Codable, Sendable {
     case complete(token: UUID, lastComponent: String)
     /// Compiles and runs a source in one step, assigning it a fresh context id.
     /// `token` correlates the request with the caller's input card via `started`.
-    case execute(token: UUID, source: String)
+    /// `name` is the filename tracebacks show, `<script>/<id>` without one.
+    case execute(token: UUID, source: String, name: String? = nil)
     /// Cooperatively cancels the awaited work of a running execution.
     case stop(id: UInt64)
 }
@@ -55,6 +56,32 @@ public struct InterpreterEvent: Codable, Sendable {
         /// Acknowledges that a running execution was stopped before completing.
         case stopped
         case attachment(items: [InputAttachment])
+    }
+}
+
+/// A problem a type check found, in its source's lines and columns (1-based).
+public struct Diagnostic: Codable, Sendable, Hashable {
+    public enum Severity: String, Codable, Sendable {
+        case error, warning, note
+    }
+
+    public let line: Int
+    public let column: Int
+    public let endLine: Int
+    public let endColumn: Int
+    public let severity: Severity
+    public let message: String
+    /// The checker's rule, such as `reportAssignmentType`.
+    public let code: String?
+
+    public init(line: Int, column: Int, endLine: Int, endColumn: Int, severity: Severity, message: String, code: String?) {
+        self.line = line
+        self.column = column
+        self.endLine = endLine
+        self.endColumn = endColumn
+        self.severity = severity
+        self.message = message
+        self.code = code
     }
 }
 
