@@ -108,7 +108,7 @@ if let cpython = ProcessInfo.processInfo.environment["SWIFTPY_CPYTHON_PATH"] {
 } else {
     package.dependencies.append(
         // Exact: the fork also carries upstream tags such as v3.14.0.
-        .package(url: "https://github.com/libswiftpy/cpython.git", exact: "3.15.0-swiftpy.1", traits: cpythonTraits)
+        .package(url: "https://github.com/libswiftpy/cpython.git", exact: "3.15.2-swiftpy.1", traits: cpythonTraits)
     )
 }
 
