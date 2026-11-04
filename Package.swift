@@ -26,11 +26,6 @@ let package = Package(
             name: "pocketpy",
             description: "Embed the bundled pocketpy instead of CPython."
         ),
-        .trait(
-            name: "mlx",
-            description: "Build Apple's MLX into CPython as mlx.core. Needs cpython's Swift/build-mlx.sh.",
-            enabledTraits: ["cpython"]
-        ),
         .default(enabledTraits: ["cpython"]),
     ],
     dependencies: [
@@ -95,20 +90,17 @@ let package = Package(
     ]
 )
 
-// cpython's own mlx trait follows this package's.
-let cpythonTraits: Set<Package.Dependency.Trait> = [.defaults, .trait(name: "mlx", condition: .when(traits: ["mlx"]))]
-
 // Only pulled in by the "cpython" trait; SwiftPM prunes it from the graph
 // entirely when the trait is off. The package links a libpython that its own
 // Swift/build.sh stages and does not commit, so a fresh checkout has nothing to
 // link against until that script has been run inside it — point
 // SWIFTPY_CPYTHON_PATH at a local checkout that is already built.
 if let cpython = ProcessInfo.processInfo.environment["SWIFTPY_CPYTHON_PATH"] {
-    package.dependencies.append(.package(path: cpython, traits: cpythonTraits))
+    package.dependencies.append(.package(path: cpython))
 } else {
     package.dependencies.append(
         // Exact: the fork also carries upstream tags such as v3.14.0.
-        .package(url: "https://github.com/libswiftpy/cpython.git", exact: "3.15.2-swiftpy.1", traits: cpythonTraits)
+        .package(url: "https://github.com/libswiftpy/cpython.git", exact: "3.15.2-swiftpy.2")
     )
 }
 

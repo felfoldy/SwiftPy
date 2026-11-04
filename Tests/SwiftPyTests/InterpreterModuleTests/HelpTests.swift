@@ -556,20 +556,30 @@ struct HelpTests {
             #expect(!output.contains("json/__main__"))
         }
 
+        // A module that's neither Python's own nor the user's, as PIL is in an app.
+        private func bundleModule() async {
+            await Interpreter.run("""
+            import sys, types
+            sys.modules['plbundled'] = types.ModuleType('plbundled')
+            """)
+        }
+
         @Test("lists the app's modules, the bundled ones, then the standard library")
         func moduleGroups() async throws {
+            await bundleModule()
             let output = try await markdown(of: "modules")
             let other = try #require(output.range(of: "## Other modules"))
             let stdlib = try #require(output.range(of: "## Standard library"))
 
             #expect(output.hasPrefix("## "))
             #expect(output.range(of: "| ``interpreter`` |")!.lowerBound < other.lowerBound)
-            #expect(output[other.upperBound..<stdlib.lowerBound].contains("| ``PIL`` |"))
+            #expect(output[other.upperBound..<stdlib.lowerBound].contains("| ``plbundled`` |"))
             #expect(output[stdlib.upperBound...].contains("| ``json`` |"))
         }
 
         @Test("counts what the app bundles as its own, apart from the standard library")
         func appModules() async throws {
+            await bundleModule()
             await Interpreter.run("""
             _pl_app = _help_module._app_modules()
             _pl_stdlib = _help_module._stdlib_modules()
@@ -577,11 +587,11 @@ struct HelpTests {
             let app: [String] = try #require(Interpreter.evaluate("_pl_app"))
             let stdlib: [String] = try #require(Interpreter.evaluate("_pl_stdlib"))
 
-            #expect(app.contains("PIL"))
+            #expect(app.contains("plbundled"))
             #expect(app.contains("interpreter"))
             #expect(!app.contains("json"))
             #expect(stdlib.contains("json"))
-            #expect(!stdlib.contains("PIL"))
+            #expect(!stdlib.contains("plbundled"))
         }
 
         @Test("opens a module its package has not imported")
