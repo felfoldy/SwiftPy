@@ -124,6 +124,37 @@ def _json_markdown(value) -> str:
     return json.dumps(value, indent=2)
 
 
+_is_sampling_lines = False
+
+def _start_line_sampler():
+    global _is_sampling_lines
+    if _is_sampling_lines:
+        return
+    _is_sampling_lines = True
+    import _thread
+    # Not a threading.Thread, which a script would see in threading.enumerate().
+    _thread.start_new_thread(_sample_lines, (_thread.get_ident,))
+
+def _sample_lines(get_ident, interval=0.25):
+    """Report the innermost script line of whatever is running, until no run is
+    left to report to. A library's frames are skipped for the line calling it."""
+    global _is_sampling_lines
+    import sys, time
+    from interpreter.native import _line_sampling, _line_sampled
+    me = get_ident()
+    try:
+        while _line_sampling():
+            time.sleep(interval)
+            for ident, frame in sys._current_frames().items():
+                while ident != me and frame is not None:
+                    source = frame.f_code.co_filename
+                    if source.startswith('<script'):
+                        _line_sampled(source, frame.f_lineno)
+                        break
+                    frame = frame.f_back
+    finally:
+        _is_sampling_lines = False
+
 import builtins as _builtins
 
 # pocketpy's builtin dir is incomplete; the module only exists on that backend.

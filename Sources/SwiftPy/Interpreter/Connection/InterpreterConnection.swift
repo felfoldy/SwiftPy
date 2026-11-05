@@ -92,6 +92,8 @@ public struct ExecutionFeedback: Codable, Sendable, Hashable, Identifiable {
         case error
         /// The line that just produced output; a transient flash, not persistent.
         case output
+        /// The line a run is on, as sampled.
+        case running
     }
 
     public let lineNumber: Int

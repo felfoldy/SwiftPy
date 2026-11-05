@@ -62,6 +62,8 @@ public actor LocalInterpreterConnection: InterpreterConnection {
         let code = compiled.code
         let cancellation = RunCancellation()
         running[id] = cancellation
+        await Interpreter.beginLineSampling()
+        defer { Interpreter.endLineSampling() }
         await time(id: id, cancellation: cancellation) {
             try await Interpreter.execute(code)
         }

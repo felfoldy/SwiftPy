@@ -102,6 +102,16 @@ extension Interpreter {
                 }
             }
 
+            module.def("_line_sampling() -> bool") { argc, argv in
+                PyBind.function(argc, argv) { LineSampler.isActive }
+            }
+
+            module.def("_line_sampled(source: str, line: int) -> None") { argc, argv in
+                PyBind.function(argc, argv) { (source: String, line: Int) -> Void in
+                    LineSampler.sampled(source: source, line: line)
+                }
+            }
+
             // What a console cell echoes an expression's value through: a
             // view is presented, anything else prints as its repr.
             module.def("_displayhook(value) -> None") { argc, argv in
