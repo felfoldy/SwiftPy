@@ -151,7 +151,11 @@ def _class_signature(cls):
     return "class " + cls.__name__ + ":"
 
 
-def _class_lines(cls):
+# Python calls these for itself, on a class rather than an instance.
+_hidden_special_methods = ('__init_subclass__', '__class_getitem__', '__subclasshook__')
+
+
+def _class_lines(cls, special_methods=False):
     interface = getattr(cls, '_interface', None)
     if interface:
         return [interface]
@@ -178,7 +182,11 @@ def _class_lines(cls):
 
     # An enum's own methods only: a StrEnum would list all of str's.
     for attr_name in (list(vars(cls)) if is_enum else dir(cls)):
-        if attr_name.startswith('_'):
+        # A stub needs the ones it declares, or `x[0]` reads as unsupported;
+        # `help` reads better without them.
+        is_special = (special_methods and attr_name in vars(cls) and attr_name not in _hidden_special_methods
+                      and attr_name.startswith('__') and attr_name.endswith('__'))
+        if attr_name.startswith('_') and not is_special:
             continue
         # Likewise what a subclass of `str` inherits: a type checker knows
         # `str`'s, and some of it has no signature to write.
@@ -194,6 +202,13 @@ def _class_lines(cls):
         # A blank line separates members, but not the first one from its class.
         if len(lines) > 1:
             lines.append("")
+        # `getattr` binds a classmethod, which loses its `cls`.
+        static = inspect.getattr_static(cls, attr_name, None)
+        if isinstance(static, classmethod):
+            lines.append("    @classmethod")
+            attr = static.__func__
+        elif isinstance(static, staticmethod):
+            lines.append("    @staticmethod")
         lines += _callable_lines(attr, fallback_name=attr_name, indent="    ", owner=cls)
 
     # An empty class body still needs one, as in a stub file.
@@ -510,7 +525,7 @@ def _stub_lines(module):
         # a copy would be a second class of the same name.
         if cls.__module__ == 'builtins':
             continue
-        lines += _class_lines(cls) + [""]
+        lines += _class_lines(cls, special_methods=True) + [""]
 
     for name, function in functions:
         overloads = _overloads_of(function)
@@ -537,7 +552,7 @@ def _stub_lines(module):
         if origin not in (None, module.__name__) and not getattr(value, '_interface', None):
             continue
         if isinstance(value, type):
-            lines += _class_lines(value) + [""]
+            lines += _class_lines(value, special_methods=True) + [""]
             continue
         # A `type` alias, such as `views.Length`, is usable in annotations.
         if type(value).__name__ == 'TypeAliasType':
@@ -695,7 +710,7 @@ def _stubs():
     # In a module of their own, which stubs can import: the builtins file
     # only reaches the code being checked.
     if bound:
-        lines = sum([_class_lines(cls) + [""] for cls in bound.values()], [])
+        lines = sum([_class_lines(cls, special_methods=True) + [""] for cls in bound.values()], [])
         drafts["_swiftpy_builtins.pyi"] = ("_swiftpy_builtins", "\n".join(lines))
     trees = {}
     for path, (module_name, text) in drafts.items():

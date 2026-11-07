@@ -1343,6 +1343,45 @@ struct HelpTests {
             #expect(Interpreter.evaluate("'_swiftpy_asyncio.pyi' in _stubs") == false)
         }
 
+        @Test("keep a Python class's classmethods and staticmethods")
+        func classAndStaticMethods() async {
+            await Interpreter.run("""
+            import ast
+            from interpreter import help as _help_module
+            import interpreter.help as _help
+            class _Methods:
+                @classmethod
+                def made(cls, value: int) -> None: ...
+                @staticmethod
+                def plain(value: int) -> None: ...
+                def method(self) -> None: ...
+            _text = '\\n'.join(_help._class_lines(_Methods))
+            _methods = {node.name: node for node in ast.parse(_text).body[0].body if isinstance(node, ast.FunctionDef)}
+            _arguments = {name: [argument.arg for argument in node.args.args] for name, node in _methods.items()}
+            _decorators = {name: [decorator.id for decorator in node.decorator_list] for name, node in _methods.items()}
+            """)
+            #expect(Interpreter.evaluate("_arguments == {'made': ['cls', 'value'], 'plain': ['value'], 'method': ['self']}") == true)
+            #expect(Interpreter.evaluate("_decorators == {'made': ['classmethod'], 'plain': ['staticmethod'], 'method': []}") == true)
+        }
+
+        @Test("keep the special methods a class defines")
+        func specialMethods() async {
+            await Interpreter.run("""
+            import interpreter.help as _help
+            class _Special:
+                def __init__(self, value: int) -> None: ...
+                def __getitem__(self, key: str) -> int: ...
+                def __init_subclass__(cls) -> None: ...
+                def _private(self) -> None: ...
+            _stub = '\\n'.join(_help._class_lines(_Special, special_methods=True))
+            _help_text = '\\n'.join(_help._class_lines(_Special))
+            """)
+            #expect(Interpreter.evaluate("'def __init__(self, value: int)' in _stub") == true)
+            #expect(Interpreter.evaluate("'def __getitem__(self, key: str)' in _stub") == true)
+            #expect(Interpreter.evaluate("'__init_subclass__' in _stub or '_private' in _stub") == false)
+            #expect(Interpreter.evaluate("'__getitem__' in _help_text") == false)
+        }
+
         @Test("are written for a private module backing a public one")
         func coverBackingModules() async {
             PyBind.module("_backed") { _ in }
