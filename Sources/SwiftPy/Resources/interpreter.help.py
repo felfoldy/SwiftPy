@@ -2,6 +2,13 @@ import inspect
 from interpreter.native import modules as _registered_modules
 
 
+def _docstring(obj):
+    """`obj.__doc__` if it's a string. A C type that defines `__doc__` for its
+    instances, such as `types.BuiltinFunctionType`, gives a descriptor instead."""
+    doc = getattr(obj, '__doc__', None)
+    return doc if isinstance(doc, str) else None
+
+
 def _callable_signature(obj, fallback_name=None):
     interface = getattr(obj, '_interface', None)
     if interface:
@@ -90,11 +97,11 @@ def _callable_definitions(obj, fallback_name=None, owner=None):
 
 
 def _callable_doc(obj):
-    doc = getattr(obj, '__doc__', None)
+    doc = _docstring(obj)
     if doc:
         return doc
     for overload in _overloads_of(obj):
-        doc = getattr(overload, '__doc__', None)
+        doc = _docstring(overload)
         if doc:
             return doc
     return None
@@ -137,7 +144,7 @@ def _docstring_lines(doc, indent="    "):
 def _callable_lines(obj, fallback_name=None, indent="", owner=None):
     definition = indent + _callable_definition(obj, fallback_name, owner)
 
-    doc = getattr(obj, '__doc__', None)
+    doc = _docstring(obj)
     if not doc:
         return [definition + " ..."]
 
@@ -162,7 +169,7 @@ def _class_lines(cls, special_methods=False):
 
     lines = [_class_signature(cls)]
 
-    doc = getattr(cls, '__doc__', None)
+    doc = _docstring(cls)
     if doc:
         lines += _docstring_lines(doc)
 
@@ -331,7 +338,7 @@ def _unimported_module_doc(name):
     if loader is None:
         return None
     if loader is importlib.machinery.BuiltinImporter:
-        return getattr(importlib.import_module(name), '__doc__', None)
+        return _docstring(importlib.import_module(name))
     if hasattr(loader, 'get_code'):
         code = loader.get_code(name)
         if code is not None:
@@ -356,11 +363,11 @@ def _module_doc(name):
         if getattr(getattr(sys, 'implementation', None), 'name', None) == 'cpython':
             module = sys.modules.get(name)
             if module is not None:
-                doc = getattr(module, '__doc__', None)
+                doc = _docstring(module)
             else:
                 doc = _unimported_module_doc(name)
         else:
-            doc = getattr(__import__(name), '__doc__', None)
+            doc = _docstring(__import__(name))
         if doc:
             return doc.strip().split("\n")[0]
     except:
@@ -489,7 +496,7 @@ def _module_lines(module):
     name = getattr(module, '__name__', None) or str(module)
     lines = ["Help on module " + name + ":", ""]
 
-    doc = getattr(module, '__doc__', None)
+    doc = _docstring(module)
     if doc:
         lines.append(doc)
         lines.append("")
@@ -515,7 +522,7 @@ def _module_lines(module):
 def _stub_lines(module):
     # Readable, not yet resolvable: `_typed_stub` adds the imports.
     lines = []
-    doc = getattr(module, '__doc__', None)
+    doc = _docstring(module)
     if doc:
         lines = _docstring_lines(doc, indent="") + [""]
 
@@ -1228,7 +1235,7 @@ def _overload_sections(overloads, definitions):
     for index in range(len(definitions)):
         entry = overloads[index]
         definition = definitions[index]
-        summary, body = _doc_markdown(getattr(entry, '__doc__', None), definition)
+        summary, body = _doc_markdown(_docstring(entry), definition)
 
         if index:
             lines.append("")
@@ -1347,7 +1354,7 @@ def _module_markdown(module):
     name = getattr(module, '__name__', None) or str(module)
     lines = [_reference_markdown("modules"), ""]
 
-    doc = getattr(module, '__doc__', None)
+    doc = _docstring(module)
     if doc:
         lines += [doc.strip(), ""]
 
@@ -1404,7 +1411,7 @@ def _linked_doc_references(text):
 def _class_summary(cls):
     # `@Scriptable` writes the class comment to `__doc__`; a class declared by an
     # interface string keeps its documentation inside the stub instead.
-    doc = getattr(cls, '__doc__', None)
+    doc = _docstring(cls)
     if doc:
         summary, _, _ = _doc_sections(doc, [])
         return _linked_doc_references(summary)
@@ -1446,7 +1453,7 @@ def _function_entries(owner_path, functions, owner=None):
 
         for entry in entries:
             definition = _callable_definition(entry, member_name, owner)
-            summary, _, _ = _doc_sections(getattr(entry, '__doc__', None), [])
+            summary, _, _ = _doc_sections(_docstring(entry), [])
             signature = _without_trailing_colon(definition)
             declaration = []
             if overloads:
@@ -1564,7 +1571,7 @@ def _property_summary(cls, name):
     # An annotation-only name has no getter, and None has a docstring.
     if getter is None:
         return None
-    doc = getattr(getter, '__doc__', None)
+    doc = _docstring(getter)
     if not doc:
         return None
 

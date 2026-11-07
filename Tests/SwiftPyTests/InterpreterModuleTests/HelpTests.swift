@@ -73,6 +73,20 @@ struct HelpTests {
         #expect(Interpreter.evaluate("_readme_is_reference") == true)
     }
 
+    @Test("documents types, whose C types give a descriptor for __doc__")
+    func documentsTypes() async throws {
+        await Interpreter.run("""
+        import interpreter.help as _help_module
+        _types_page = "\\n".join(_help_module._markdown_lines('types'))
+        _types_stub = "\\n".join(_help_module._class_lines(__import__('types').BuiltinFunctionType))
+        """)
+
+        let page: String = try #require(Interpreter.evaluate("_types_page"))
+        #expect(page.contains("BuiltinFunctionType"))
+        let stub: String = try #require(Interpreter.evaluate("_types_stub"))
+        #expect(stub.contains("class"))
+    }
+
     @Suite("no args", .serialized) @MainActor
     struct NoArgs {
         init() async {
