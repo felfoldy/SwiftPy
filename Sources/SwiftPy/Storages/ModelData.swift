@@ -84,6 +84,12 @@ final class ModelHandle: PythonBindable {
         lastJSON = json
     }
 
+    /// The fields as JSON in the store now, which another object or device may
+    /// have written since this one last read them.
+    var storedJson: String {
+        (try? store.row(id: id))?.json ?? lastJSON
+    }
+
     /// The fields as JSON, as last read from or written to the store.
     ///
     /// A write to a row that another device deleted stores it again.

@@ -45,7 +45,7 @@ def _model__repr__(self) -> str:
     args: list = [f"{field}={obj_d[field]!r}" for field in fields if not field.startswith('_')]
     return f"{type(self).__name__}({', '.join(args)})"
 
-def _model_did_change(self):
+def _model_did_change(self, field=None):
     pass
 
 def _make_property(field: str):
@@ -54,7 +54,7 @@ def _make_property(field: str):
 
     def fset(self, value):
         self._fields[field] = value
-        self._did_change()
+        self._did_change(field)
 
     return property(fget, fset)
 

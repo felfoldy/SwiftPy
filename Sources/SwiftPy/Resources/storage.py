@@ -3,10 +3,22 @@ __all__ = ["Store"]
 
 from storage.native import *
 
-def _did_change(self):
-    if getattr(self, '_data', None) is not None:
-        import json
-        self._data.json = json.dumps(self._fields)
+def _did_change(self, field=None):
+    data = getattr(self, '_data', None)
+    if data is None:
+        return
+    import json
+    if field is None:
+        data.json = json.dumps(self._fields)
+        return
+    # Only the field set: another copy of the row, or another device, may have
+    # written the others since this object read them.
+    try:
+        stored = json.loads(data.stored_json)
+    except ValueError:
+        stored = dict(self._fields)
+    stored[field] = self._fields[field]
+    data.json = json.dumps(stored)
 
 @classmethod
 def _makemodels(cls, models: list):

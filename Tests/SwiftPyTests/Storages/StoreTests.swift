@@ -87,6 +87,23 @@ struct StoreTests {
     }
     
     @available(macOS 15, *)
+    @Test func aStaleCopyWritesOnlyTheFieldItSets() async throws {
+        try await run("""
+        container = Store('stale_copy_testing', True)
+        shield = Item(name='Shield')
+        container.insert(shield)
+        stale = container.fetch(Item)[0]
+        shield.quantity = 5
+        stale.description = "Set on the old copy"
+        """)
+
+        let container: SwiftPy.Store = try #require(try await evaluate("container"))
+        let handle: ModelHandle = try #require(try await evaluate("shield._data"))
+        let row = try #require(try container.row(id: handle.id))
+        #expect(row.json == #"{"name": "Shield", "quantity": 5, "description": "Set on the old copy", "_icloud_id": null}"#)
+    }
+
+    @available(macOS 15, *)
     @Test func delete() async throws {
         try await run("""
         container = Store('delete_testing', True)
