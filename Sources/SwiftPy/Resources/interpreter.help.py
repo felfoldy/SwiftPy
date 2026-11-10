@@ -1765,6 +1765,141 @@ def _markdown_lines(obj):
     return _class_markdown(type(obj))
 
 
+def _first_paragraph(doc):
+    paragraph = []
+    for line in (doc or "").strip().split("\n"):
+        if not line.strip():
+            break
+        paragraph.append(line.strip())
+    return " ".join(paragraph)
+
+
+def _index_entry(name, declaration, summary):
+    entry = "- " + declaration
+    if summary:
+        entry += " - " + " ".join(summary.split())
+    return entry
+
+
+def _function_index(owner_path, functions, owner=None):
+    lines = []
+    for member_name, function in functions:
+        overloads = getattr(function, '_overloads', None)
+        for entry in (overloads if overloads else [function]):
+            definition = _without_trailing_colon(_callable_definition(entry, member_name, owner))
+            if definition.startswith("def "):
+                definition = definition[4:]
+            if definition.startswith("async def "):
+                definition = "async " + definition[10:]
+            summary, _, _ = _doc_sections(_docstring(entry), [])
+            lines.append(_index_entry(member_name, definition, summary))
+    return lines
+
+
+def docs_index(name):
+    """A compact page for the assistant: "modules" lists the app's modules, and
+    a module lists its members a line each, to look up one by one. Anything
+    else returns None, for its full help page."""
+    if name == "modules":
+        lines = ["Modules (Python's standard library is available too):"]
+        stdlib = set(_stdlib_modules())
+        for module_name in _available_modules():
+            if module_name not in stdlib:
+                lines.append(_index_entry(module_name, module_name, _module_doc(module_name)))
+        lines.append("")
+        lines.append('Look one up by name, such as docs("views").')
+        return "\n".join(lines)
+
+    try:
+        module = _resolve_name(_reference_name(name))
+    except (ImportError, AttributeError):
+        return None
+    if not isinstance(module, type(__import__('sys'))):
+        return None
+
+    module_name = getattr(module, '__name__', name)
+    lines = ["# " + module_name]
+    summary = _first_paragraph(_docstring(module))
+    if summary:
+        lines += ["", summary]
+
+    submodules = _submodules(module)
+    if submodules:
+        lines += ["", "Modules:"]
+        for submodule in submodules:
+            lines.append(_index_entry(submodule, module_name + "." + submodule, _module_doc(module_name + "." + submodule)))
+
+    classes, functions = _module_members(module)
+    if classes:
+        lines += ["", "Classes:"]
+        for member_name, cls in classes:
+            header = _class_header(cls)
+            if header.startswith("class "):
+                header = header[6:]
+            lines.append(_index_entry(member_name, header, _class_summary(cls)))
+    if functions:
+        lines += ["", "Functions:"]
+        lines += _function_index(module_name, functions)
+
+    lines += ["", 'Look up one in full by its path, such as docs("' + module_name + '.' +
+              ((classes or functions or [("name", None)])[0][0]) + '"), or search_docs for a word.']
+    return "\n".join(lines)
+
+
+def _searchable_members(module_name, module):
+    # (path, declaration, docstring) for each public function, class, and
+    # class method or property.
+    classes, functions = _module_members(module)
+    for member_name, function in functions:
+        definition = _without_trailing_colon(_callable_definition(function, member_name))
+        yield module_name + "." + member_name, definition, _docstring(function) or ""
+    for member_name, cls in classes:
+        path = module_name + "." + member_name
+        yield path, _class_header(cls), _docstring(cls) or (getattr(cls, '_interface', None) or "")
+        for method_name, method in _class_methods(cls):
+            try:
+                definition = _without_trailing_colon(_callable_definition(method, method_name, cls))
+            except Exception:
+                definition = method_name + "(...)"
+            yield path + "." + method_name, definition, _docstring(method) or ""
+        for property_name in _class_property_names(cls):
+            yield path + "." + property_name, property_name, _property_summary(cls, property_name) or ""
+
+
+def docs_search(pattern, limit=20):
+    """Searches the app's modules for `pattern`, a regular expression matched
+    without regard to case: their names, signatures and documentation. A line
+    for each match, its path and the line that matched."""
+    import re
+    try:
+        expression = re.compile(pattern, re.IGNORECASE)
+    except re.error:
+        expression = re.compile(re.escape(pattern), re.IGNORECASE)
+
+    matches = []
+    total = 0
+    for module_name in _app_modules():
+        try:
+            module = __import__(module_name)
+        except Exception:
+            continue
+        for path, declaration, doc in _searchable_members(module_name, module):
+            text_lines = [path, declaration] + [line.strip() for line in doc.split("\n") if line.strip()]
+            hit = next((line for line in text_lines if expression.search(line)), None)
+            if hit is None:
+                continue
+            total += 1
+            if len(matches) < limit:
+                shown = hit if hit not in (path, declaration) else _first_paragraph(doc)
+                matches.append("- " + path + (": " + shown if shown else ""))
+
+    if not matches:
+        return "Nothing in the app's modules matches '" + pattern + "'."
+    if total > len(matches):
+        matches.append("... and " + str(total - len(matches)) + " more; narrow the pattern.")
+    return "\n".join(matches)
+
+
 def help(obj=None):
     """Show help for a module, class, function, or instance.
 
