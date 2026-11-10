@@ -30,7 +30,8 @@ public enum ConsoleCommand: Codable, Sendable {
     /// Compiles and runs a source in one step, assigning it a fresh context id.
     /// `token` correlates the request with the caller's input card via `started`.
     /// `name` is the filename tracebacks show, `<script>/<id>` without one.
-    case execute(token: UUID, source: String, name: String? = nil)
+    /// `namespace` runs it in globals of its own, as a notebook's, rather than `__main__`'s.
+    case execute(token: UUID, source: String, name: String? = nil, namespace: String? = nil)
     /// Cooperatively cancels the awaited work of a running execution.
     case stop(id: UInt64)
 }

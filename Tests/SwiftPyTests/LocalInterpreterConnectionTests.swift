@@ -68,15 +68,17 @@ struct LocalInterpreterConnectionTests {
         #expect(items.contains(.image(name: "xmark.square")))
     }
 
-    @Test func staleCompileIdIsIgnored() async {
+    // Runs side by side each keep their own compiled code.
+    @Test func eachCompileRunsAsItsOwn() async {
         let connection = LocalInterpreterConnection()
 
-        await connection.compile(id: 2, source: "_test_stale = 1")
-        await connection.compile(id: 1, source: "_test_stale = 2") // stale, id < latestCompileId
+        await connection.compile(id: 2, source: "_test_own_b = 2")
+        await connection.compile(id: 1, source: "_test_own_a = 1")
         await connection.run(id: 2)
+        await connection.run(id: 1)
 
-        // The stale id=1 compile was dropped, so the id=2 code ran.
-        #expect(Interpreter.evaluate("_test_stale") == 1)
+        #expect(Interpreter.evaluate("_test_own_a") == 1)
+        #expect(Interpreter.evaluate("_test_own_b") == 2)
     }
 
     // MARK: - run
@@ -121,6 +123,91 @@ struct LocalInterpreterConnectionTests {
 
         let result: Int? = Interpreter.evaluate("_test_no_run_y")
         #expect(result == nil)
+    }
+
+    // MARK: - side by side
+
+    /// Starts each source at once, returning the run ids in the order the runs ended.
+    private func executeTogether(
+        _ sources: [(source: String, namespace: String?)],
+        on connection: LocalInterpreterConnection
+    ) async -> [UInt64] {
+        var iterator = await connection.events.makeAsyncIterator()
+        for (source, namespace) in sources {
+            await connection.perform(.execute(token: UUID(), source: source, namespace: namespace))
+        }
+        var started = Set<UInt64>()
+        var ended: [UInt64] = []
+        while ended.count < sources.count, let event = await iterator.next() {
+            if case .started = event.payload { started.insert(event.id) }
+            if case .attachment = event.payload, started.contains(event.id), !ended.contains(event.id) {
+                ended.append(event.id)
+            }
+        }
+        return ended
+    }
+
+    @Test func runsStartedTogetherAllRun() async {
+        let connection = LocalInterpreterConnection()
+        let ended = await executeTogether([
+            ("_together_a = 1", nil),
+            ("_together_b = 2", nil),
+        ], on: connection)
+
+        #expect(ended.count == 2)
+        #expect(Interpreter.evaluate("_together_a") == 1)
+        #expect(Interpreter.evaluate("_together_b") == 2)
+    }
+
+    @Test func namespacesKeepTheirOwnVariables() async {
+        let connection = LocalInterpreterConnection()
+        _ = await executeTogether([
+            ("x = 'first'\nis_main = __name__ == '__main__'", "ns-first"),
+            ("x = 'second'", "ns-second"),
+        ], on: connection)
+
+        let first: String? = Interpreter.evaluate("__import__('interpreter')._namespaces['ns-first'].x")
+        let second: String? = Interpreter.evaluate("__import__('interpreter')._namespaces['ns-second'].x")
+        let isMain: Bool? = Interpreter.evaluate("__import__('interpreter')._namespaces['ns-first'].is_main")
+        #expect(first == "first")
+        #expect(second == "second")
+        #expect(isMain == true)
+
+        Interpreter.removeNamespace("ns-first")
+        Interpreter.removeNamespace("ns-second")
+        let left: Bool? = Interpreter.evaluate("'ns-first' in __import__('interpreter')._namespaces")
+        #expect(left == false)
+    }
+
+    @Test func anAwaitingRunLetsAnotherFinishFirst() async {
+        let connection = LocalInterpreterConnection()
+        let ended = await executeTogether([
+            ("import asyncio\nawait asyncio.sleep(0.4)", "ns-slow"),
+            ("quick = 1", "ns-quick"),
+        ], on: connection)
+
+        #expect(ended.count == 2)
+        #expect(ended.first == ended.max(), "The quick run, started second, ends first.")
+        Interpreter.removeNamespace("ns-slow")
+        Interpreter.removeNamespace("ns-quick")
+    }
+
+    @Test func pythonIsBusyElsewhereOnlyWhileARunComputes() async throws {
+        let connection = LocalInterpreterConnection()
+        #expect(!Interpreter.isBusyElsewhere)
+        let running = Task {
+            await executeTogether([
+                ("import time\nend = time.monotonic() + 0.5\nwhile time.monotonic() < end:\n    pass", nil),
+            ], on: connection)
+        }
+        var sawBusy = false
+        for _ in 0..<100 where !sawBusy {
+            sawBusy = Interpreter.isBusyElsewhere
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        _ = await running.value
+        #expect(sawBusy)
+        #expect(!Interpreter.isBusyElsewhere)
     }
 
     // MARK: - script names

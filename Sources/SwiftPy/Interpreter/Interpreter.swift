@@ -349,6 +349,39 @@ public extension Interpreter {
         return result
     }
 
+    /// Executes compiled code in a namespace of its own, `__main__`'s without one.
+    @discardableResult
+    static func execute(_ code: CompiledCode, namespace: String?) async throws(PythonError) -> InterpreterObject? {
+        try await execute(code, globals: namespace.flatMap(globals(ofNamespace:)))
+    }
+
+    /// The globals of a namespace, made on first use: a module named `__main__`,
+    /// so `if __name__ == "__main__":` holds. Only CPython keeps several.
+    static func globals(ofNamespace key: String) -> InterpreterObject? {
+        #if cpython
+        return try? py.module("interpreter")?._namespace?(key)
+        #else
+        return nil
+        #endif
+    }
+
+    /// Drops a namespace and everything only it held.
+    static func removeNamespace(_ key: String) {
+        #if cpython
+        _ = try? py.module("interpreter")?._drop_namespace?(key)
+        #endif
+    }
+
+    /// Whether Python is running synchronously off the main actor, so a call from
+    /// main would wait for it: a frame-driven caller skips its frame instead.
+    nonisolated static var isBusyElsewhere: Bool {
+        #if cpython
+        executing.withLock { $0 != nil }
+        #else
+        false
+        #endif
+    }
+
     /// Evaluates the expression, casts to the given type and returns the result.
     ///
     /// Synchronous, on the main actor, which holds the GIL whenever it runs:

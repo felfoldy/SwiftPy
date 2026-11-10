@@ -15,8 +15,9 @@ struct CompileResult: Sendable {
 public actor LocalInterpreterConnection: InterpreterConnection {
     var currentContextId: UInt64 = 0
     var continuations: [UUID: AsyncStream<InterpreterEvent>.Continuation] = [:]
-    var latestCompileId: UInt64 = 0
-    var compiled: CompileResult?
+    /// Compiled runs waiting to start; several can be, as notebooks run side by side.
+    var compiled: [UInt64: CompileResult] = [:]
+    private var namespaces: [UInt64: String] = [:]
     /// Cancellation tokens for executions currently in flight, keyed by context id.
     private var running: [UInt64: RunCancellation] = [:]
 
@@ -42,13 +43,14 @@ public actor LocalInterpreterConnection: InterpreterConnection {
             await Interpreter.interrupt(contextId: id)
             #endif
 
-        case let .execute(token, source, name):
+        case let .execute(token, source, name, namespace):
             // Allocate a fresh context id and return after reporting it. The
             // execution task keeps event delivery responsive while plain Python
             // code runs synchronously.
             currentContextId += 1
             let id = currentContextId
             send(id: id, .started(token: token))
+            if let namespace { namespaces[id] = namespace }
             Task {
                 await compile(id: id, source: source, name: name)
                 await run(id: id)
@@ -56,16 +58,16 @@ public actor LocalInterpreterConnection: InterpreterConnection {
         }
     }
 
-    /// Executes the code compiled for `id`, provided it is still the latest compile.
+    /// Executes the code compiled for `id`.
     func run(id: UInt64) async {
-        guard let compiled, compiled.id == id else { return }
-        let code = compiled.code
+        guard let code = compiled.removeValue(forKey: id)?.code else { return }
+        let namespace = namespaces.removeValue(forKey: id)
         let cancellation = RunCancellation()
         running[id] = cancellation
         await Interpreter.beginLineSampling()
         defer { Interpreter.endLineSampling() }
         await time(id: id, cancellation: cancellation) {
-            try await Interpreter.execute(code)
+            try await Interpreter.execute(code, namespace: namespace)
         }
         running[id] = nil
     }
@@ -179,9 +181,6 @@ public actor LocalInterpreterConnection: InterpreterConnection {
 
     func compile(id: UInt64, source: String, name: String? = nil) async {
         log.trace("compile: \(id)")
-        guard id > latestCompileId else { return }
-        latestCompileId = id
-
         do {
             let code = try await Interpreter.shared.compile(
                 source,
@@ -189,11 +188,9 @@ public actor LocalInterpreterConnection: InterpreterConnection {
                 mode: .single
             )
 
-            guard latestCompileId == id else { return }
             if let name { ScriptRuns.record(name, run: id) }
-            compiled = CompileResult(id: id, code: code)
+            compiled[id] = CompileResult(id: id, code: code)
         } catch {
-            guard latestCompileId == id else { return }
             if let traceback = error.traceback {
                 send(id: id, .stderr(text: traceback))
             }

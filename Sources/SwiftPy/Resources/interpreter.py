@@ -174,3 +174,28 @@ def _builtin_help(*args):
 
 
 _builtins.help = _builtin_help
+
+
+# Notebooks' globals, each a module named __main__, by key. sys.modules'
+# "__main__" stays the app's: code run without a namespace, as an evaluated
+# expression, would otherwise land in whichever notebook ran last.
+_namespaces: dict = {}
+
+
+def _namespace(key: str) -> dict:
+    """The globals a notebook's code runs in, made on first use."""
+    module = _namespaces.get(key)
+    if module is None:
+        import sys
+        import types
+        module = types.ModuleType("__main__")
+        module.__builtins__ = _builtins
+        _namespaces[key] = module
+        sys.modules[f"__notebook_{key}__"] = module
+    return module.__dict__
+
+
+def _drop_namespace(key: str) -> None:
+    import sys
+    _namespaces.pop(key, None)
+    sys.modules.pop(f"__notebook_{key}__", None)
