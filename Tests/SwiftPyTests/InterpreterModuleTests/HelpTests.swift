@@ -1482,6 +1482,27 @@ struct HelpTests {
             #expect(user.contains("by: Size"), "\(user)")
         }
 
+        @Test("keep a class by its module where another module's class has its name")
+        func sameNamedClasses() async throws {
+            await Interpreter.run("""
+            import ast, sys, types
+            from interpreter.help import _typed_stub
+            _module = types.ModuleType("offsets")
+            exec("class Transform: pass", _module.__dict__)
+            sys.modules["offsets"] = _module
+            _owners = {"Transform": "entities"}
+            _typed = _typed_stub(ast.parse("def transform(self) -> offsets.Transform: ..."), "_views", _owners, set())
+            _bare = _typed_stub(ast.parse("def entity_transform() -> Transform: ..."), "_views", _owners, set())
+            del sys.modules["offsets"]
+            """)
+            let typed: String = try #require(Interpreter.evaluate("_typed"))
+            let bare: String = try #require(Interpreter.evaluate("_bare"))
+            #expect(typed.contains("import offsets"), "\(typed)")
+            #expect(typed.contains("-> offsets.Transform"), "\(typed)")
+            #expect(!typed.contains("from entities"), "\(typed)")
+            #expect(bare.contains("from entities import Transform"), "\(bare)")
+        }
+
         /// A decorator's overloads, so `@tool` and `@tool(...)` both type as a
         /// `Tool`, which `inspect` writes by its private module.
         @Test("keep a Python function's overloads, and its classes by name")

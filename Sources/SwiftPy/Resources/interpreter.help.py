@@ -603,6 +603,7 @@ def _typed_stub(tree, module_name, classes, swift_builtins=()):
     defined |= {node.target.id for node in tree.body
                 if isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name)}
     imports = {}
+    modules = set()
 
     def resolves(name):
         if name in defined:
@@ -636,6 +637,15 @@ def _typed_stub(tree, module_name, classes, swift_builtins=()):
             return node if resolves(node.id) else ast.copy_location(ast.Name('Any'), node)
 
         def visit_Attribute(self, node):
+            # `views.Transform`, where another module's class has the name
+            # too (`scenes.Transform`): kept by its module, which is imported.
+            prefix = ast.unparse(node.value) if _dotted(node.value) else ""
+            if (isinstance(node.ctx, ast.Load) and prefix and prefix != module_name
+                    and not any(part.startswith('_') for part in prefix.split('.'))
+                    and classes.get(node.attr) not in (None, prefix)
+                    and isinstance(getattr(sys.modules.get(prefix), node.attr, None), type)):
+                modules.add(prefix)
+                return node
             # `_agents.Tool`, as inspect writes a class by its module: by its
             # name, where that resolves.
             if isinstance(node.ctx, ast.Load) and _dotted(node.value) and (
@@ -693,7 +703,7 @@ def _typed_stub(tree, module_name, classes, swift_builtins=()):
             ast.alias(name, name if module == '_swiftpy_builtins' else None) for name in sorted(names)
         ], level=0)
         for module, names in sorted(imports.items())
-    ]
+    ] + [ast.Import(names=[ast.alias(module)]) for module in sorted(modules)]
     docstring = tree.body[:1] if tree.body and isinstance(tree.body[0], ast.Expr) else []
     tree.body = docstring + header + tree.body[len(docstring):]
     return ast.unparse(ast.fix_missing_locations(tree)) + "\n"
