@@ -31,9 +31,17 @@ public enum ConsoleCommand: Codable, Sendable {
     /// `token` correlates the request with the caller's input card via `started`.
     /// `name` is the filename tracebacks show, `<script>/<id>` without one.
     /// `namespace` runs it in globals of its own, as a notebook's, rather than `__main__`'s.
-    case execute(token: UUID, source: String, name: String? = nil, namespace: String? = nil)
+    case execute(token: UUID, source: String, name: String? = nil, namespace: String? = nil, mode: ExecutionMode = .cell)
     /// Cooperatively cancels the awaited work of a running execution.
     case stop(id: UInt64)
+}
+
+public enum ExecutionMode: Codable, Sendable, Hashable {
+    /// A notebook cell: its last expression's value is shown.
+    case cell
+    /// Every line's value is reported as a `record`, after the `statements`.
+    /// The run stops itself after `timeout` seconds.
+    case playground(timeout: Double?)
 }
 
 public struct InterpreterEvent: Codable, Sendable {
@@ -51,6 +59,10 @@ public struct InterpreterEvent: Codable, Sendable {
         /// Reports the context id assigned to an `execute`, echoing its `token` so
         /// the caller can bind the id to the input card it already created.
         case started(token: UUID)
+        /// A playground run's top-level statements, sent before it runs.
+        case statements(items: [PlaygroundStatement])
+        /// A value a playground run's line produced.
+        case record(item: PlaygroundRecord)
         case stdout(text: String)
         case stderr(text: String)
         case feedback(item: ExecutionFeedback)
@@ -83,6 +95,40 @@ public struct Diagnostic: Codable, Sendable, Hashable {
         self.severity = severity
         self.message = message
         self.code = code
+    }
+}
+
+/// A top-level statement's lines, decorators included (1-based).
+public struct PlaygroundStatement: Codable, Sendable, Hashable {
+    public let firstLine: Int
+    public let lastLine: Int
+
+    public init(firstLine: Int, lastLine: Int) {
+        self.firstLine = firstLine
+        self.lastLine = lastLine
+    }
+}
+
+/// A value a line produced: an expression's, or a name it assigned.
+public struct PlaygroundRecord: Codable, Sendable, Hashable {
+    public let line: Int
+    /// What was assigned, such as `x` or `self.speed`; nil for an expression.
+    public let name: String?
+    /// Its `repr`, cut short.
+    public let text: String
+    public let typeName: String
+    /// How many times the line has produced it so far.
+    public let count: Int
+    /// A view to take from ``PlaygroundViews``, for an expression that is one.
+    public let view: Int?
+
+    public init(line: Int, name: String?, text: String, typeName: String, count: Int, view: Int?) {
+        self.line = line
+        self.name = name
+        self.text = text
+        self.typeName = typeName
+        self.count = count
+        self.view = view
     }
 }
 

@@ -6,6 +6,7 @@
 //
 
 import Foundation
+import SwiftUI
 
 struct CompileResult: Sendable {
     let id: UInt64
@@ -18,6 +19,7 @@ public actor LocalInterpreterConnection: InterpreterConnection {
     /// Compiled runs waiting to start; several can be, as notebooks run side by side.
     var compiled: [UInt64: CompileResult] = [:]
     private var namespaces: [UInt64: String] = [:]
+    private var modes: [UInt64: ExecutionMode] = [:]
     /// Cancellation tokens for executions currently in flight, keyed by context id.
     private var running: [UInt64: RunCancellation] = [:]
 
@@ -43,7 +45,7 @@ public actor LocalInterpreterConnection: InterpreterConnection {
             await Interpreter.interrupt(contextId: id)
             #endif
 
-        case let .execute(token, source, name, namespace):
+        case let .execute(token, source, name, namespace, mode):
             // Allocate a fresh context id and return after reporting it. The
             // execution task keeps event delivery responsive while plain Python
             // code runs synchronously.
@@ -51,8 +53,9 @@ public actor LocalInterpreterConnection: InterpreterConnection {
             let id = currentContextId
             send(id: id, .started(token: token))
             if let namespace { namespaces[id] = namespace }
+            modes[id] = mode
             Task {
-                await compile(id: id, source: source, name: name)
+                await compile(id: id, source: source, name: name, mode: mode)
                 await run(id: id)
             }
         }
@@ -60,16 +63,41 @@ public actor LocalInterpreterConnection: InterpreterConnection {
 
     /// Executes the code compiled for `id`.
     func run(id: UInt64) async {
+        let mode = modes.removeValue(forKey: id) ?? .cell
         guard let code = compiled.removeValue(forKey: id)?.code else { return }
         let namespace = namespaces.removeValue(forKey: id)
         let cancellation = RunCancellation()
         running[id] = cancellation
         await Interpreter.beginLineSampling()
         defer { Interpreter.endLineSampling() }
-        await time(id: id, cancellation: cancellation) {
+        var display: InterpreterExecutionContext.Display?
+        var record: (@Sendable (PlaygroundRecord) -> Void)?
+        var timeout: Task<Void, Never>?
+        if case let .playground(seconds) = mode {
+            display = { [weak self] view in self?.recordDisplayed(view, run: id) }
+            record = { [weak self] item in self?.send(id: id, .record(item: item)) }
+            if let seconds {
+                timeout = Task { [weak self] in
+                    try? await Task.sleep(for: .seconds(seconds))
+                    guard !Task.isCancelled else { return }
+                    await self?.perform(.stop(id: id))
+                }
+            }
+        }
+        await time(id: id, cancellation: cancellation, display: display, record: record) {
             try await Interpreter.execute(code, namespace: namespace)
         }
+        timeout?.cancel()
         running[id] = nil
+    }
+
+    /// A view a playground run displays itself, as a record of the line it's on.
+    @MainActor
+    private func recordDisplayed(_ view: AnyView, run id: UInt64) {
+        let line = ScriptRuns.currentLine(tracer: nil, run: id)?.line ?? 0
+        send(id: id, .record(item: PlaygroundRecord(
+            line: line, name: nil, text: "", typeName: "View", count: 1, view: PlaygroundViews.store(view)
+        )))
     }
     
     @MainActor
@@ -116,7 +144,13 @@ public actor LocalInterpreterConnection: InterpreterConnection {
         }
     }
 
-    private func time(id: UInt64, cancellation: RunCancellation? = nil, _ call: @Sendable () async throws -> Void) async {
+    private func time(
+        id: UInt64,
+        cancellation: RunCancellation? = nil,
+        display: InterpreterExecutionContext.Display? = nil,
+        record: (@Sendable (PlaygroundRecord) -> Void)? = nil,
+        _ call: @Sendable () async throws -> Void
+    ) async {
         let time = DispatchTime.now().uptimeNanoseconds
         let tracer = LineTracer()
 
@@ -132,7 +166,7 @@ public actor LocalInterpreterConnection: InterpreterConnection {
         }
 
         do {
-            try await InterpreterExecutionContext.withOutput(tracer, cancellation: cancellation, contextId: id) {
+            try await InterpreterExecutionContext.withOutput(tracer, cancellation: cancellation, contextId: id, display: display, record: record) {
                 try await call()
             } stdout: { text in
                 // Flash the line the output came from. Skip past library frames to
@@ -179,20 +213,27 @@ public actor LocalInterpreterConnection: InterpreterConnection {
         send(id: 0, .completions(suggestions: completions, token: token))
     }
 
-    func compile(id: UInt64, source: String, name: String? = nil) async {
+    func compile(id: UInt64, source: String, name: String? = nil, mode: ExecutionMode = .cell) async {
         log.trace("compile: \(id)")
+        let filename = sourceLocation(for: id, name: name)
         do {
-            let code = try await Interpreter.shared.compile(
-                source,
-                filename: sourceLocation(for: id, name: name),
-                mode: .single
-            )
+            let code: CompiledCode
+            if case .playground = mode {
+                let result = try await Interpreter.shared.compilePlayground(source, filename: filename)
+                send(id: id, .statements(items: result.statements))
+                code = result.code
+            } else {
+                code = try await Interpreter.shared.compile(source, filename: filename, mode: .single)
+            }
 
             if let name { ScriptRuns.record(name, run: id) }
             compiled[id] = CompileResult(id: id, code: code)
         } catch {
             if let traceback = error.traceback {
                 send(id: id, .stderr(text: traceback))
+            }
+            if case .playground = mode, let line = await Interpreter.shared.playgroundErrorLine() {
+                send(id: id, .feedback(item: ExecutionFeedback(lineNumber: line, type: .error)))
             }
             send(id: id, .attachment(items: [.image(name: "xmark.square")]))
         }

@@ -121,6 +121,13 @@ extension Interpreter {
                 }
             }
 
+            // What a playground line sends its value through.
+            module.def("_playground_record(line: int, name: str | None, value: object, count: int) -> None") { argc, argv in
+                PyBind.function(argc, argv) { (line: Int, name: String?, value: PyObject?, count: Int) -> Void in
+                    Interpreter.record(line: line, name: name, value: value, count: count)
+                }
+            }
+
             py.module("builtins")?.input = module.input
 
             let appVersion = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? ""

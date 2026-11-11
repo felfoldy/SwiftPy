@@ -28,6 +28,8 @@ enum InterpreterExecutionContext {
         var inputHandler: InputHandler?
         var traceRecorder: LineTracer?
         var cancellation: RunCancellation?
+        /// Where a playground run's lines send their values.
+        var record: (@Sendable (PlaygroundRecord) -> Void)?
         /// The context id of the running execution, or `0` outside one.
         var contextId: UInt64 = 0
     }
@@ -38,11 +40,15 @@ enum InterpreterExecutionContext {
         _ traceRecorder: LineTracer? = nil,
         cancellation: RunCancellation? = nil,
         contextId: UInt64 = 0,
+        display: Display? = nil,
+        record: (@Sendable (PlaygroundRecord) -> Void)? = nil,
         operation: @Sendable () async throws -> T,
         stdout: @escaping Output
     ) async rethrows -> T {
         var context = current
         context.output = stdout
+        if let display { context.display = display }
+        if let record { context.record = record }
         context.traceRecorder = traceRecorder
         context.cancellation = cancellation
         context.contextId = contextId

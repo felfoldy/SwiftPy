@@ -93,6 +93,7 @@ public final class Interpreter {
     var registeredModuleNames: [String] {
         let hiddenModules: Set<String> = [
             "interpreter.help",
+            "interpreter.playground",
             "keyword",
             "rlcompleter",
         ]
@@ -171,6 +172,7 @@ public final class Interpreter {
 
         // Bundled source-only modules.
         bindModule("interpreter.help", in: .module)
+        bindModule("interpreter.playground", in: .module)
         #if !cpython
         bindModule("keyword", in: .pocketPythonResources)
         bindModule("rlcompleter", in: .pocketPythonResources)
