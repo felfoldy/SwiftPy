@@ -22,6 +22,61 @@ public enum PlaygroundViews {
     }
 }
 
+/// A value a playground run produced, kept to look into until its run is let go.
+@MainActor
+public enum PlaygroundObjects {
+    private static var objects: [Int: (run: UInt64, object: PyObject)] = [:]
+    private static var next = 0
+
+    static func store(_ object: PyObject, run: UInt64) -> Int {
+        next += 1
+        objects[next] = (run, object)
+        return next
+    }
+
+    /// Lets go of what `run` produced, and everything looked into below it.
+    public static func release(run: UInt64) {
+        objects = objects.filter { $0.value.run != run }
+    }
+
+    /// What it holds, one level down: a container's items, or an object's
+    /// properties, each kept to look into in turn.
+    public static func children(of token: Int) -> [PlaygroundChild] {
+        #if cpython
+        guard let (run, object) = objects[token],
+              let module = py.module("interpreter.playground") else { return [] }
+        let parts: [PyObject] = (try? module._items_flat?(object)) ?? []
+        return stride(from: 0, to: parts.count - 1, by: 2).map { index in
+            let item = parts[index + 1]
+            let holds: Bool = (try? module._has_items?(item)) ?? false
+            let view = item.reference.view
+            let short: String? = try? module._short?(item)
+            return PlaygroundChild(
+                id: store(item, run: run),
+                name: String.fromPython(parts[index].reference),
+                text: view != nil ? item.typeName : short ?? item.typeName,
+                typeName: item.typeName,
+                view: view,
+                holdsItems: holds
+            )
+        }
+        #else
+        return []
+        #endif
+    }
+}
+
+/// An item or property of a playground value.
+public struct PlaygroundChild: Identifiable {
+    /// Its token in ``PlaygroundObjects``, to look into it.
+    public let id: Int
+    public let name: String
+    public let text: String
+    public let typeName: String
+    public let view: AnyView?
+    public let holdsItems: Bool
+}
+
 extension Interpreter {
     /// Compiles a file so that every line reports its value.
     func compilePlayground(_ source: String, filename: String) throws(PythonError) -> (code: CompiledCode, statements: [PlaygroundStatement]) {
@@ -64,16 +119,20 @@ extension Interpreter {
         #if cpython
         guard let record = InterpreterExecutionContext.current.record, let value else { return }
         let reference = value.reference
-        // Only an expression shows as a view: an assigned one reads as its type.
-        let view = name == nil ? reference.view.map(PlaygroundViews.store) : nil
-        let text = (try? py.repr(reference)) ?? "?"
+        let view = reference.view.map(PlaygroundViews.store)
+        // A view reads as its type: its repr is Swift's name for it.
+        let short: String? = try? py.module("interpreter.playground")?._short?(value)
+        let text = view != nil ? value.typeName : short ?? (try? py.repr(reference)) ?? "?"
+        let holds: Bool = (try? py.module("interpreter.playground")?._has_items?(value)) ?? false
+        let object = holds ? PlaygroundObjects.store(value, run: Interpreter.currentExecutionId) : nil
         record(PlaygroundRecord(
             line: line,
             name: name,
             text: text.count > 300 ? String(text.prefix(300)) + "…" : text,
             typeName: value.typeName,
             count: count,
-            view: view
+            view: view,
+            object: object
         ))
         #endif
     }

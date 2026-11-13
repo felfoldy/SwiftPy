@@ -119,16 +119,19 @@ public struct PlaygroundRecord: Codable, Sendable, Hashable {
     public let typeName: String
     /// How many times the line has produced it so far.
     public let count: Int
-    /// A view to take from ``PlaygroundViews``, for an expression that is one.
+    /// A view to take from ``PlaygroundViews``, for a value that is one.
     public let view: Int?
+    /// The value, kept in ``PlaygroundObjects`` to look into, when it holds anything.
+    public let object: Int?
 
-    public init(line: Int, name: String?, text: String, typeName: String, count: Int, view: Int?) {
+    public init(line: Int, name: String?, text: String, typeName: String, count: Int, view: Int?, object: Int? = nil) {
         self.line = line
         self.name = name
         self.text = text
         self.typeName = typeName
         self.count = count
         self.view = view
+        self.object = object
     }
 }
 

@@ -148,3 +148,63 @@ def _compile(source: str, filename: str) -> str:
 
 def _take(key: str):
     return _compiled.pop(key, None)
+
+
+def _short(value) -> str:
+    """Its repr, or its type's name where the repr is only that or an address;
+    an enum's member as it's written, `Alignment.CENTER`."""
+    import enum
+    if isinstance(value, enum.Enum):
+        return f'{type(value).__name__}.{value.name}'
+    try:
+        text = repr(value)
+    except Exception:
+        return type(value).__name__
+    name = type(value).__name__
+    if (text.startswith('<') and ' at 0x' in text) or (text.endswith('.' + name) and ' ' not in text):
+        return name
+    return text if len(text) <= 120 else text[:120] + '…'
+
+
+def _items(value, limit: int = 30) -> list:
+    """What a value holds, one level down, as `(name, item)`: a container's
+    items, else its public attributes that aren't methods."""
+    if value is None or isinstance(value, (str, bytes, int, float, complex, bool, type)):
+        return []
+    try:
+        if isinstance(value, dict):
+            return [(_short(key), item) for key, item in list(value.items())[:limit]]
+        if isinstance(value, (list, tuple, set, frozenset)):
+            return [(f'[{index}]', item) for index, item in enumerate(list(value)[:limit])]
+        items = []
+        # Indexed, as a Group of views is, before its properties.
+        kind = type(value)
+        if hasattr(kind, '__len__') and hasattr(kind, '__getitem__'):
+            try:
+                items = [(f'[{index}]', value[index]) for index in range(min(len(value), limit))]
+            except Exception:
+                items = []
+        for name in dir(value):
+            if name.startswith('_'):
+                continue
+            try:
+                item = getattr(value, name)
+            except Exception:
+                continue
+            if callable(item) and not hasattr(item, 'body'):
+                continue
+            items.append((name, item))
+            if len(items) >= limit:
+                break
+        return items
+    except Exception:
+        return []
+
+
+def _items_flat(value) -> list:
+    """`_items`, flat as `[name, item, name, item, ...]` for Swift."""
+    return [part for pair in _items(value) for part in pair]
+
+
+def _has_items(value) -> bool:
+    return bool(_items(value, limit=1))
