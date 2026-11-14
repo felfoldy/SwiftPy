@@ -75,7 +75,8 @@ class _Recorder(ast.NodeTransformer):
                     and isinstance(statement.value, ast.Constant) and isinstance(statement.value.value, str):
                 statements.append(statement)
                 continue
-            statements.extend(self._statement(self.visit(statement)))
+            statement = self.visit(statement)
+            statements.extend(self._statement(statement))
         return statements
 
     def _statement(self, node):
@@ -91,6 +92,11 @@ class _Recorder(ast.NodeTransformer):
         records = [ast.copy_location(ast.Expr(_call(self.run, 'assigned', ast.Constant(node.lineno), ast.Constant(name), load)), node)
                    for name, load in targets]
         return [node] + records
+
+    def visit_ClassDef(self, node):
+        # A class is a definition, methods and all: nothing in it is a result,
+        # even when a system calls its methods every frame.
+        return node
 
     def generic_visit(self, node):
         super().generic_visit(node)
@@ -151,17 +157,28 @@ def _take(key: str):
 
 
 def _short(value) -> str:
-    """Its repr, or its type's name where the repr is only that or an address;
-    an enum's member as it's written, `Alignment.CENTER`."""
+    """Its repr; its type's name where it opens to what it holds, or the repr
+    is only that or an address; an enum's member as it's written,
+    `Alignment.CENTER`; a container's count."""
     import enum
     if isinstance(value, enum.Enum):
         return f'{type(value).__name__}.{value.name}'
+    # Its count, `[2]`: its items show when it's opened. Only exactly these,
+    # as a subclass may have a repr of its own.
+    if type(value) in (list, tuple, set, frozenset, dict):
+        open_, close = '[]' if type(value) is list else '()' if type(value) is tuple else '{}'
+        return open_ + (str(len(value)) if value else '') + close
+    # What opens reads as its type: its values show inside.
+    if _has_items(value):
+        return type(value).__name__
     try:
         text = repr(value)
     except Exception:
         return type(value).__name__
+    import re
     name = type(value).__name__
-    if (text.startswith('<') and ' at 0x' in text) or (text.endswith('.' + name) and ' ' not in text):
+    # An address, or a bare type path such as Swift's `Scenes.SceneEntity`.
+    if (text.startswith('<') and ' at 0x' in text) or re.fullmatch(r'[A-Za-z_]\w*(\.[A-Za-z_]\w*)+', text):
         return name
     return text if len(text) <= 120 else text[:120] + '…'
 

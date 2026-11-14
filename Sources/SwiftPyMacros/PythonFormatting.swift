@@ -179,7 +179,9 @@ extension String {
     /// "text"  -> " = 'text'"
     /// true    -> " = True"
     var pyLiteralExpression: String {
-        " = " + singleLine
+        // A call, such as `Vector3(x: 1)`, would be Swift in the stub.
+        if !singleLine.hasPrefix("\""), singleLine.contains("(") { return " = ..." }
+        return " = " + singleLine
             .replacingOccurrences(of: "nil", with: "None")
             .replacingOccurrences(of: "\"", with: "'")
             .replacingOccurrences(of: "true", with: "True")

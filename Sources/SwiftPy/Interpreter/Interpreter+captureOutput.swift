@@ -28,6 +28,8 @@ enum InterpreterExecutionContext {
         var inputHandler: InputHandler?
         var traceRecorder: LineTracer?
         var cancellation: RunCancellation?
+        /// Told when the execution shows a window, as a playground run is.
+        var windowShown: (@MainActor @Sendable () -> Void)?
         /// Where a playground run's lines send their values.
         var record: (@Sendable (PlaygroundRecord) -> Void)?
         /// The context id of the running execution, or `0` outside one.
@@ -150,6 +152,26 @@ public extension Interpreter {
         return try await InterpreterExecutionContext.$current.withValue(context) {
             try await operation()
         }
+    }
+
+    /// Runs `operation` with `windowShown` told whenever it, or a run it
+    /// starts, shows a window.
+    @MainActor
+    static func withWindowShown<T>(
+        _ windowShown: @escaping @MainActor @Sendable () -> Void,
+        operation: () async throws -> T
+    ) async rethrows -> T {
+        var context = InterpreterExecutionContext.current
+        context.windowShown = windowShown
+        return try await InterpreterExecutionContext.$current.withValue(context) {
+            try await operation()
+        }
+    }
+
+    /// Tells the current execution's host it showed a window.
+    @MainActor
+    static func reportWindowShown() {
+        InterpreterExecutionContext.current.windowShown?()
     }
 
     /// Presents a view where the current execution displays: its own place,

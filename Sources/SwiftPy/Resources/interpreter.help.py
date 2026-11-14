@@ -1644,6 +1644,50 @@ def _builtin_class_path(cls):
     return name if builtin is cls else None
 
 
+# What a special method lets code write, in the order a page lists them.
+_OPERATIONS = [
+    ('__getitem__', 'x[key]'), ('__setitem__', 'x[key] = value'), ('__delitem__', 'del x[key]'),
+    ('__contains__', 'item in x'), ('__iter__', 'for item in x'), ('__len__', 'len(x)'),
+    ('__call__', 'x(...)'), ('__enter__', 'with x:'), ('__aenter__', 'async with x:'),
+    ('__aiter__', 'async for item in x'), ('__await__', 'await x'),
+    ('__add__', 'x + y'), ('__sub__', 'x - y'), ('__mul__', 'x * y'), ('__matmul__', 'x @ y'),
+    ('__truediv__', 'x / y'), ('__floordiv__', 'x // y'), ('__mod__', 'x % y'), ('__pow__', 'x ** y'),
+    ('__neg__', '-x'), ('__abs__', 'abs(x)'), ('__lt__', 'x < y'), ('__le__', 'x <= y'),
+    ('__gt__', 'x > y'), ('__ge__', 'x >= y'),
+]
+
+
+from collections.abc import Mapping
+
+
+def _operations(cls):
+    """`(usage, method)` for each operation the class itself supports: not
+    `object`'s or a builtin base's, which every reader knows."""
+    found = []
+    for method_name, usage in _OPERATIONS:
+        # Declared in its MRO, not found on the metaclass: every class is
+        # callable, as its constructor.
+        owner = next((klass for klass in getattr(cls, '__mro__', ())
+                      if isinstance(vars(klass), Mapping) and method_name in vars(klass)), None)
+        if owner is None or owner is object or (_is_core_builtin(owner) and not _is_core_builtin(cls)):
+            continue
+        if not callable(getattr(cls, method_name, None)):
+            continue
+        found.append((usage, method_name))
+    return found
+
+
+def _operation_entries(cls, operations):
+    lines = []
+    for usage, method_name in operations:
+        try:
+            signature = method_name + str(inspect.signature(getattr(cls, method_name)))
+        except (TypeError, ValueError):
+            signature = method_name
+        lines.append("- `" + usage + "`: `" + signature + "`")
+    return lines + [""]
+
+
 def _class_markdown(cls, path=None):
     header = _class_header(cls)
     lines = []
@@ -1672,6 +1716,11 @@ def _class_markdown(cls, path=None):
     initializers = _class_initializers(cls)
     if initializers:
         lines += ["## Initializers", ""] + _function_entries(path, initializers, cls)
+
+    # Special methods aren't listed as functions; this is how they're used.
+    operations = _operations(cls)
+    if operations:
+        lines += ["## Operations", ""] + _operation_entries(cls, operations)
 
     # Inherited ones are linked to where they're documented, rather than
     # repeated: every view would list all of `View`'s modifiers.
@@ -1808,7 +1857,8 @@ def _function_index(owner_path, functions, owner=None):
 
 def docs_index(name):
     """A compact page for the assistant: "modules" lists the app's modules, and
-    a module lists its members a line each, to look up one by one. Anything
+    a module gives its description, then its members a line each, to look up
+    one by one. Anything
     else returns None, for its full help page."""
     if name == "modules":
         lines = ["Modules (Python's standard library is available too):"]
@@ -1829,9 +1879,10 @@ def docs_index(name):
 
     module_name = getattr(module, '__name__', name)
     lines = ["# " + module_name]
-    summary = _first_paragraph(_docstring(module))
-    if summary:
-        lines += ["", summary]
+    # The whole description: a module's is written as its guide, examples too.
+    description = (_docstring(module) or "").strip()
+    if description:
+        lines += ["", description]
 
     submodules = _submodules(module)
     if submodules:
@@ -1846,7 +1897,13 @@ def docs_index(name):
             header = _class_header(cls)
             if header.startswith("class "):
                 header = header[6:]
-            lines.append(_index_entry(member_name, header, _class_summary(cls)))
+            summary = _class_summary(cls)
+            operations = _operations(cls)
+            if operations:
+                # So `components[Spin]` is known without opening the class.
+                usages = ", ".join(usage for usage, _ in operations)
+                summary = ((summary or "").rstrip(".") + ". " if summary else "") + "Supports " + usages + "."
+            lines.append(_index_entry(member_name, header, summary))
     if functions:
         lines += ["", "Functions:"]
         lines += _function_index(module_name, functions)

@@ -135,5 +135,45 @@ struct PlaygroundRunTests {
         #expect(run.last(3) == nil)
         #expect(run.last(5)?.text == "1")
     }
+
+    @Test func nothingInAClassIsAResult() async {
+        let run = await play("""
+        class Spin:
+            speed = 2
+            def faster(self):
+                doubled = self.speed * 2
+                return doubled
+        Spin().faster()
+        """)
+        #expect(run.last(2, "speed") == nil)
+        #expect(run.last(4, "doubled") == nil)
+        #expect(run.last(6)?.text == "4")
+    }
+
+    // A repr that's only a type's path, as a Swift object's description is.
+    @Test func aBareTypePathShowsTheClassName() async {
+        let run = await play("""
+        class Entity:
+            def __repr__(self):
+                return 'Scenes.SceneEntity'
+        e = Entity()
+        1.5
+        items = [e, Entity()]
+        class Point:
+            def __init__(self):
+                self.x = 1
+            def __repr__(self):
+                return 'Point(1)'
+        p = Point()
+        """)
+        #expect(run.last(12, "p")?.text == "Point")
+        #expect(run.last(4, "e")?.text == "Entity")
+        #expect(run.last(5)?.text == "1.5")
+        #expect(run.last(6, "items")?.text == "[2]")
+        let token = try? #require(run.last(6, "items")?.object)
+        let children = token.map(PlaygroundObjects.children(of:)) ?? []
+        #expect(children.map(\.name) == ["[0]", "[1]"], "\(children.map(\.name))")
+        #expect(children.first?.text == "Entity")
+    }
 }
 #endif
