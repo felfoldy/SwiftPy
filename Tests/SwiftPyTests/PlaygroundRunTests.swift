@@ -150,6 +150,20 @@ struct PlaygroundRunTests {
         #expect(run.last(6)?.text == "4")
     }
 
+    @Test func nothingInAFunctionIsAResult() async {
+        let run = await play("""
+        def area(r):
+            squared = r * r
+            squared * 3
+            return squared * 3
+        for r in range(3):
+            total = area(r)
+        """)
+        #expect(run.last(2, "squared") == nil)
+        #expect(run.last(3) == nil)
+        #expect(run.last(6, "total")?.text == "12")
+    }
+
     // A repr that's only a type's path, as a Swift object's description is.
     @Test func aBareTypePathShowsTheClassName() async {
         let run = await play("""

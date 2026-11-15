@@ -93,18 +93,19 @@ class _Recorder(ast.NodeTransformer):
                    for name, load in targets]
         return [node] + records
 
+    # A definition isn't a result: only top-level code is recorded, not what
+    # runs inside a function or class each time it's called.
     def visit_ClassDef(self, node):
-        # A class is a definition, methods and all: nothing in it is a result,
-        # even when a system calls its methods every frame.
         return node
+
+    visit_FunctionDef = visit_AsyncFunctionDef = visit_ClassDef
 
     def generic_visit(self, node):
         super().generic_visit(node)
-        has_docstring = isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef))
         for field in ('body', 'orelse', 'finalbody'):
             body = getattr(node, field, None)
             if isinstance(body, list) and body and isinstance(body[0], ast.stmt):
-                setattr(node, field, self._body(body, docstring=has_docstring and field == 'body'))
+                setattr(node, field, self._body(body))
         return node
 
 
