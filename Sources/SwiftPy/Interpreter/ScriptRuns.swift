@@ -22,16 +22,17 @@ enum ScriptRuns {
         return UInt64(source.dropFirst(prefix.count))
     }
 
-    /// The innermost script line on the running stack, and the run it reports
-    /// to; only `run`'s lines when given. pocketpy can't walk its stack, so
-    /// it reads the last line `tracer` saw instead.
-    static func currentLine(tracer: LineTracer?, run: UInt64? = nil) -> (run: UInt64, line: Int)? {
+    /// The innermost script line on the running stack, or with `outermost` the
+    /// line calling into the rest, and the run it reports to; only `run`'s lines
+    /// when given. pocketpy can't walk its stack, so it reads the last line
+    /// `tracer` saw instead.
+    static func currentLine(tracer: LineTracer?, run: UInt64? = nil, outermost: Bool = false) -> (run: UInt64, line: Int)? {
         func owner(_ source: String) -> UInt64? {
             guard let id = runId(for: source), run == nil || run == id else { return nil }
             return id
         }
         #if cpython
-        guard let frame = PyAPI.frame(where: { owner($0) != nil }),
+        guard let frame = PyAPI.frame(outermost: outermost, where: { owner($0) != nil }),
               let id = owner(frame.source) else { return nil }
         return (id, frame.line)
         #else

@@ -171,8 +171,10 @@ public actor LocalInterpreterConnection: InterpreterConnection {
             } stdout: { text in
                 // Flash the line the output came from. Skip past library frames to
                 // the last line that belongs to a script context, so output that
-                // originates in a lib still flashes the user's call site.
-                if let (lineId, line) = ScriptRuns.currentLine(tracer: tracer) {
+                // originates in a lib still flashes the user's call site. A
+                // playground, which groups by statement, takes the top-level line
+                // that called in: a function's print goes under its call.
+                if let (lineId, line) = ScriptRuns.currentLine(tracer: tracer, outermost: record != nil) {
                     self.send(id: lineId, .feedback(item: ExecutionFeedback(lineNumber: line, type: .output)))
                 }
                 self.send(id: id, .stdout(text: text))
