@@ -40,6 +40,11 @@ public enum Keychain {
         storage.names()
     }
 
+    /// Stores a secret under a name, replacing one already there.
+    public static func set(_ value: String, for name: String) throws(PythonError) {
+        try storage.set(value, for: name)
+    }
+
     /// Removes the secret stored under a name; a missing one is left alone.
     public static func delete(_ name: String) throws(PythonError) {
         try storage.remove(name)
