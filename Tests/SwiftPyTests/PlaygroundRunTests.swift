@@ -107,6 +107,19 @@ struct PlaygroundRunTests {
         #expect(run.last(2) == nil)
     }
 
+    @Test func aFunctionsPrintFlashesItsCall() async {
+        let run = await play("def f():\n    print('hi')\n\nf()")
+        #expect(run.feedback.contains(ExecutionFeedback(lineNumber: 4, type: .output)))
+        #expect(!run.feedback.contains(ExecutionFeedback(lineNumber: 2, type: .output)))
+    }
+
+    // The event loop runs a task without the file's top-level code on the stack.
+    @Test func aTasksPrintHasNoTopLevelLine() async {
+        let run = await play("import asyncio\n\nasync def work():\n    print('later')\n\nawait asyncio.get_running_loop().create_task(work())")
+        #expect(run.feedback.contains(ExecutionFeedback(lineNumber: 0, type: .output)))
+        #expect(!run.feedback.contains(ExecutionFeedback(lineNumber: 4, type: .output)))
+    }
+
     @Test func anErrorIsReportedAtItsLine() async {
         let run = await play("x = 1\ny = x / 0\nz = 3")
         #expect(run.feedback.contains(ExecutionFeedback(lineNumber: 2, type: .error)))
